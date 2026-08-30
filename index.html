@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="未读提醒">
+<meta name="theme-color" content="#fe2c55">
+<link rel="manifest" href='data:application/manifest+json,{"name":"抖音未读提醒","short_name":"未读提醒","start_url":"/mobile","display":"standalone","theme_color":"#fe2c55","background_color":"#f6f7f9"}'>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23fe2c55'/%3E%3Ctext x='50' y='68' font-size='52' text-anchor='middle'%3E%F0%9F%94%94%3C/text%3E%3C/svg%3E">
+<title>抖音未读提醒</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",Arial,sans-serif;
+       background:#f6f7f9;color:#161823;font-size:15px;line-height:1.5}
+  header{position:sticky;top:0;z-index:20;background:#fe2c55;color:#fff;padding:12px 16px;
+         padding-top:calc(12px + env(safe-area-inset-top));display:flex;align-items:center;gap:10px}
+  header h1{font-size:17px;margin:0;flex:1;font-weight:600}
+  header .cnt{font-size:13px;background:rgba(255,255,255,.22);padding:4px 11px;border-radius:20px}
+  .wrap{padding:12px}
+  .card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .big{font-size:15px;font-weight:600;margin:0 0 8px}
+  .muted{color:#86909c;font-size:13px}
+  button{font-family:inherit;font-size:15px;border:none;border-radius:10px;padding:11px 16px;
+         background:#fe2c55;color:#fff;font-weight:500;cursor:pointer}
+  button:active{opacity:.75}
+  button.ghost{background:#f2f3f5;color:#161823}
+  button.block{width:100%}
+  input,select{font-family:inherit;font-size:15px;padding:10px 12px;border:1px solid #e5e6eb;
+               border-radius:10px;background:#fff;width:100%}
+  .status{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .status .who{font-size:14px}
+  .status .who b{color:#fe2c55}
+  .cats-label{font-size:13px;color:#86909c;margin:2px 2px 4px;font-weight:500}
+  .cats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:2px 0 12px}
+  .cat{background:#fff;border:1px solid #e5e6eb;border-radius:20px;padding:9px 4px;
+       font-size:13px;color:#4e5969;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cat.on{background:#fe2c55;border-color:#fe2c55;color:#fff;font-weight:500}
+  .vcard{display:flex;gap:12px;background:#fff;border-radius:12px;padding:12px;margin-bottom:10px;
+         box-shadow:0 1px 3px rgba(0,0,0,.06);cursor:pointer}
+  .vcard:active{background:#fafafa}
+  .thumb{width:96px;height:128px;flex:0 0 96px;border-radius:8px;object-fit:cover;background:#e5e6eb}
+  .vbody{flex:1;min-width:0;display:flex;flex-direction:column}
+  .vtitle{font-size:14px;line-height:1.45;max-height:3.9em;overflow:hidden;
+          display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;margin-bottom:6px}
+  .vmeta{font-size:12px;color:#86909c;margin-bottom:auto}
+  .tag{display:inline-block;background:#f2f3f5;color:#4e5969;font-size:11px;
+       padding:2px 7px;border-radius:4px;margin-right:5px}
+  .vacts{display:flex;gap:8px;margin-top:10px}
+  .vacts .play{flex:1;text-align:center;background:#fe2c55;color:#fff;
+           padding:10px 0;border-radius:9px;font-size:14px;font-weight:500}
+  .vacts .play:active{opacity:.75}
+  .vacts button{flex:0 0 84px;background:#f2f3f5;color:#4e5969;font-size:13px;padding:10px 0;
+           border:none;border-radius:9px;font-family:inherit;cursor:pointer}
+  .empty{text-align:center;padding:46px 20px;color:#86909c}
+  .empty .big{font-size:42px;margin-bottom:10px}
+  .note{background:#fff7e8;border:1px solid #ffd591;border-radius:10px;padding:10px 12px;
+        font-size:13px;color:#8c5b00;margin-bottom:12px}
+  .err{background:#fff1f0;border:1px solid #ffccc7;border-radius:10px;padding:10px 12px;
+       font-size:13px;color:#cf1322;margin-bottom:12px}
+  .hide{display:none}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);
+        border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  /* 面包屑（分类 › 公众号 › 视频） */
+  .crumb{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:13px;color:#86909c;margin:2px 0 12px}
+  .crumb .lk{color:#fe2c55;cursor:pointer}
+  .crumb .sep{color:#c9cdd4}
+  .crumb .cur{color:#1d2129;font-weight:500}
+  /* 公众号列表（二级：先看每个公众号有多少未读） */
+  .acct{display:flex;align-items:center;gap:10px;background:#fff;border-radius:12px;padding:13px 14px;
+        margin-bottom:9px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .acct .an{flex:1;min-width:0;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .acct .an .acct-cat{display:block;font-size:11px;color:#86909c;margin-top:2px;font-weight:400}
+  .acct .an-n{flex:0 0 auto;background:#fff1f3;color:#fe2c55;font-size:13px;font-weight:600;
+              padding:4px 11px;border-radius:20px}
+  .acct .arw{flex:0 0 auto;color:#c9cdd4;font-size:16px}
+  /* 从 GitHub 下载数据 */
+  .ghcard{background:#fff;border-radius:12px;padding:14px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .ghcard .gh-head{display:flex;align-items:center;gap:10px}
+  .ghcard .gh-head .t{flex:1;font-size:14px;font-weight:600}
+  .ghcard .gh-cached{font-size:12px;color:#86909c}
+  .ghbtn{background:#24292f;color:#fff;border:none;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;cursor:pointer}
+  .ghcard label{display:block;font-size:12px;color:#86909c;margin-top:10px}
+  .ghcard input[type=text],.ghcard input[type=password]{width:100%;padding:10px 11px;border:1px solid #e5e6eb;
+        border-radius:9px;font-size:15px;margin-top:5px;background:#fff;color:#1d2129}
+  .ghgo{width:100%;margin-top:14px;background:#fe2c55;color:#fff;border:none;border-radius:10px;
+        padding:12px;font-size:15px;font-weight:600;cursor:pointer}
+  .ghcard .hint{font-size:12px;color:#86909c;line-height:1.6;margin-top:10px}
+  footer{text-align:center;color:#86909c;font-size:12px;padding:16px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🔔 抖音未读提醒</h1>
+  <span class="cnt" id="hdr-cnt">…</span>
+</header>
+
+<div class="wrap">
+
+  <!-- 顶部状态 + 同步 -->
+  <div class="card" id="status-card">
+    <div class="status">
+      <span class="who" id="who">连接中…</span>
+      <button id="btn-sync" style="margin-left:auto">🔄 同步</button>
+    </div>
+    <div class="muted" id="stat-line" style="margin-top:8px"></div>
+  </div>
+
+  <div id="msg"></div>
+
+  <!-- 从 GitHub 下载数据（用户填自己的账号 / 仓库 / Token） -->
+  <div class="ghcard" id="gh-card">
+    <div class="gh-head">
+      <span class="t">☁️ 从 GitHub 下载未读数据</span>
+      <span class="gh-cached" id="gh-cached"></span>
+      <button class="ghbtn" id="gh-toggle">填写信息</button>
+    </div>
+    <div id="gh-form" style="display:none;margin-top:12px">
+      <label>GitHub 用户名</label>
+      <input type="text" id="gh-owner" placeholder="例如 yourname" value="maidang0706" autocomplete="off">
+      <label>仓库名</label>
+      <input type="text" id="gh-repo" placeholder="例如 douyin-unread" value="douyin" autocomplete="off">
+      <label>分支</label>
+      <input type="text" id="gh-branch" value="main" autocomplete="off">
+      <!-- 注意：下方 Token 仅本机使用；发布到公开仓库时 export-mobile.js 会自动清空，不会泄露 -->
+      <label>Token（公开仓库可留空；私有仓库必填）</label>
+      <input type="password" id="gh-token" placeholder="ghp_xxxxxxxxxxxx" value="" autocomplete="off">
+      <button class="ghgo" id="gh-download">⬇️ 下载并载入</button>
+      <div class="hint">下载的是「抖音未读提醒」保存的 <code>unread.json</code>：你关注的公众号 + 每个公众号的未读视频。<br>
+        公开仓库不用 Token；填了 Token 或仓库为私有时，会改走 GitHub API 读取。<b>信息只存在本机浏览器</b>，不会上传到别处。</div>
+    </div>
+  </div>
+
+  <!-- 离线（直接用文件打开）时的导入区 -->
+  <div class="card hide" id="import-card">
+    <p class="big">离线模式：导入快照</p>
+    <p class="muted" style="margin:0 0 10px">你是直接用文件打开的，无法联网同步。请选择电脑生成的「手机快照.json」。</p>
+    <input type="file" id="file-input" accept=".json,application/json">
+    <div class="note" style="margin-top:12px">
+      想用「登录 + 一键同步」，请在手机浏览器访问电脑地址（连同一个 WiFi）：<br>
+      <b id="host-hint">（先用手机浏览器打开过一次电脑地址，这里就会记住）</b>
+    </div>
+  </div>
+
+  <!-- 分类栏（一级：分类） -->
+  <div class="cats-label">📂 公众号分类</div>
+  <div class="cats" id="cats"></div>
+
+  <!-- 面包屑：分类 › 公众号 › 视频 -->
+  <div class="crumb" id="crumb"></div>
+
+  <!-- 未读列表（二级：公众号列表；三级：某公众号的未读视频） -->
+  <div id="cards"></div>
+
+  <footer id="footer">抖音未读提醒 · 手机版</footer>
+</div>
+
+<script>
+var ONLINE = /^https?:$/.test(location.protocol);
+if (ONLINE) { try { localStorage.setItem('dy_host', location.origin); } catch(e){} }
+function lastHost(){ try { return localStorage.getItem('dy_host') || ''; } catch(e){ return ''; } }
+
+/* GitHub 数据源（可选，离线/手机端用）：
+   - 留空 '' → 页面尝试拉取同目录下的 ./unread.json（适用于把本页部署到 GitHub Pages）
+   - 用手机 file:// 直接打开本文件时，把它改成你的 raw 地址，例如：
+       https://raw.githubusercontent.com/你的用户名/你的仓库/main/unread.json
+   含占位符「你的用户名/你的仓库」时自动跳过、改用同目录文件。 */
+/* 已预填：手机用 file:// 直接打开本文件时，会自动从下面地址拉取最新 unread.json（公开仓库免 Token）。
+   本机发布到 GitHub Pages 时，export-mobile.js 会把它覆盖为同目录 ./unread.json，无需改动。 */
+var DATA_URL = '';
+var GITHUB_PH = /你的用户名|USERNAME|<username>/;
+/* 静态托管（GitHub Pages / 已配 DATA_URL）＝本机后端不可用，写操作只落 localStorage */
+var STATIC_HOST = (location.hostname.indexOf('github.io') >= 0) || (DATA_URL && !GITHUB_PH.test(DATA_URL));
+async function loadFromUrl(){
+  var url = (DATA_URL && !GITHUB_PH.test(DATA_URL)) ? DATA_URL : './unread.json';
+  try {
+    msg('正在从 GitHub 拉取数据…');
+    var sep = url.indexOf('?') < 0 ? '?' : '&';
+    var r = await fetch(url + sep + '_=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var d = await r.json();
+    if (!d || !d.videos) throw new Error('数据格式不对');
+    var hadCache = !!(ghGetSnap() && ghGetSnap().videos);
+    ghSetSnap(d);                            // 存本机缓存：下次打开先秒开，再后台刷新
+    ghShowCached();
+    applySnapshot(d, 'GitHub 数据 · 更新于 ' + esc(d.exportedAt || ''));
+    $('btn-sync').style.display = '';        // 拉取成功后保留「🔄」按钮用于刷新
+    // 静态托管（GitHub Pages / 已配置 DATA_URL）时，🔄 = 重新从 GitHub 拉取
+    if (location.hostname.indexOf('github.io') >= 0 || (DATA_URL && !GITHUB_PH.test(DATA_URL))){
+      $('btn-sync').onclick = loadFromUrl;
+    }
+    clearMsg();
+    if (!hadCache) msg('✅ 已载入 ' + d.videos.length + ' 条未读（已缓存到本机，下次打开秒开）。');
+  } catch(e){
+    msg('从 GitHub 拉取失败：' + esc(e.message) + '<br>可改用「选择文件」手动导入，或检查 DATA_URL 是否正确。', true);
+  }
+}
+
+/* 本地"已看"记录：让离线单文件里的「标已看」在刷新后依然生效 */
+var READ_KEY = 'dy_read_v1';
+function readSet(){ try { return new Set(JSON.parse(localStorage.getItem(READ_KEY) || '[]')); } catch(e){ return new Set(); } }
+function addRead(k){ try { var s = readSet(); s.add(k); localStorage.setItem(READ_KEY, JSON.stringify(Array.from(s))); } catch(e){} }
+function keyOf(v){ return v.id || v.awemeId || ''; }
+
+var S = { accounts:[], videos:[], categories:[], selfProfile:{}, loggedIn:false };
+var curCat = '';            // 一级：当前分类
+var curAcct = '';           // 二级：当前公众号
+var view = 'accts';         // 'accts' = 公众号列表 ｜ 'videos' = 某公众号的未读视频
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function $(id){ return document.getElementById(id); }
+function msg(html, isErr){ $('msg').innerHTML = '<div class="'+(isErr?'err':'note')+'">'+html+'</div>'; }
+function clearMsg(){ $('msg').innerHTML = ''; }
+
+/* 视频所属分类：与桌面端 catOf 一致（先查账号.category，回退视频.category） */
+function catOf(v){
+  var a = S.accounts.find(function(x){ return x.name === v.account; });
+  return (a && a.category) ? a.category : (v.category || '未分类');
+}
+
+/* ============ 在线：拉取数据 ============ */
+async function loadState(){
+  if (!ONLINE) return;
+  try {
+    var r = await fetch('/api/mobile/state', {cache:'no-store'});
+    var d = await r.json();
+    S.accounts    = d.accounts || [];
+    S.categories  = d.categories || [];
+    S.videos      = d.videos || [];
+    S.selfProfile = d.selfProfile || {};
+    S.loggedIn    = !!d.loggedIn;
+    var nick = S.selfProfile.nickname || '';
+    var uid  = S.selfProfile.uniqueId || '';
+    $('who').innerHTML = S.loggedIn
+      ? ('已登录：<b>' + esc(nick || '抖音账号') + '</b>' + (uid ? '（' + esc(uid) + '）' : ''))
+      : '<span style="color:#cf1322">未登录，请先在电脑看板登录</span>';
+    $('stat-line').textContent = '监控 ' + S.accounts.length + ' 个账号 · 已收录 ' +
+      (d.totalVideos || 0) + ' 条视频 · 当前未读 ' + visibleVideos().length + ' 条';
+    curCat = ''; curAcct = ''; view = 'accts';
+    refreshAll(true);
+  } catch(e){
+    // 部署到 GitHub Pages 等静态托管时，没有 /api/mobile/state，改从同目录 unread.json 加载
+    if (location.hostname.indexOf('github.io') >= 0 || (DATA_URL && !GITHUB_PH.test(DATA_URL))){
+      return loadFromUrl();
+    }
+    msg('连接电脑服务失败：' + esc(e.message) + '<br>请确认电脑上的服务在运行、且手机与电脑连同一个 WiFi。', true);
+  }
+}
+
+/* ============ 同步（异步 + 轮询） ============ */
+$('btn-sync').onclick = async function(){
+  if (!ONLINE){ if (DATA_URL && !GITHUB_PH.test(DATA_URL)){ await loadFromUrl(); } else { msg('当前模式下无法同步。', true); } return; }
+  var btn = $('btn-sync');
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> 同步中…';
+  msg('正在读取抖音关注页的真实未看状态（约 1 分钟，会打开你电脑上的浏览器）…');
+  try {
+    var r = await fetch('/api/mobile/sync', {method:'POST'});
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error || '同步启动失败');
+    if (!d.started){ msg(d.note || '已有同步在进行中'); }
+    // 轮询状态
+    for (var i = 0; i < 120; i++){
+      await new Promise(s => setTimeout(s, 3000));
+      var sr = await fetch('/api/mobile/sync/status', {cache:'no-store'});
+      var sd = await sr.json();
+      if (sd.done){
+        if (sd.error) msg('同步失败：' + esc(sd.error), true);
+        else {
+          var c = sd.result || {};
+          msg(c.skipped
+            ? '⚠️ 没读到抖音未看数（可能未登录或页面被限制），数据未更新。'
+            : ('✅ 已同步：按抖音真实未读校准 ' + (c.matched||0) + ' 个账号，标未读 ' + (c.marked||0) + ' 条、清已读 ' + (c.cleared||0) + ' 条。'));
+        }
+        await loadState();
+        break;
+      }
+    }
+  } catch(e){ msg('同步出错：' + esc(e.message), true); }
+  btn.disabled = false; btn.innerHTML = '🔄 同步';
+};
+
+/* 当前仍算未读的视频（扣掉本地已标已看的） */
+function visibleVideos(){
+  var read = readSet();
+  return S.videos.filter(function(v){ return !read.has(keyOf(v)); });
+}
+
+/* ============ 分类栏 ============ */
+function renderCats(){
+  var cats = S.categories.slice();
+  S.accounts.forEach(function(a){ if (a.category && cats.indexOf(a.category) < 0) cats.push(a.category); });
+  var vis = visibleVideos();
+  // 只显示有未读视频的分类
+  var withCount = cats.map(function(c){
+    return { name:c, n:vis.filter(function(v){ return catOf(v) === c; }).length };
+  }).filter(function(x){ return x.n > 0; });
+  var total = vis.length;
+  var html = '<div class="cat' + (curCat===''?' on':'') + '" data-cat="">全部 ' + total + '</div>';
+  withCount.sort(function(a,b){ return b.n - a.n; }).forEach(function(x){
+    html += '<div class="cat' + (curCat===x.name?' on':'') + '" data-cat="' + esc(x.name) + '">' +
+            esc(x.name) + ' ' + x.n + '</div>';
+  });
+  $('cats').innerHTML = html;
+  Array.prototype.forEach.call($('cats').children, function(el){
+    el.onclick = function(){
+      // 一级：选分类 → 进入二级（该分类下的公众号列表）
+      curCat = el.getAttribute('data-cat');
+      curAcct = '';
+      view = 'accts';
+      renderCats(); renderCrumb(); render(true);
+    };
+  });
+}
+
+/* ============ 渲染列表（分页，手机上一次性渲染两千条会卡） ============ */
+var PAGE = 80, shown = PAGE;
+
+function cardHtml(v){
+  var k = esc(keyOf(v));
+  return '<div class="vcard" onclick="openVideo(\'' + k + '\')">' +
+    '<img class="thumb" loading="lazy" referrerpolicy="no-referrer" src="' + esc(v.thumbnail) + '" ' +
+         'onerror="this.style.visibility=\'hidden\'" alt="">' +
+    '<div class="vbody">' +
+      '<div class="vtitle">' + esc(v.title || '（无标题）') + '</div>' +
+      '<div class="vmeta"><span class="tag">' + esc(catOf(v)) + '</span>' +
+        esc(v.account) + ' · ' + esc(v.publishTime || '') + '</div>' +
+      '<div class="vacts">' +
+        '<span class="play">▶ 用抖音打开</span>' +
+        '<button onclick="event.stopPropagation();markRead(\'' + k + '\')">✓ 标已看</button>' +
+      '</div>' +
+    '</div></div>';
+}
+
+/* 点卡片 → 直接跳转抖音 App 播放（移动端 douyin.com 视频页会唤起 App） */
+function openVideo(k){
+  var v = S.videos.find(function(x){ return keyOf(x) === k; });
+  var url = (v && v.url) ? v.url : ('https://www.douyin.com/video/' + k);
+  window.location.href = url;
+}
+
+/* 当前分类下，每个公众号各有多少条未读（二级页面的数据） */
+function accountsInCat(){
+  var vis = visibleVideos();
+  var map = {};
+  vis.forEach(function(v){
+    if (curCat && catOf(v) !== curCat) return;
+    var a = v.account || '（未知）';
+    map[a] = (map[a] || 0) + 1;
+  });
+  return Object.keys(map).map(function(a){
+    var acc = S.accounts.find(function(x){ return x.name === a; });
+    return { name:a, n:map[a], cat:(acc && acc.category) || '' };
+  }).sort(function(x,y){ return y.n - x.n; });
+}
+
+/* 面包屑：全部 › 分类 › 公众号（点前面的层级可返回） */
+function renderCrumb(){
+  var h = '<span class="lk" data-go="all">全部</span><span class="sep">›</span>';
+  if (view === 'accts'){
+    h += '<span class="cur">' + esc(curCat || '全部分类') + '</span>';
+  } else {
+    h += '<span class="lk" data-go="accts">' + esc(curCat || '全部分类') + '</span><span class="sep">›</span>';
+    h += '<span class="cur">' + esc(curAcct) + '</span>';
+  }
+  $('crumb').innerHTML = h;
+  Array.prototype.forEach.call($('crumb').querySelectorAll('.lk'), function(el){
+    el.onclick = function(){
+      var go = el.getAttribute('data-go');
+      if (go === 'all'){ curCat = ''; curAcct = ''; }
+      else { curAcct = ''; }
+      view = 'accts';
+      renderCats(); renderCrumb(); render(true);
+    };
+  });
+}
+
+/* 二级：列出该分类下的公众号 + 各自未读数 */
+function renderAccounts(){
+  var list = accountsInCat();
+  $('hdr-cnt').textContent = '公众号 ' + list.length;
+  if (!list.length){
+    $('cards').innerHTML = '<div class="empty"><div class="big">🎉</div>' +
+      (visibleVideos().length ? '该分类没有未读视频' : '没有未读视频了') + '</div>';
+    return;
+  }
+  $('cards').innerHTML = list.map(function(a){
+    return '<div class="acct" data-acct="' + esc(a.name) + '">' +
+      '<div class="an">' + esc(a.name) + (a.cat ? '<span class="acct-cat">' + esc(a.cat) + '</span>' : '') + '</div>' +
+      '<div class="an-n">' + a.n + ' 条未读</div>' +
+      '<div class="arw">›</div>' +
+    '</div>';
+  }).join('');
+  Array.prototype.forEach.call($('cards').children, function(el){
+    el.onclick = function(){
+      curAcct = el.getAttribute('data-acct');
+      view = 'videos';
+      renderCrumb(); render(true);
+    };
+  });
+}
+
+/* 三级：某个公众号的未读视频（整卡点击跳抖音 App） */
+function renderVideos(reset){
+  if (reset) shown = PAGE;
+  var list = visibleVideos().filter(function(v){ return (v.account || '（未知）') === curAcct; });
+  list.sort(function(a,b){ return (b.publishedAt||0) - (a.publishedAt||0); });
+  $('hdr-cnt').textContent = '未读 ' + list.length;
+  if (!list.length){
+    $('cards').innerHTML = '<div class="empty"><div class="big">🎉</div>该公众号没有未读视频了</div>';
+    return;
+  }
+  var slice = list.slice(0, shown);
+  var html = slice.map(cardHtml).join('');
+  if (list.length > slice.length){
+    html += '<button id="btn-more" style="width:100%;margin:14px 0;padding:13px;' +
+            'background:#fff;color:#fe2c55;border:1px solid #ffd7de;border-radius:12px;' +
+            'font-size:15px;font-weight:600">加载更多（还有 ' + (list.length - slice.length) + ' 条）</button>';
+  }
+  $('cards').innerHTML = html;
+  var mb = $('btn-more');
+  if (mb) mb.onclick = function(){ shown += PAGE; renderVideos(false); };
+}
+
+function render(reset){
+  if (view === 'videos') renderVideos(reset);
+  else renderAccounts();
+}
+
+/* 统一刷新：分类栏 + 面包屑 + 列表 */
+function refreshAll(reset){ renderCats(); renderCrumb(); render(reset); }
+
+/* 标已看：手机端只清本地（视频是在抖音 App 里看的，抖音已记录已看，不用电脑再播一遍） */
+async function markRead(k){
+  try {
+    if (ONLINE && !window.SNAPSHOT && !STATIC_HOST){
+      await fetch('/api/videos/' + encodeURIComponent(k) + '/read?nosync=1', {method:'POST'});
+    }
+    addRead(k);          // 离线单文件也生效，并记进 localStorage 以便刷新后保持
+    refreshAll();
+    showUndo(k, markReadUndo);
+  } catch(e){ msg('标记失败：' + esc(e.message), true); }
+}
+
+/* 撤销「标已看」：误点时能立刻恢复（改本地记录；连着电脑服务时一并通知电脑端） */
+function markReadUndo(k){
+  try { var s = readSet(); s.delete(k); localStorage.setItem(READ_KEY, JSON.stringify(Array.from(s))); } catch(e){}
+  if (ONLINE && !window.SNAPSHOT && !STATIC_HOST){
+    fetch('/api/videos/' + encodeURIComponent(k) + '/unread?nosync=1', {method:'POST'}).catch(function(){});
+  }
+  refreshAll(); clearMsg();
+}
+
+/* 提示条 + 撤销按钮（几秒后自动消失，不长期占屏） */
+var undoTimer = null;
+function showUndo(k, cb){
+  clearTimeout(undoTimer);
+  var v = S.videos.find(function(x){ return keyOf(x) === k; });
+  var t = v ? (v.title || '') : '';
+  if (t.length > 16) t = t.slice(0, 16) + '…';
+  msg('已标为已看' + (t ? '：' + esc(t) : '') +
+      ' <button id="btn-undo" style="margin-left:8px;background:#fff;color:#fe2c55;' +
+      'border:1px solid #ffd7de;border-radius:8px;padding:4px 12px;font-size:13px;cursor:pointer">撤销</button>');
+  var ub = $('btn-undo');
+  if (ub) ub.onclick = function(){ clearTimeout(undoTimer); cb(k); };
+  undoTimer = setTimeout(clearMsg, 6000);
+}
+
+/* ============ 离线模式：套用快照数据（内嵌或手选文件都走这里） ============ */
+function applySnapshot(d, label){
+  S.accounts    = d.accounts || [];
+  S.categories  = d.categories || [];
+  S.videos      = d.videos || [];
+  S.selfProfile = d.selfProfile || {};
+  S.loggedIn    = false;
+  $('import-card').classList.add('hide');
+  $('btn-sync').style.display = 'none';
+  $('who').innerHTML = label;
+  $('stat-line').textContent = '账号 ' + S.accounts.length + ' 个 · 未读 ' + visibleVideos().length + ' 条';
+  curCat = ''; curAcct = ''; view = 'accts';
+  refreshAll(true); clearMsg();
+}
+
+$('file-input').onchange = function(e){
+  var f = e.target.files && e.target.files[0];
+  if (!f) return;
+  var fr = new FileReader();
+  fr.onload = function(){
+    try {
+      var d = JSON.parse(fr.result);
+      if (!d || !d.videos) throw new Error('文件格式不对');
+      applySnapshot(d, '离线快照（' + esc(d.exportedAt || '') + '）');
+    } catch(err){ msg('导入失败：' + esc(err.message), true); }
+  };
+  fr.readAsText(f, 'utf-8');
+};
+
+/* ============ 从 GitHub 下载数据（用户填账号 / 仓库 / Token） ============ */
+var GH_CFG_KEY = 'dy_gh_cfg_v1';
+var GH_SNAP_KEY = 'dy_gh_snap_v1';
+
+function ghGetCfg(){ try { return JSON.parse(localStorage.getItem(GH_CFG_KEY) || '{}'); } catch(e){ return {}; } }
+function ghSetCfg(c){ try { localStorage.setItem(GH_CFG_KEY, JSON.stringify(c)); } catch(e){} }
+function ghGetSnap(){ try { return JSON.parse(localStorage.getItem(GH_SNAP_KEY) || 'null'); } catch(e){ return null; } }
+function ghSetSnap(d){ try { localStorage.setItem(GH_SNAP_KEY, JSON.stringify(d)); return true; } catch(e){ return false; } }
+
+function ghFillForm(){
+  var c = ghGetCfg();
+  if (c.owner) $('gh-owner').value = c.owner;
+  if (c.repo) $('gh-repo').value = c.repo;
+  if (c.branch) $('gh-branch').value = c.branch;
+  if (c.token) $('gh-token').value = c.token;
+}
+function ghShowCached(){
+  var s = ghGetSnap();
+  $('gh-cached').textContent = s ? ('已缓存 ' + (s.exportedAt || '')) : '';
+}
+
+function b64DecodeUtf8(b64){
+  var bin = atob(b64);
+  var bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+/* 取 unread.json：
+   - 没填 Token：直接用 raw 直链（公开仓库最快，且没有 contents API 的 1MB 限制）
+   - 填了 Token：走 GitHub API（支持私有仓库）；文件 >1MB 时 content 为空，改读 blob */
+async function ghFetchJson(owner, repo, branch, token){
+  var rawUrl = 'https://raw.githubusercontent.com/' + owner + '/' + repo + '/' + branch + '/unread.json';
+  if (!token){
+    var r = await fetch(rawUrl + '?_=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) throw new Error('HTTP ' + r.status + '（公开仓库请确认仓库为 Public，或填上 Token）');
+    return await r.json();
+  }
+  var hdr = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' };
+  var apiUrl = 'https://api.github.com/repos/' + owner + '/' + repo + '/contents/unread.json?ref=' + branch;
+  var res = await fetch(apiUrl, {headers: hdr, cache: 'no-store'});
+  if (res.ok){
+    var meta = await res.json();
+    if (meta && meta.content) return JSON.parse(b64DecodeUtf8(meta.content));
+    if (meta && meta.sha){
+      var bres = await fetch('https://api.github.com/repos/' + owner + '/' + repo + '/git/blobs/' + meta.sha,
+                             {headers: hdr, cache: 'no-store'});
+      if (!bres.ok) throw new Error('读取文件失败（HTTP ' + bres.status + '）');
+      var b = await bres.json();
+      if (!b || !b.content) throw new Error('未能取到文件内容');
+      return JSON.parse(b64DecodeUtf8(b.content));
+    }
+    throw new Error('未能取到文件内容');
+  }
+  // API 不通（例如公开仓库但 Token 无效）→ 回退 raw
+  var r2 = await fetch(rawUrl + '?_=' + Date.now(), {cache:'no-store'});
+  if (!r2.ok) throw new Error('HTTP ' + res.status + '（raw 也失败：' + r2.status + '）');
+  return await r2.json();
+}
+
+async function ghDownload(){
+  var owner = $('gh-owner').value.trim();
+  var repo = $('gh-repo').value.trim();
+  var branch = $('gh-branch').value.trim() || 'main';
+  var token = $('gh-token').value.trim();
+  if (!owner || !repo){ msg('请填写 GitHub 用户名和仓库名。', true); return; }
+  var btn = $('gh-download');
+  btn.disabled = true; btn.textContent = '正在下载…';
+  msg('正在从 GitHub 下载数据…');
+  try {
+    var d = await ghFetchJson(owner, repo, branch, token);
+    if (!d || !d.videos) throw new Error('数据格式不对（仓库里没有 unread.json？）');
+    var cached = ghSetSnap(d);
+    ghSetCfg({ owner: owner, repo: repo, branch: branch, token: token });
+    ghShowCached();
+    applySnapshot(d, 'GitHub 数据 · 更新于 ' + esc(d.exportedAt || ''));
+    msg(cached
+      ? '✅ 已从 GitHub 载入 ' + d.videos.length + ' 条未读（已缓存到本机，下次打开自动加载）。'
+      : '✅ 已从 GitHub 载入 ' + d.videos.length + ' 条未读（本机空间不足，未能缓存）。');
+  } catch(e){
+    msg('从 GitHub 下载失败：' + esc(e.message) + '<br>请检查用户名 / 仓库名 / 分支是否正确；私有仓库需填 Token。', true);
+  }
+  btn.disabled = false; btn.textContent = '⬇️ 下载并载入';
+}
+
+$('gh-toggle').onclick = function(){
+  var f = $('gh-form');
+  var open = (f.style.display === 'none');
+  f.style.display = open ? '' : 'none';
+  $('gh-toggle').textContent = open ? '收起' : '填写信息';
+  if (open) ghFillForm();
+};
+$('gh-download').onclick = ghDownload;
+
+/* ============ 启动 ============ */
+(function init(){
+  ghShowCached();          // 展示本机是否已缓存过 GitHub 数据
+  // 导出成单文件时，数据会内嵌成 window.SNAPSHOT，打开即可用，无需选文件
+  if (window.SNAPSHOT){
+    applySnapshot(window.SNAPSHOT, '未读清单 · 导出于 ' + esc(window.SNAPSHOT.exportedAt || ''));
+    return;
+  }
+  if (ONLINE){
+    $('import-card').classList.add('hide');
+    // 先用本机缓存秒开（不必每次都等 1MB+ 的 JSON 下完），再由 loadState 拉最新数据覆盖
+    var c0 = ghGetSnap();
+    if (c0 && c0.videos){
+      applySnapshot(c0, '本机缓存 · 更新于 ' + esc(c0.exportedAt || ''));
+    }
+    loadState();
+    return;
+  }
+  // 离线：先用本机缓存的 GitHub 数据（若有），省去每次联网
+  var cachedSnap = ghGetSnap();
+  if (cachedSnap && cachedSnap.videos){
+    applySnapshot(cachedSnap, '本机缓存 · 更新于 ' + esc(cachedSnap.exportedAt || ''));
+    return;
+  }
+  // 离线：优先尝试 GitHub 数据源（DATA_URL 已配置时）；否则显示手动导入
+  if (DATA_URL && !GITHUB_PH.test(DATA_URL)){
+    $('import-card').classList.remove('hide');   // 保留「选择文件」作为兜底
+    $('btn-sync').style.display = '';            // 显示 🔄 用于刷新/重试
+    $('who').innerHTML = '离线模式 · GitHub 数据源';
+    $('hdr-cnt').textContent = 'GitHub';
+    loadFromUrl();
+  } else {
+    $('import-card').classList.remove('hide');
+    $('btn-sync').style.display = 'none';
+    $('who').innerHTML = '离线模式（未连接电脑服务）';
+    $('hdr-cnt').textContent = '离线';
+    var h = lastHost();
+    if (h) $('host-hint').innerHTML = '<a href="' + esc(h) + '/mobile">' + esc(h) + '/mobile</a>';
+  }
+})();
+</script>
+</body>
+</html>
