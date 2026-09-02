@@ -70,12 +70,21 @@
   .crumb .cur{color:#1d2129;font-weight:500}
   /* 公众号列表（二级：先看每个公众号有多少未读） */
   .acct{display:flex;align-items:center;gap:10px;background:#fff;border-radius:12px;padding:13px 14px;
-        margin-bottom:9px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+        margin-bottom:9px;box-shadow:0 1px 3px rgba(0,0,0,.06);position:relative}
   .acct .an{flex:1;min-width:0;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .acct .an .acct-cat{display:block;font-size:11px;color:#86909c;margin-top:2px;font-weight:400}
+  .acct .acct-cat-sel{flex:0 0 auto;max-width:40%;font-size:12px;padding:6px 7px;border:1px solid #e5e6eb;
+                      border-radius:8px;background:#f7f8fa;color:#4e5969;font-family:inherit}
+  .acct .acct-cat-sel.new{background:#fe2c55;color:#fff;border-color:#fe2c55}
   .acct .an-n{flex:0 0 auto;background:#fff1f3;color:#fe2c55;font-size:13px;font-weight:600;
               padding:4px 11px;border-radius:20px}
   .acct .arw{flex:0 0 auto;color:#c9cdd4;font-size:16px}
+  /* 公众号拖动手柄（仅「已分类」视图下出现，用于上下拖动排序） */
+  .acct.dragging{box-shadow:0 8px 22px rgba(0,0,0,.20);background:#fff;z-index:30;cursor:grabbing}
+  .acct .acct-drag{flex:0 0 auto;width:24px;text-align:center;color:#c9cdd4;font-size:18px;line-height:1;
+              cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+  .acct .acct-drag:active{color:#fe2c55}
+  .drag-tip{font-size:12px;color:#86909c;margin:0 2px 8px}
   /* 从 GitHub 下载数据 */
   .ghcard{background:#fff;border-radius:12px;padding:14px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
   .ghcard .gh-head{display:flex;align-items:center;gap:10px}
@@ -131,6 +140,10 @@
       <button class="ghgo" id="gh-download">⬇️ 下载并载入</button>
       <div class="hint">下载的是「抖音未读提醒」保存的 <code>unread.json</code>：你关注的公众号 + 每个公众号的未读视频。<br>
         公开仓库不用 Token；填了 Token 或仓库为私有时，会改走 GitHub API 读取。<b>信息只存在本机浏览器</b>，不会上传到别处。</div>
+      <button class="ghgo" id="gh-upload" style="background:#24292f;margin-top:10px">⬆️ 上传改动到 GitHub</button>
+      <div class="hint">把你在手机上改过的<b>分类</b>和<b>已读记录</b>写回 <code>unread.json</code>。<br>
+        电脑端下次「一键导入并开始监控」会自动下载并应用：新分类回写到账号，已读视频不再算未读。<br>
+        <b>上传需要写权限的 Token</b>（公开/私有仓库都需填）。</div>
     </div>
   </div>
 
@@ -205,6 +218,19 @@ function readSet(){ try { return new Set(JSON.parse(localStorage.getItem(READ_KE
 function addRead(k){ try { var s = readSet(); s.add(k); localStorage.setItem(READ_KEY, JSON.stringify(Array.from(s))); } catch(e){} }
 function keyOf(v){ return v.id || v.awemeId || ''; }
 
+/* 分类覆盖：手机端改过的分类先存本机，刷新/重新下载后仍能保留；上传 GitHub 时会一并回传 */
+var CAT_OVERRIDE_KEY = 'dy_cat_overrides_v1';
+function loadCatOverrides(){ try { return JSON.parse(localStorage.getItem(CAT_OVERRIDE_KEY) || '{}'); } catch(e){ return {}; } }
+function saveCatOverride(name, cat){ var m = loadCatOverrides(); if (cat) m[name] = cat; else delete m[name]; try { localStorage.setItem(CAT_OVERRIDE_KEY, JSON.stringify(m)); } catch(e){} }
+function applyCatOverrides(){ var m = loadCatOverrides(); S.accounts.forEach(function(a){ if (m[a.name] !== undefined) a.category = m[a.name]; }); }
+function mergeCategoriesFrom(arr){ (arr||[]).forEach(function(a){ if (a && a.category && S.categories.indexOf(a.category) < 0) S.categories.push(a.category); }); }
+
+/* 分类下公众号的手动排序：手机端拖动产生，先存本机，上传/下载时随 GitHub 往返 */
+var ORDER_KEY = 'dy_acct_order_v1';
+function loadOrder(){ try { return JSON.parse(localStorage.getItem(ORDER_KEY) || '{}') || {}; } catch(e){ return {}; } }
+function saveOrder(o){ try { localStorage.setItem(ORDER_KEY, JSON.stringify(o)); } catch(e){} }
+var gOrder = loadOrder();
+
 var S = { accounts:[], videos:[], categories:[], selfProfile:{}, loggedIn:false };
 var curCat = '';            // 一级：当前分类
 var curAcct = '';           // 二级：当前公众号
@@ -233,6 +259,13 @@ async function loadState(){
     S.videos      = d.videos || [];
     S.selfProfile = d.selfProfile || {};
     S.loggedIn    = !!d.loggedIn;
+    applyCatOverrides();          // 在线模式也允许手机端本地改过的分类覆盖到账号上
+    mergeCategoriesFrom(S.accounts);
+    if (d.orderByCat && typeof d.orderByCat === 'object'){   // 在线模式同样尊重服务端保存的排序
+      var o = loadOrder();
+      Object.keys(d.orderByCat).forEach(function(k){ if (Array.isArray(d.orderByCat[k]) && d.orderByCat[k].length) o[k] = d.orderByCat[k].slice(); });
+      saveOrder(o); gOrder = o;
+    }
     var nick = S.selfProfile.nickname || '';
     var uid  = S.selfProfile.uniqueId || '';
     $('who').innerHTML = S.loggedIn
@@ -351,10 +384,20 @@ function accountsInCat(){
     var a = v.account || '（未知）';
     map[a] = (map[a] || 0) + 1;
   });
-  return Object.keys(map).map(function(a){
+  var list = Object.keys(map).map(function(a){
     var acc = S.accounts.find(function(x){ return x.name === a; });
     return { name:a, n:map[a], cat:(acc && acc.category) || '' };
   }).sort(function(x,y){ return y.n - x.n; });
+  // 应用本机保存的手动排序（仅「已分类」视图下有意义；未排序的账号排到末尾）
+  var order = gOrder[curCat] || [];
+  if (order.length){
+    list.sort(function(a,b){
+      var ia = order.indexOf(a.name), ib = order.indexOf(b.name);
+      if (ia < 0) ia = 1e9; if (ib < 0) ib = 1e9;
+      return ia - ib;
+    });
+  }
+  return list;
 }
 
 /* 面包屑：全部 › 分类 › 公众号（点前面的层级可返回） */
@@ -378,7 +421,7 @@ function renderCrumb(){
   });
 }
 
-/* 二级：列出该分类下的公众号 + 各自未读数 */
+/* 二级：列出该分类下的公众号 + 各自未读数（已分类视图下可拖动排序） */
 function renderAccounts(){
   var list = accountsInCat();
   $('hdr-cnt').textContent = '公众号 ' + list.length;
@@ -387,20 +430,127 @@ function renderAccounts(){
       (visibleVideos().length ? '该分类没有未读视频' : '没有未读视频了') + '</div>';
     return;
   }
-  $('cards').innerHTML = list.map(function(a){
+  var canDrag = !!curCat;   // 仅「已分类」视图下允许拖动排序（全部视图无单一分类上下文）
+  var html = '';
+  if (canDrag && list.length > 1) html += '<div class="drag-tip">⬍ 长按左侧 ⠿ 手柄可上下拖动排序</div>';
+  html += list.map(function(a){
     return '<div class="acct" data-acct="' + esc(a.name) + '">' +
-      '<div class="an">' + esc(a.name) + (a.cat ? '<span class="acct-cat">' + esc(a.cat) + '</span>' : '') + '</div>' +
+      (canDrag ? '<div class="acct-drag" data-drag="' + esc(a.name) + '">⠿</div>' : '') +
+      '<div class="an">' + esc(a.name) + '</div>' +
+      '<select class="acct-cat-sel" data-acct="' + esc(a.name) + '">' + buildCatOptions(a.cat) + '</select>' +
       '<div class="an-n">' + a.n + ' 条未读</div>' +
       '<div class="arw">›</div>' +
     '</div>';
   }).join('');
-  Array.prototype.forEach.call($('cards').children, function(el){
-    el.onclick = function(){
+  $('cards').innerHTML = html;
+  Array.prototype.forEach.call($('cards').querySelectorAll('.acct'), function(el){
+    el.onclick = function(e){
+      if (e.target && e.target.closest && e.target.closest('.acct-drag')) return;   // 点手柄不导航
+      if (window.__suppressClickUntil && Date.now() < window.__suppressClickUntil) return;  // 拖完防误触
+      if (e.target && e.target.tagName === 'SELECT') return;   // 点下拉改分类时，不钻进视频列表
       curAcct = el.getAttribute('data-acct');
       view = 'videos';
       renderCrumb(); render(true);
     };
   });
+  Array.prototype.forEach.call($('cards').querySelectorAll('.acct-cat-sel'), function(sel){
+    sel.onclick = function(e){ e.stopPropagation(); };          // 阻止冒泡到整行点击
+    sel.onchange = function(e){ e.stopPropagation(); changeAcctCategory(sel.getAttribute('data-acct'), sel.value); };
+  });
+  if (canDrag){
+    Array.prototype.forEach.call($('cards').querySelectorAll('.acct-drag'), function(h){
+      h.addEventListener('pointerdown', function(e){ startDrag(e, h); });
+    });
+  }
+}
+
+/* ============ 拖动排序（手机端：在「已分类」视图下长按手柄上下拖动公众号） ============ */
+var drag = null;
+function startDrag(e, handle){
+  if (!curCat) return;
+  e.preventDefault(); e.stopPropagation();
+  var row = handle.parentNode;
+  drag = { el: row, startY: e.clientY, ptr: e.pointerId, prevOrder: (gOrder[curCat] ? gOrder[curCat].slice() : []) };
+  row.classList.add('dragging');
+  try { handle.setPointerCapture(e.pointerId); } catch(_){}
+  handle.addEventListener('pointermove', onDragMove);
+  handle.addEventListener('pointerup', onDragUp);
+  handle.addEventListener('pointercancel', onDragUp);
+}
+function onDragMove(e){
+  if (!drag) return;
+  e.preventDefault();
+  var dy = e.clientY - drag.startY;
+  drag.el.style.transform = 'translateY(' + dy + 'px)';
+  var cards = $('cards');
+  var rows = Array.prototype.slice.call(cards.querySelectorAll('.acct'));
+  var ref = null;
+  for (var i = 0; i < rows.length; i++){
+    if (rows[i] === drag.el) continue;
+    var r = rows[i].getBoundingClientRect();
+    if (e.clientY < r.top + r.height / 2){ ref = rows[i]; break; }
+  }
+  if (ref){
+    cards.insertBefore(drag.el, ref);
+    drag.el.style.transform = 'translateY(0)';   // 落位后归零位移，让行吸附到新槽位
+    drag.startY = e.clientY;                      // 指针继续从该处跟随
+  } else if (drag.el !== rows[rows.length - 1]) {
+    cards.appendChild(drag.el);
+    drag.el.style.transform = 'translateY(0)';
+    drag.startY = e.clientY;
+  }
+}
+function onDragUp(){
+  if (!drag) return;
+  var el = drag.el;
+  var handle = el.querySelector('.acct-drag');
+  if (handle){
+    handle.removeEventListener('pointermove', onDragMove);
+    handle.removeEventListener('pointerup', onDragUp);
+    handle.removeEventListener('pointercancel', onDragUp);
+  }
+  el.classList.remove('dragging');
+  el.style.transform = '';
+  var cards = $('cards');
+  var order = Array.prototype.slice.call(cards.querySelectorAll('.acct')).map(function(n){ return n.getAttribute('data-acct'); });
+  var o = loadOrder();
+  o[curCat] = order; saveOrder(o); gOrder = o;
+  var prev = drag.prevOrder || [];
+  var changed = JSON.stringify(prev) !== JSON.stringify(order);
+  drag = null;
+  window.__suppressClickUntil = Date.now() + 500;   // 防止松手后的 click 误触导航
+  renderAccounts();                                // 干净重渲染，顺序与数据一致
+  if (changed) msg('已保存「' + esc(curCat) + '」分类下 ' + order.length + ' 个公众号的顺序。');
+}
+
+/* 生成分类下拉选项：当前分类选中 + 「➕ 新建分类…」 */
+function buildCatOptions(cur){
+  var cats = S.categories.slice();
+  S.accounts.forEach(function(a){ if (a.category && cats.indexOf(a.category) < 0) cats.push(a.category); });
+  cats = cats.filter(Boolean);
+  var html = '<option value="">未分类</option>';
+  cats.forEach(function(c){ html += '<option value="' + esc(c) + '"' + (c === cur ? ' selected' : '') + '>' + esc(c) + '</option>'; });
+  html += '<option value="__new__">➕ 新建分类…</option>';
+  return html;
+}
+
+/* 修改某公众号的分类：可选已有分类，或选「新建」后输入新名称 */
+function changeAcctCategory(name, val){
+  if (val === '__new__'){
+    var nn = (window.prompt ? prompt('请输入新分类名称：') : null);
+    if (nn === null || !nn.trim()){ renderAccounts(); return; }   // 取消 → 还原下拉
+    nn = nn.trim();
+    if (S.categories.indexOf(nn) < 0) S.categories.push(nn);
+    setAcctCategory(name, nn);
+    renderCats(); renderAccounts();
+    return;
+  }
+  setAcctCategory(name, val);
+  renderCats(); renderAccounts();   // 更新分类栏计数（账号可能离开当前筛选）
+}
+function setAcctCategory(name, cat){
+  var a = S.accounts.find(function(x){ return x.name === name; });
+  if (a){ a.category = cat; saveCatOverride(name, cat); }
 }
 
 /* 三级：某个公众号的未读视频（整卡点击跳抖音 App） */
@@ -476,6 +626,22 @@ function applySnapshot(d, label){
   S.videos      = d.videos || [];
   S.selfProfile = d.selfProfile || {};
   S.loggedIn    = false;
+  // 合并「已读」记录（来自 PC 端 / 手机端回传的 readVideoIds），让本机标记过的视频保持已读
+  if (Array.isArray(d.readVideoIds) && d.readVideoIds.length){
+    var s = readSet();
+    d.readVideoIds.forEach(function(k){ if (k) s.add(String(k)); });
+    try { localStorage.setItem(READ_KEY, JSON.stringify(Array.from(s))); } catch(e){}
+  }
+  applyCatOverrides();          // 手机端本地改过的分类覆盖到账号上
+  mergeCategoriesFrom(S.accounts);
+  // 合并 GitHub 侧的手工排序（按分类），本机未改过的分类以 GitHub 为准
+  if (d.orderByCat && typeof d.orderByCat === 'object'){
+    var o = loadOrder();
+    Object.keys(d.orderByCat).forEach(function(k){
+      if (Array.isArray(d.orderByCat[k]) && d.orderByCat[k].length) o[k] = d.orderByCat[k].slice();
+    });
+    saveOrder(o); gOrder = o;
+  }
   $('import-card').classList.add('hide');
   $('btn-sync').style.display = 'none';
   $('who').innerHTML = label;
@@ -583,6 +749,69 @@ async function ghDownload(){
   btn.disabled = false; btn.textContent = '⬇️ 下载并载入';
 }
 
+/* 上传到 GitHub：把手机端改过的「分类 + 已读记录」写回 unread.json（走 Contents API，需要 Token） */
+async function ghUpload(){
+  var owner = $('gh-owner').value.trim();
+  var repo = $('gh-repo').value.trim();
+  var branch = $('gh-branch').value.trim() || 'main';
+  var token = $('gh-token').value.trim();
+  if (!owner || !repo){ msg('请填写 GitHub 用户名和仓库名。', true); return; }
+  if (!token){ msg('上传（写回 GitHub）需要 Token（公开/私有仓库都需要有写权限的 Token）。', true); return; }
+  var btn = $('gh-upload');
+  btn.disabled = true; btn.textContent = '正在上传…';
+  msg('正在准备数据并上传到 GitHub…');
+  try {
+    // 构造与 PC 端 buildSnapshot 兼容的快照：未读视频 + 分类 + 已读记录
+    var read = readSet();
+    var cats = S.categories.slice();
+    S.accounts.forEach(function(a){ if (a.category && cats.indexOf(a.category) < 0) cats.push(a.category); });
+    var accts = S.accounts.map(function(a){ return { name: a.name, category: (a.category || '') }; });
+    var vids = S.videos.filter(function(v){ return !read.has(keyOf(v)); }).map(function(v){
+      return { awemeId: v.awemeId, account: v.account, title: v.title,
+               publishTime: v.publishTime, publishedAt: v.publishedAt || 0,
+               thumbnail: v.thumbnail || '', url: v.url || ('https://www.douyin.com/video/' + v.awemeId) };
+    });
+    var readIds = Array.from(read);
+    var snap = {
+      type: 'douyin-mobile-snapshot',
+      exportedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      calibrated: false,
+      selfProfile: S.selfProfile || {},
+      categories: cats,
+      accounts: accts,
+      videos: vids,
+      readVideoIds: readIds,
+      orderByCat: gOrder          // 各分类下公众号的手工排序（手机端拖动产生）
+    };
+    var json = JSON.stringify(snap);
+    var content = btoa(unescape(encodeURIComponent(json)));
+    var hdr = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' };
+    var apiUrl = 'https://api.github.com/repos/' + owner + '/' + repo + '/contents/unread.json?ref=' + branch;
+    // 取当前文件 sha（已存在时更新需带 sha；404 表示首次创建）
+    var sha = '';
+    try {
+      var gr = await fetch(apiUrl, { headers: hdr, cache: 'no-store' });
+      if (gr.ok){ var gm = await gr.json(); sha = gm.sha || ''; }
+    } catch (e) {}
+    var body = { message: '抖音未读提醒：同步分类与已读 ' + new Date().toLocaleString('zh-CN', { hour12: false }),
+                 content: content, branch: branch };
+    if (sha) body.sha = sha;
+    var pr = await fetch(apiUrl, { method: 'PUT', headers: hdr, body: JSON.stringify(body) });
+    if (!pr.ok){
+      var perr = await pr.json().catch(function(){ return {}; });
+      throw new Error(perr.message || ('HTTP ' + pr.status));
+    }
+    ghSetCfg({ owner: owner, repo: repo, branch: branch, token: token });
+    var pd = JSON.parse(json); ghSetSnap(pd);
+    var orderedCats = Object.keys(gOrder).filter(function(k){ return gOrder[k] && gOrder[k].length; }).length;
+    msg('✅ 已上传到 GitHub：分类 ' + cats.length + ' 个、未读 ' + vids.length + ' 条、已读记录 ' +
+        readIds.length + ' 条、排序分类 ' + orderedCats + ' 个。电脑端下次「一键导入」会自动下载并应用。');
+  } catch (e) {
+    msg('上传失败：' + esc(e.message) + '<br>请确认 Token 有该仓库写权限、仓库/分支正确。', true);
+  }
+  btn.disabled = false; btn.textContent = '⬆️ 上传改动到 GitHub';
+}
+
 $('gh-toggle').onclick = function(){
   var f = $('gh-form');
   var open = (f.style.display === 'none');
@@ -591,6 +820,7 @@ $('gh-toggle').onclick = function(){
   if (open) ghFillForm();
 };
 $('gh-download').onclick = ghDownload;
+$('gh-upload').onclick = ghUpload;
 
 /* ============ 启动 ============ */
 (function init(){
