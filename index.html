@@ -71,31 +71,38 @@
   /* 公众号列表（二级：先看每个公众号有多少未读） */
   .acct{display:flex;align-items:center;gap:10px;background:#fff;border-radius:12px;padding:13px 14px;
         margin-bottom:9px;box-shadow:0 1px 3px rgba(0,0,0,.06);position:relative}
-  .acct .an{flex:1;min-width:0;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .acct .an{flex:1;min-width:0;font-size:15px;overflow:visible;text-overflow:clip;white-space:normal;word-break:break-word}
   .acct .an .acct-cat{display:block;font-size:11px;color:#86909c;margin-top:2px;font-weight:400}
-  .acct .acct-cat-sel{flex:0 0 auto;max-width:40%;font-size:12px;padding:6px 7px;border:1px solid #e5e6eb;
+  .acct .acct-cat-sel{flex:0 0 auto;max-width:34%;font-size:12px;padding:5px 6px;border:1px solid #e5e6eb;
                       border-radius:8px;background:#f7f8fa;color:#4e5969;font-family:inherit}
   .acct .acct-cat-sel.new{background:#fe2c55;color:#fff;border-color:#fe2c55}
   .acct .an-n{flex:0 0 auto;background:#fff1f3;color:#fe2c55;font-size:13px;font-weight:600;
               padding:4px 11px;border-radius:20px}
   .acct .arw{flex:0 0 auto;color:#c9cdd4;font-size:16px}
-  /* 公众号拖动手柄（仅「已分类」视图下出现，用于上下拖动排序） */
-  .acct.dragging{box-shadow:0 8px 22px rgba(0,0,0,.20);background:#fff;z-index:30;cursor:grabbing}
-  .acct .acct-drag{flex:0 0 auto;width:24px;text-align:center;color:#c9cdd4;font-size:18px;line-height:1;
-              cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
-  .acct .acct-drag:active{color:#fe2c55}
-  .drag-tip{font-size:12px;color:#86909c;margin:0 2px 8px}
+  /* 公众号上下排序箭头（仅「已分类」视图下出现，用 ▲▼ 调整顺序） */
+  .acct .acct-mv{display:flex;flex-direction:column;gap:3px;flex:0 0 auto}
+  .acct .acct-mv .mv{width:28px;height:19px;line-height:17px;text-align:center;border:1px solid #e5e6eb;
+              border-radius:6px;background:#f7f8fa;color:#4e5969;font-size:12px;cursor:pointer;padding:0;font-family:inherit}
+  .acct .acct-mv .mv:active{background:#e5e6eb}
   /* 从 GitHub 下载数据 */
   .ghcard{background:#fff;border-radius:12px;padding:14px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
   .ghcard .gh-head{display:flex;align-items:center;gap:10px}
   .ghcard .gh-head .t{flex:1;font-size:14px;font-weight:600}
-  .ghcard .gh-cached{font-size:12px;color:#86909c}
-  .ghbtn{background:#24292f;color:#fff;border:none;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;cursor:pointer}
+  /* （gh-cached / ghbtn 已不再使用） */
   .ghcard label{display:block;font-size:12px;color:#86909c;margin-top:10px}
   .ghcard input[type=text],.ghcard input[type=password]{width:100%;padding:10px 11px;border:1px solid #e5e6eb;
         border-radius:9px;font-size:15px;margin-top:5px;background:#fff;color:#1d2129}
+  .gh-actions{display:flex;gap:10px;margin-top:14px}
+  .gh-actions .ghgo{width:auto;margin-top:0;flex:1}
   .ghgo{width:100%;margin-top:14px;background:#fe2c55;color:#fff;border:none;border-radius:10px;
         padding:12px;font-size:15px;font-weight:600;cursor:pointer}
+  .ghgo.up{background:#24292f}
+  .gh-set{background:none;border:none;color:#86909c;font-size:18px;cursor:pointer;padding:0 4px;line-height:1}
+  .gh-ind{display:inline-block;margin-top:12px;padding:7px 16px;border-radius:20px;font-size:13px;font-weight:600;
+          background:#e5e6eb;color:#4e5969}
+  .gh-ind.blue{background:#1664ff;color:#fff}
+  .gh-ind.green{background:#00b42a;color:#fff}
+  .gh-ind.red{background:#f53f3f;color:#fff}
   .ghcard .hint{font-size:12px;color:#86909c;line-height:1.6;margin-top:10px}
   footer{text-align:center;color:#86909c;font-size:12px;padding:16px}
 </style>
@@ -120,12 +127,11 @@
 
   <div id="msg" data-page-node-id="mb02GiM2m6BlGimh8zZ2gX"></div>
 
-  <!-- 从 GitHub 下载数据（用户填自己的账号 / 仓库 / Token） -->
+  <!-- 与 GitHub 同步：仅两个按钮 + 一个状态指示灯 -->
   <div class="ghcard" id="gh-card" data-page-node-id="gLzEJfUI1fPBg3fMOwEvPR">
     <div class="gh-head" data-page-node-id="BRAsM53NPD0pHou5JoD2IL">
-      <span class="t" data-page-node-id="hDCg8RIHloJJGr1PMvZTJ6">☁️ 从 GitHub 下载未读数据</span>
-      <span class="gh-cached" id="gh-cached" data-page-node-id="FlwB4owZCzbo4bMWiPVR6u"></span>
-      <button class="ghbtn" id="gh-toggle" data-page-node-id="BQgJyyDxpK4qkOmNuZaqYi">填写信息</button>
+      <span class="t" data-page-node-id="hDCg8RIHloJJGr1PMvZTJ6">☁️ GitHub 同步</span>
+      <button class="gh-set" id="gh-toggle" title="修改仓库 / Token" data-page-node-id="BQgJyyDxpK4qkOmNuZaqYi">⚙</button>
     </div>
     <div id="gh-form" style="display:none;margin-top:12px" data-page-node-id="lE2rLTAnmorEKt4uFZpaR0">
       <label data-page-node-id="nGuXsdWjnoRLWqDBi8gp9D">GitHub 用户名</label>
@@ -137,14 +143,17 @@
       <!-- 注意：下方 Token 仅本机使用；发布到公开仓库时 export-mobile.js 会自动清空，不会泄露 -->
       <label data-page-node-id="f7atU0CqDDvV2xSqzrYFCE">Token（公开仓库可留空；私有仓库必填）</label>
       <input type="password" id="gh-token" placeholder="ghp_xxxxxxxxxxxx" value="" autocomplete="off" data-page-node-id="LFXdODy49TnLA4eceAZRHp">
-      <button class="ghgo" id="gh-download" data-page-node-id="y66ja37VrpDFCJ2IkVeudP">⬇️ 下载并载入</button>
       <div class="hint" data-page-node-id="6TGziBhXSScg7Ev28FZXQt">下载的是「抖音未读提醒」保存的 <code data-page-node-id="lBQR559YCYVv1xr8Bovwhj">unread.json</code>：你关注的公众号 + 每个公众号的未读视频。<br data-page-node-id="TppVA6gc1izxOjSeZAGYKN">
         公开仓库不用 Token；填了 Token 或仓库为私有时，会改走 GitHub API 读取。<b data-page-node-id="pozTrECQcDfVGgNHvW705N">信息只存在本机浏览器</b>，不会上传到别处。</div>
-      <button class="ghgo" id="gh-upload" style="background:#24292f;margin-top:10px" data-page-node-id="xdu1c6ouNabiq81b2IqCo4">⬆️ 上传改动到 GitHub</button>
-      <div class="hint" data-page-node-id="tFIyG16nh8p2BR0s3BnRCI">把你在手机上改过的<b data-page-node-id="hd69Qb9BMWhUu6RBv6av0e">分类</b>和<b data-page-node-id="I1Gx5sZGgu3LjUUBuKUbiy">已读记录</b>写回 <code data-page-node-id="B1C0nBanMKY2yXeViEl6Ag">unread.json</code>。<br data-page-node-id="VIZT3k1YpiAF1Y7ivOFPZn">
+      <div class="hint" data-page-node-id="tFIyG16nh8p2BR0s3BnRCI">上传把你在手机上改过的<b data-page-node-id="hd69Qb9BMWhUu6RBv6av0e">分类</b>和<b data-page-node-id="I1Gx5sZGgu3LjUUBuKUbiy">已读记录</b>写回 <code data-page-node-id="B1C0nBanMKY2yXeViEl6Ag">unread.json</code>。<br data-page-node-id="VIZT3k1YpiAF1Y7ivOFPZn">
         电脑端下次「一键导入并开始监控」会自动下载并应用：新分类回写到账号，已读视频不再算未读。<br data-page-node-id="Hy0lgorwcXGqHIfTqAcDD7">
         <b data-page-node-id="ZCtjedMyrUGKQ5v502zpTG">上传需要写权限的 Token</b>（公开/私有仓库都需填）。</div>
     </div>
+    <div class="gh-actions">
+      <button class="ghgo" id="gh-download" data-page-node-id="y66ja37VrpDFCJ2IkVeudP">⬇️ 从 GitHub 下载</button>
+      <button class="ghgo up" id="gh-upload" data-page-node-id="xdu1c6ouNabiq81b2IqCo4">⬆️ 上传到 GitHub</button>
+    </div>
+    <div class="gh-ind" id="gh-ind">就绪</div>
   </div>
 
   <!-- 离线（直接用文件打开）时的导入区 -->
@@ -273,6 +282,7 @@ async function loadState(){
       : '<span style="color:#cf1322">未登录，请先在电脑看板登录</span>';
     $('stat-line').textContent = '监控 ' + S.accounts.length + ' 个账号 · 已收录 ' +
       (d.totalVideos || 0) + ' 条视频 · 当前未读 ' + visibleVideos().length + ' 条';
+    $('status-card').style.display = '';
     curCat = ''; curAcct = ''; view = 'accts';
     refreshAll(true);
   } catch(e){
@@ -421,7 +431,7 @@ function renderCrumb(){
   });
 }
 
-/* 二级：列出该分类下的公众号 + 各自未读数（已分类视图下可拖动排序） */
+/* 二级：列出该分类下的公众号 + 各自未读数（已分类视图下可用 ▲▼ 排序） */
 function renderAccounts(){
   var list = accountsInCat();
   $('hdr-cnt').textContent = '公众号 ' + list.length;
@@ -430,14 +440,19 @@ function renderAccounts(){
       (visibleVideos().length ? '该分类没有未读视频' : '没有未读视频了') + '</div>';
     return;
   }
-  var canDrag = !!curCat;   // 仅「已分类」视图下允许拖动排序（全部视图无单一分类上下文）
+  var canDrag = !!curCat;   // 仅「已分类」视图下允许排序（全部视图无单一分类上下文）
   var html = '';
-  if (canDrag && list.length > 1) html += '<div class="drag-tip">⬍ 长按左侧 ⠿ 手柄可上下拖动排序</div>';
   html += list.map(function(a){
+    var mv = canDrag
+      ? '<div class="acct-mv">' +
+          '<button class="mv up" data-acct="' + esc(a.name) + '">▲</button>' +
+          '<button class="mv down" data-acct="' + esc(a.name) + '">▼</button>' +
+        '</div>'
+      : '';
     return '<div class="acct" data-acct="' + esc(a.name) + '">' +
-      (canDrag ? '<div class="acct-drag" data-drag="' + esc(a.name) + '">⠿</div>' : '') +
       '<div class="an">' + esc(a.name) + '</div>' +
       '<select class="acct-cat-sel" data-acct="' + esc(a.name) + '">' + buildCatOptions(a.cat) + '</select>' +
+      mv +
       '<div class="an-n">' + a.n + ' 条未读</div>' +
       '<div class="arw">›</div>' +
     '</div>';
@@ -445,8 +460,8 @@ function renderAccounts(){
   $('cards').innerHTML = html;
   Array.prototype.forEach.call($('cards').querySelectorAll('.acct'), function(el){
     el.onclick = function(e){
-      if (e.target && e.target.closest && e.target.closest('.acct-drag')) return;   // 点手柄不导航
-      if (window.__suppressClickUntil && Date.now() < window.__suppressClickUntil) return;  // 拖完防误触
+      if (e.target && e.target.closest && (e.target.closest('.acct-mv') || e.target.closest('.acct-cat-sel'))) return;  // 点箭头/下拉不导航
+      if (window.__suppressClickUntil && Date.now() < window.__suppressClickUntil) return;
       if (e.target && e.target.tagName === 'SELECT') return;   // 点下拉改分类时，不钻进视频列表
       curAcct = el.getAttribute('data-acct');
       view = 'videos';
@@ -458,69 +473,30 @@ function renderAccounts(){
     sel.onchange = function(e){ e.stopPropagation(); changeAcctCategory(sel.getAttribute('data-acct'), sel.value); };
   });
   if (canDrag){
-    Array.prototype.forEach.call($('cards').querySelectorAll('.acct-drag'), function(h){
-      h.addEventListener('pointerdown', function(e){ startDrag(e, h); });
+    Array.prototype.forEach.call($('cards').querySelectorAll('.acct-mv .mv'), function(b){
+      b.onclick = function(e){
+        e.stopPropagation();
+        moveAccount(b.getAttribute('data-acct'), b.classList.contains('up') ? 'up' : 'down');
+      };
     });
   }
 }
 
-/* ============ 拖动排序（手机端：在「已分类」视图下长按手柄上下拖动公众号） ============ */
-var drag = null;
-function startDrag(e, handle){
+/* ============ 上下箭头排序（手机端：在「已分类」视图下用 ▲▼ 调整公众号顺序） ============ */
+function moveAccount(name, dir){
   if (!curCat) return;
-  e.preventDefault(); e.stopPropagation();
-  var row = handle.parentNode;
-  drag = { el: row, startY: e.clientY, ptr: e.pointerId, prevOrder: (gOrder[curCat] ? gOrder[curCat].slice() : []) };
-  row.classList.add('dragging');
-  try { handle.setPointerCapture(e.pointerId); } catch(_){}
-  handle.addEventListener('pointermove', onDragMove);
-  handle.addEventListener('pointerup', onDragUp);
-  handle.addEventListener('pointercancel', onDragUp);
-}
-function onDragMove(e){
-  if (!drag) return;
-  e.preventDefault();
-  var dy = e.clientY - drag.startY;
-  drag.el.style.transform = 'translateY(' + dy + 'px)';
-  var cards = $('cards');
-  var rows = Array.prototype.slice.call(cards.querySelectorAll('.acct'));
-  var ref = null;
-  for (var i = 0; i < rows.length; i++){
-    if (rows[i] === drag.el) continue;
-    var r = rows[i].getBoundingClientRect();
-    if (e.clientY < r.top + r.height / 2){ ref = rows[i]; break; }
-  }
-  if (ref){
-    cards.insertBefore(drag.el, ref);
-    drag.el.style.transform = 'translateY(0)';   // 落位后归零位移，让行吸附到新槽位
-    drag.startY = e.clientY;                      // 指针继续从该处跟随
-  } else if (drag.el !== rows[rows.length - 1]) {
-    cards.appendChild(drag.el);
-    drag.el.style.transform = 'translateY(0)';
-    drag.startY = e.clientY;
-  }
-}
-function onDragUp(){
-  if (!drag) return;
-  var el = drag.el;
-  var handle = el.querySelector('.acct-drag');
-  if (handle){
-    handle.removeEventListener('pointermove', onDragMove);
-    handle.removeEventListener('pointerup', onDragUp);
-    handle.removeEventListener('pointercancel', onDragUp);
-  }
-  el.classList.remove('dragging');
-  el.style.transform = '';
-  var cards = $('cards');
-  var order = Array.prototype.slice.call(cards.querySelectorAll('.acct')).map(function(n){ return n.getAttribute('data-acct'); });
-  var o = loadOrder();
-  o[curCat] = order; saveOrder(o); gOrder = o;
-  var prev = drag.prevOrder || [];
-  var changed = JSON.stringify(prev) !== JSON.stringify(order);
-  drag = null;
-  window.__suppressClickUntil = Date.now() + 500;   // 防止松手后的 click 误触导航
-  renderAccounts();                                // 干净重渲染，顺序与数据一致
-  if (changed) msg('已保存「' + esc(curCat) + '」分类下 ' + order.length + ' 个公众号的顺序。');
+  var list = accountsInCat().map(function(a){ return a.name; });   // 当前展示顺序（已应用 gOrder）
+  var order = (gOrder[curCat] && gOrder[curCat].length) ? gOrder[curCat].slice() : list.slice();
+  // 以当前列表为准，补齐缺失、剔除多余，保证顺序数组与展示一致
+  list.forEach(function(n){ if (order.indexOf(n) < 0) order.push(n); });
+  order = order.filter(function(n){ return list.indexOf(n) >= 0; });
+  var i = order.indexOf(name);
+  if (i < 0) return;
+  var j = (dir === 'up') ? i - 1 : i + 1;
+  if (j < 0 || j >= order.length) return;
+  var t = order[i]; order[i] = order[j]; order[j] = t;
+  var o = loadOrder(); o[curCat] = order; saveOrder(o); gOrder = o;
+  renderAccounts();
 }
 
 /* 生成分类下拉选项：当前分类选中 + 「➕ 新建分类…」 */
@@ -644,8 +620,7 @@ function applySnapshot(d, label){
   }
   $('import-card').classList.add('hide');
   $('btn-sync').style.display = 'none';
-  $('who').innerHTML = label;
-  $('stat-line').textContent = '账号 ' + S.accounts.length + ' 个 · 未读 ' + visibleVideos().length + ' 条';
+  $('status-card').style.display = 'none';   // 缓存/离线/快照载入时不再展示冗余的缓存状态行
   curCat = ''; curAcct = ''; view = 'accts';
   refreshAll(true); clearMsg();
 }
@@ -681,8 +656,17 @@ function ghFillForm(){
   if (c.token) $('gh-token').value = c.token;
 }
 function ghShowCached(){
+  var el = $('gh-cached');
+  if (!el) return;
   var s = ghGetSnap();
-  $('gh-cached').textContent = s ? ('已缓存 ' + (s.exportedAt || '')) : '';
+  el.textContent = s ? ('已缓存 ' + (s.exportedAt || '')) : '';
+}
+/* GitHub 同步状态指示灯：blue=进行中 / green=成功 / red=失败 */
+function ghSetInd(state, text){
+  var el = $('gh-ind');
+  if (!el) return;
+  el.className = 'gh-ind ' + (state === 'blue' ? 'blue' : state === 'green' ? 'green' : state === 'red' ? 'red' : '');
+  el.textContent = text;
 }
 
 function b64DecodeUtf8(b64){
@@ -732,6 +716,7 @@ async function ghDownload(){
   if (!owner || !repo){ msg('请填写 GitHub 用户名和仓库名。', true); return; }
   var btn = $('gh-download');
   btn.disabled = true; btn.textContent = '正在下载…';
+  ghSetInd('blue', '⬇️ 下载中…');
   msg('正在从 GitHub 下载数据…');
   try {
     var d = await ghFetchJson(owner, repo, branch, token);
@@ -743,10 +728,12 @@ async function ghDownload(){
     msg(cached
       ? '✅ 已从 GitHub 载入 ' + d.videos.length + ' 条未读（已缓存到本机，下次打开自动加载）。'
       : '✅ 已从 GitHub 载入 ' + d.videos.length + ' 条未读（本机空间不足，未能缓存）。');
+    ghSetInd('green', '✅ 下载成功');
   } catch(e){
+    ghSetInd('red', '❌ 下载失败');
     msg('从 GitHub 下载失败：' + esc(e.message) + '<br>请检查用户名 / 仓库名 / 分支是否正确；私有仓库需填 Token。', true);
   }
-  btn.disabled = false; btn.textContent = '⬇️ 下载并载入';
+  btn.disabled = false; btn.textContent = '⬇️ 从 GitHub 下载';
 }
 
 /* 上传到 GitHub：把手机端改过的「分类 + 已读记录」写回 unread.json（走 Contents API，需要 Token） */
@@ -759,6 +746,7 @@ async function ghUpload(){
   if (!token){ msg('上传（写回 GitHub）需要 Token（公开/私有仓库都需要有写权限的 Token）。', true); return; }
   var btn = $('gh-upload');
   btn.disabled = true; btn.textContent = '正在上传…';
+  ghSetInd('blue', '⬆️ 上传中…');
   msg('正在准备数据并上传到 GitHub…');
   try {
     // 构造与 PC 端 buildSnapshot 兼容的快照：未读视频 + 分类 + 已读记录
@@ -806,18 +794,18 @@ async function ghUpload(){
     var orderedCats = Object.keys(gOrder).filter(function(k){ return gOrder[k] && gOrder[k].length; }).length;
     msg('✅ 已上传到 GitHub：分类 ' + cats.length + ' 个、未读 ' + vids.length + ' 条、已读记录 ' +
         readIds.length + ' 条、排序分类 ' + orderedCats + ' 个。电脑端下次「一键导入」会自动下载并应用。');
+    ghSetInd('green', '✅ 上传成功');
   } catch (e) {
+    ghSetInd('red', '❌ 上传失败');
     msg('上传失败：' + esc(e.message) + '<br>请确认 Token 有该仓库写权限、仓库/分支正确。', true);
   }
-  btn.disabled = false; btn.textContent = '⬆️ 上传改动到 GitHub';
+  btn.disabled = false; btn.textContent = '⬆️ 上传到 GitHub';
 }
 
 $('gh-toggle').onclick = function(){
   var f = $('gh-form');
-  var open = (f.style.display === 'none');
-  f.style.display = open ? '' : 'none';
-  $('gh-toggle').textContent = open ? '收起' : '填写信息';
-  if (open) ghFillForm();
+  f.style.display = (f.style.display === 'none') ? '' : 'none';
+  if (f.style.display !== 'none') ghFillForm();
 };
 $('gh-download').onclick = ghDownload;
 $('gh-upload').onclick = ghUpload;
