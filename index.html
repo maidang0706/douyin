@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="未读提醒">
-<meta name="theme-color" content="#fe2c55">
-<link rel="manifest" href='data:application/manifest+json,{"name":"抖音未读提醒","short_name":"未读提醒","start_url":"/mobile","display":"standalone","theme_color":"#fe2c55","background_color":"#f6f7f9"}'>
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23fe2c55'/%3E%3Ctext x='50' y='68' font-size='52' text-anchor='middle'%3E%F0%9F%94%94%3C/text%3E%3C/svg%3E">
+<html lang="zh-CN" data-page-node-id="nPVojv3Fr1YFF0gVBtC6O5">
+<head data-page-node-id="oFrj5leKfFf79RSfQRmPer">
+<meta charset="UTF-8" data-page-node-id="MAYB4Zhg9YaCOfZSlawO2F">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" data-page-node-id="nakNOJOGVGy4dId8cXD7IF">
+<meta name="apple-mobile-web-app-capable" content="yes" data-page-node-id="g1ZqoTIdSKWjrPvmXZFXzb">
+<meta name="apple-mobile-web-app-status-bar-style" content="default" data-page-node-id="pxJ69pEyI7pD2jHNcM1GUR">
+<meta name="apple-mobile-web-app-title" content="未读提醒" data-page-node-id="AvlOSom71wzDj5y9Cg0hPF">
+<meta name="theme-color" content="#fe2c55" data-page-node-id="k2iZYVueBlOgA76A68EyCb">
+<link rel="manifest" href='data:application/manifest+json,{"name":"抖音未读提醒","short_name":"未读提醒","start_url":"/mobile","display":"standalone","theme_color":"#fe2c55","background_color":"#f6f7f9"}' data-page-node-id="1soyvydbcwWPq5Z4hH2dCt">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23fe2c55'/%3E%3Ctext x='50' y='68' font-size='52' text-anchor='middle'%3E%F0%9F%94%94%3C/text%3E%3C/svg%3E" data-page-node-id="dHWifYGERDlTjXB9NhGz0t">
 <title>抖音未读提醒</title>
 <style>
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -100,75 +100,75 @@
   footer{text-align:center;color:#86909c;font-size:12px;padding:16px}
 </style>
 </head>
-<body>
+<body data-page-node-id="Tvcrot0rwLFbNrv3e4ZL9B">
 
-<header>
-  <h1>🔔 抖音未读提醒</h1>
-  <span class="cnt" id="hdr-cnt">…</span>
+<header data-page-node-id="6eKa4runF9QHDMErj6rJm9">
+  <h1 data-page-node-id="KuK6E0EpJUQtPQ6hGjw6yd">🔔 抖音未读提醒</h1>
+  <span class="cnt" id="hdr-cnt" data-page-node-id="pDV28l5FKymph76szpbsaZ">…</span>
 </header>
 
-<div class="wrap">
+<div class="wrap" data-page-node-id="v2Cz7ohtJaMEPvERydM5mF">
 
   <!-- 顶部状态 + 同步 -->
-  <div class="card" id="status-card">
-    <div class="status">
-      <span class="who" id="who">连接中…</span>
-      <button id="btn-sync" style="margin-left:auto">🔄 同步</button>
+  <div class="card" id="status-card" data-page-node-id="W4jjkQjCLq2If6V2t0VMaG">
+    <div class="status" data-page-node-id="CNCnIqS2f4GHKpADNAugqj">
+      <span class="who" id="who" data-page-node-id="VsxEbzcpnXndB9sLQr5tbG">连接中…</span>
+      <button id="btn-sync" style="margin-left:auto" data-page-node-id="HNUlgV8KQMiqnQGQr6Biub">🔄 同步</button>
     </div>
-    <div class="muted" id="stat-line" style="margin-top:8px"></div>
+    <div class="muted" id="stat-line" style="margin-top:8px" data-page-node-id="6gLOucGPqsCyUs2e60NVk5"></div>
   </div>
 
-  <div id="msg"></div>
+  <div id="msg" data-page-node-id="mb02GiM2m6BlGimh8zZ2gX"></div>
 
   <!-- 从 GitHub 下载数据（用户填自己的账号 / 仓库 / Token） -->
-  <div class="ghcard" id="gh-card">
-    <div class="gh-head">
-      <span class="t">☁️ 从 GitHub 下载未读数据</span>
-      <span class="gh-cached" id="gh-cached"></span>
-      <button class="ghbtn" id="gh-toggle">填写信息</button>
+  <div class="ghcard" id="gh-card" data-page-node-id="gLzEJfUI1fPBg3fMOwEvPR">
+    <div class="gh-head" data-page-node-id="BRAsM53NPD0pHou5JoD2IL">
+      <span class="t" data-page-node-id="hDCg8RIHloJJGr1PMvZTJ6">☁️ 从 GitHub 下载未读数据</span>
+      <span class="gh-cached" id="gh-cached" data-page-node-id="FlwB4owZCzbo4bMWiPVR6u"></span>
+      <button class="ghbtn" id="gh-toggle" data-page-node-id="BQgJyyDxpK4qkOmNuZaqYi">填写信息</button>
     </div>
-    <div id="gh-form" style="display:none;margin-top:12px">
-      <label>GitHub 用户名</label>
-      <input type="text" id="gh-owner" placeholder="例如 yourname" value="maidang0706" autocomplete="off">
-      <label>仓库名</label>
-      <input type="text" id="gh-repo" placeholder="例如 douyin-unread" value="douyin" autocomplete="off">
-      <label>分支</label>
-      <input type="text" id="gh-branch" value="main" autocomplete="off">
+    <div id="gh-form" style="display:none;margin-top:12px" data-page-node-id="lE2rLTAnmorEKt4uFZpaR0">
+      <label data-page-node-id="nGuXsdWjnoRLWqDBi8gp9D">GitHub 用户名</label>
+      <input type="text" id="gh-owner" placeholder="例如 yourname" value="maidang0706" autocomplete="off" data-page-node-id="fgyjdrcZsaq6OuF3omCVHs">
+      <label data-page-node-id="6VNSFa5RrmNY1FEnQscBMe">仓库名</label>
+      <input type="text" id="gh-repo" placeholder="例如 douyin-unread" value="douyin" autocomplete="off" data-page-node-id="rykSAgdunO3AtxnOPyvr6q">
+      <label data-page-node-id="TiAObzbZjp4OOnt1V8Bhrx">分支</label>
+      <input type="text" id="gh-branch" value="main" autocomplete="off" data-page-node-id="jzMcLTa8JD0u4FzE8wXo7f">
       <!-- 注意：下方 Token 仅本机使用；发布到公开仓库时 export-mobile.js 会自动清空，不会泄露 -->
-      <label>Token（公开仓库可留空；私有仓库必填）</label>
-      <input type="password" id="gh-token" placeholder="ghp_xxxxxxxxxxxx" value="" autocomplete="off">
-      <button class="ghgo" id="gh-download">⬇️ 下载并载入</button>
-      <div class="hint">下载的是「抖音未读提醒」保存的 <code>unread.json</code>：你关注的公众号 + 每个公众号的未读视频。<br>
-        公开仓库不用 Token；填了 Token 或仓库为私有时，会改走 GitHub API 读取。<b>信息只存在本机浏览器</b>，不会上传到别处。</div>
-      <button class="ghgo" id="gh-upload" style="background:#24292f;margin-top:10px">⬆️ 上传改动到 GitHub</button>
-      <div class="hint">把你在手机上改过的<b>分类</b>和<b>已读记录</b>写回 <code>unread.json</code>。<br>
-        电脑端下次「一键导入并开始监控」会自动下载并应用：新分类回写到账号，已读视频不再算未读。<br>
-        <b>上传需要写权限的 Token</b>（公开/私有仓库都需填）。</div>
+      <label data-page-node-id="f7atU0CqDDvV2xSqzrYFCE">Token（公开仓库可留空；私有仓库必填）</label>
+      <input type="password" id="gh-token" placeholder="ghp_xxxxxxxxxxxx" value="" autocomplete="off" data-page-node-id="LFXdODy49TnLA4eceAZRHp">
+      <button class="ghgo" id="gh-download" data-page-node-id="y66ja37VrpDFCJ2IkVeudP">⬇️ 下载并载入</button>
+      <div class="hint" data-page-node-id="6TGziBhXSScg7Ev28FZXQt">下载的是「抖音未读提醒」保存的 <code data-page-node-id="lBQR559YCYVv1xr8Bovwhj">unread.json</code>：你关注的公众号 + 每个公众号的未读视频。<br data-page-node-id="TppVA6gc1izxOjSeZAGYKN">
+        公开仓库不用 Token；填了 Token 或仓库为私有时，会改走 GitHub API 读取。<b data-page-node-id="pozTrECQcDfVGgNHvW705N">信息只存在本机浏览器</b>，不会上传到别处。</div>
+      <button class="ghgo" id="gh-upload" style="background:#24292f;margin-top:10px" data-page-node-id="xdu1c6ouNabiq81b2IqCo4">⬆️ 上传改动到 GitHub</button>
+      <div class="hint" data-page-node-id="tFIyG16nh8p2BR0s3BnRCI">把你在手机上改过的<b data-page-node-id="hd69Qb9BMWhUu6RBv6av0e">分类</b>和<b data-page-node-id="I1Gx5sZGgu3LjUUBuKUbiy">已读记录</b>写回 <code data-page-node-id="B1C0nBanMKY2yXeViEl6Ag">unread.json</code>。<br data-page-node-id="VIZT3k1YpiAF1Y7ivOFPZn">
+        电脑端下次「一键导入并开始监控」会自动下载并应用：新分类回写到账号，已读视频不再算未读。<br data-page-node-id="Hy0lgorwcXGqHIfTqAcDD7">
+        <b data-page-node-id="ZCtjedMyrUGKQ5v502zpTG">上传需要写权限的 Token</b>（公开/私有仓库都需填）。</div>
     </div>
   </div>
 
   <!-- 离线（直接用文件打开）时的导入区 -->
-  <div class="card hide" id="import-card">
-    <p class="big">离线模式：导入快照</p>
-    <p class="muted" style="margin:0 0 10px">你是直接用文件打开的，无法联网同步。请选择电脑生成的「手机快照.json」。</p>
-    <input type="file" id="file-input" accept=".json,application/json">
-    <div class="note" style="margin-top:12px">
-      想用「登录 + 一键同步」，请在手机浏览器访问电脑地址（连同一个 WiFi）：<br>
-      <b id="host-hint">（先用手机浏览器打开过一次电脑地址，这里就会记住）</b>
+  <div class="card hide" id="import-card" data-page-node-id="Bf4CB23azcfLejUzhDzV8r">
+    <p class="big" data-page-node-id="ylH4a0PiSzEdcHJSR2gbTe">离线模式：导入快照</p>
+    <p class="muted" style="margin:0 0 10px" data-page-node-id="y7iT9HBaAcHfMUksB1SKKe">你是直接用文件打开的，无法联网同步。请选择电脑生成的「手机快照.json」。</p>
+    <input type="file" id="file-input" accept=".json,application/json" data-page-node-id="PeeyAoCVaRcf4T59DHrld8">
+    <div class="note" style="margin-top:12px" data-page-node-id="0CPlJvC7lIME8NPD25ekle">
+      想用「登录 + 一键同步」，请在手机浏览器访问电脑地址（连同一个 WiFi）：<br data-page-node-id="KasLAaOuTwJGZmTs7LQrec">
+      <b id="host-hint" data-page-node-id="CHEyXSarRXwYQXTE376iFb">（先用手机浏览器打开过一次电脑地址，这里就会记住）</b>
     </div>
   </div>
 
   <!-- 分类栏（一级：分类） -->
-  <div class="cats-label">📂 公众号分类</div>
-  <div class="cats" id="cats"></div>
+  <div class="cats-label" data-page-node-id="O9p5rHooqxlPH2flxtIi3r">📂 公众号分类</div>
+  <div class="cats" id="cats" data-page-node-id="GxNU79KqNAQrxCATs9gICE"></div>
 
   <!-- 面包屑：分类 › 公众号 › 视频 -->
-  <div class="crumb" id="crumb"></div>
+  <div class="crumb" id="crumb" data-page-node-id="lFx7G4G1iV1hQEm5sZ2UOx"></div>
 
   <!-- 未读列表（二级：公众号列表；三级：某公众号的未读视频） -->
-  <div id="cards"></div>
+  <div id="cards" data-page-node-id="Q5Vw4EPPXZK3BQAHiJ7hsv"></div>
 
-  <footer id="footer">抖音未读提醒 · 手机版</footer>
+  <footer id="footer" data-page-node-id="ZRcoDYLmaCIwRi3PosKFKS">抖音未读提醒 · 手机版</footer>
 </div>
 
 <script>
@@ -821,10 +821,23 @@ $('gh-toggle').onclick = function(){
 };
 $('gh-download').onclick = ghDownload;
 $('gh-upload').onclick = ghUpload;
+/* 边输边存：GitHub 用户名/仓库/分支/Token 一改动就写进本机，下次打开自动填回，不必每次重输 */
+['gh-owner','gh-repo','gh-branch','gh-token'].forEach(function(id){
+  var el = $(id);
+  if (el) el.addEventListener('input', function(){
+    var c = ghGetCfg();
+    c.owner = $('gh-owner').value.trim();
+    c.repo = $('gh-repo').value.trim();
+    c.branch = $('gh-branch').value.trim();
+    c.token = $('gh-token').value.trim();
+    ghSetCfg(c);
+  });
+});
 
 /* ============ 启动 ============ */
 (function init(){
   ghShowCached();          // 展示本机是否已缓存过 GitHub 数据
+  ghFillForm();            // 打开页面即把本机保存的 GitHub 用户名/仓库/分支/Token 填回表单（含 Token，免每次手输）
   // 导出成单文件时，数据会内嵌成 window.SNAPSHOT，打开即可用，无需选文件
   if (window.SNAPSHOT){
     applySnapshot(window.SNAPSHOT, '未读清单 · 导出于 ' + esc(window.SNAPSHOT.exportedAt || ''));
