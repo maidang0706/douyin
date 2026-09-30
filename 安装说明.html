@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>抖音关注助手 · 手机免电脑版 安装说明</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#f2f3f5;color:#1d2129;font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;padding:0 0 40px}
+  .wrap{max-width:640px;margin:0 auto;padding:16px}
+  h1{font-size:20px;margin:8px 0 4px}
+  .sub{color:#86909c;font-size:13px;margin-bottom:16px}
+  .card{background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .card h2{font-size:16px;margin:0 0 10px;display:flex;align-items:center;gap:6px}
+  .num{display:inline-flex;width:22px;height:22px;border-radius:50%;background:#fe2c55;color:#fff;font-size:13px;align-items:center;justify-content:center;flex:0 0 auto}
+  ol{margin:6px 0;padding-left:22px}
+  li{margin:6px 0}
+  code{background:#f2f3f5;padding:2px 6px;border-radius:4px;font-size:13px;word-break:break-all}
+  .warn{background:#fff7e8;border-left:3px solid #ff7d00;padding:10px 12px;border-radius:6px;font-size:13.5px;margin:10px 0;color:#8c5b00}
+  .ok{background:#e8ffea;border-left:3px solid #00b42a;padding:10px 12px;border-radius:6px;font-size:13.5px;margin:10px 0;color:#0a6c1f}
+  .info{background:#e8f3ff;border-left:3px solid #165dff;padding:10px 12px;border-radius:6px;font-size:13.5px;margin:10px 0;color:#0e42a0}
+  textarea{width:100%;height:120px;font-size:12px;padding:10px;border:1px solid #e5e6eb;border-radius:8px;font-family:monospace;resize:vertical}
+  .btn{display:block;width:100%;padding:13px;border-radius:10px;border:0;background:#fe2c55;color:#fff;font-size:16px;font-weight:600;margin:10px 0}
+  .btn.gray{background:#f2f3f5;color:#4e5969;font-weight:400}
+  .btn:active{opacity:.8}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+  th,td{border-bottom:1px solid #f0f0f0;padding:8px 4px;text-align:left}
+  th{color:#86909c;font-weight:500}
+  .tag{display:inline-block;background:#fe2c55;color:#fff;font-size:11px;padding:1px 6px;border-radius:4px;margin-left:6px;vertical-align:middle}
+  .tag.g{background:#00b42a}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>抖音关注助手 · 手机免电脑版</h1>
+  <div class="sub">在手机浏览器里直接抓未读、批量取关、搜索关注 —— 全程不需要电脑</div>
+
+  <div class="card">
+    <h2>为什么以前必须要电脑</h2>
+    <p style="margin:6px 0">网页有一条死规矩：<b>一个网页不能操控另一个网站的页面</b>。抖音的关注按钮在 <code>douyin.com</code> 里，你的工具页在别处，中间隔着浏览器的安全沙箱，谁也碰不到谁。</p>
+    <p style="margin:6px 0">所以之前的做法是：让电脑上那台已登录的浏览器去点按钮，你的手机只当遥控器。</p>
+    <div class="ok"><b>现在的做法</b>：让脚本<b>直接跑在手机浏览器的抖音页面里</b>。这样它和抖音「同源」，请求自带你的登录态，点按钮也是真人在真浏览器里点 —— 抖音风控从根上就不存在了，电脑也就不需要了。</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">1</span> 准备：手机浏览器打开抖音网页版</h2>
+    <ol>
+      <li>用手机浏览器（Chrome / Edge / 三星 / 夸克等均可）访问 <code>www.douyin.com</code></li>
+      <li><b>必须开启「桌面版网站」</b>：浏览器菜单里勾选（Chrome 是右上角 ⋮ → 桌面版网站）<span class="tag">关键</span></li>
+      <li>在页面上<b>登录抖音</b>（手机号验证码 / 密码 / 扫码均可）</li>
+      <li>确认地址栏显示的是 <code>www.douyin.com</code>，而不是跳到下载 App 的页面</li>
+    </ol>
+    <div class="warn">如果一直被强制跳「下载抖音 App」，说明桌面模式没生效，回到第 2 步重新勾选。</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">2</span> 安装脚本（两种方式，选一个）</h2>
+
+    <p style="margin:8px 0 4px"><b>方式 A · 书签小工具</b><span class="tag g">推荐 · 零安装</span></p>
+    <ol>
+      <li>先复制下面这段代码</li>
+      <li>给浏览器<b>新建一个书签</b>，名字随便起（比如「抖音助手」），把网址栏里原来的地址删掉，<b>粘贴这段内容</b>并保存</li>
+      <li>以后在抖音页面上点一下这个书签，右下角就会出现 🎯 按钮</li>
+    </ol>
+    <textarea id="bm" readonly>javascript:(function(){if(!/douyin\.com/.test(location.href)){alert('请先在手机浏览器打开 www.douyin.com（桌面版）再点这个书签');return;}if(window.__DY_HELPER_LOADED__){alert('助手已经启动了，看右下角 🎯 按钮');return;}var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/gh/maidang0706/douyin@main/%E6%8A%96%E9%9F%B3%E6%89%8B%E6%9C%BA%E5%8A%A9%E6%89%8B.user.js?t='+Date.now();s.onload=function(){alert('抖音关注助手已启动，看右下角 🎯 按钮');};s.onerror=function(){alert('加载失败，请检查网络后重试');};document.body.appendChild(s);})();</textarea>
+    <button class="btn" onclick="copyBm()">📋 复制书签代码</button>
+    <div class="info">脚本本体托管在 jsDelivr CDN，<b>以后我更新了脚本，你这个书签不用改</b>，自动就是新版。</div>
+    <div class="warn">个别手机浏览器的书签不允许执行代码（点书签没反应）。遇到这种情况改用方式 B。</div>
+
+    <p style="margin:16px 0 4px"><b>方式 B · 用户脚本管理器</b></p>
+    <ol>
+      <li>装一个支持扩展的浏览器：<b>Kiwi Browser</b> 或 <b>Firefox（安卓版）</b></li>
+      <li>在里面装 <b>Tampermonkey</b>（Kiwi 可从 Chrome 应用商店装）或 <b>Violentmonkey</b>（Firefox 附加组件）</li>
+      <li>打开下面这个地址，点「安装」即可</li>
+    </ol>
+    <code>https://raw.githubusercontent.com/maidang0706/douyin/main/抖音手机助手.user.js</code>
+    <button class="btn gray" onclick="copyRaw()">📋 复制安装地址</button>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">3</span> 怎么用</h2>
+    <table>
+      <tr><th>按钮</th><th>作用</th></tr>
+      <tr><td>📥 刷新关注列表</td><td>把你抖音关注的全部账号读进来（一直翻到底，不会被 400 条截断）</td></tr>
+      <tr><td>🔍 抓最新未读</td><td>逐个账号抓最新视频，实时显示进度「已抓 N/M」，自动防风控间隔</td></tr>
+      <tr><td>📺 看未读列表</td><td>在手机上直接看未读，点标题跳转、点「已读」标记</td></tr>
+      <tr><td>🚫 批量取关</td><td>按分类整批取关，或单个账号 ✕ 取关（真的取消抖音关注）</td></tr>
+      <tr><td>🔎 搜索关注</td><td>搜昵称 → 结果里一键关注</td></tr>
+      <tr><td>☁️ 推到 GitHub</td><td>把数据推到你的仓库，原来的手机端 HTML 点「🔄 同步」就能看到</td></tr>
+      <tr><td>⚙️ 设置</td><td>填 GitHub 用户名 / 仓库 / Token（填一次永久记住）</td></tr>
+    </table>
+    <div class="warn">首次使用顺序：<b>⚙️ 设置填 Token</b> → <b>📥 刷新关注列表</b> → <b>🔍 抓最新未读</b> → <b>☁️ 推到 GitHub</b>。</div>
+  </div>
+
+  <div class="card">
+    <h2>常见问题</h2>
+    <p style="margin:6px 0"><b>Q：抓未读要多久？</b><br>约 400 个账号、每个间隔 1~2.5 秒，大约 <b>10~15 分钟</b>。期间把手机屏幕保持亮着、别切走这个标签页。</p>
+    <p style="margin:6px 0"><b>Q：显示失败很多？</b><br>多半是抖音风控冷却中，过 20~30 分钟再抓一次。脚本本身遇错会自动退避等待，不会硬闯。</p>
+    <p style="margin:6px 0"><b>Q：取关失败？</b><br>取关是用「隐藏 iframe 打开对方主页 → 点真实关注按钮」实现的。若抖音禁止了 iframe 嵌入，会提示超时 —— 这种情况下请在抖音网页版里手动搜索该账号取关。</p>
+    <p style="margin:6px 0"><b>Q：数据存在哪？</b><br>存在你手机浏览器的 localStorage 里（抖音域名下）。推到 GitHub 后，原来的手机端 HTML 也能看到同一份数据。</p>
+    <p style="margin:6px 0"><b>Q：换手机/清缓存会丢吗？</b><br>会。所以抓完记得点「☁️ 推到 GitHub」；在新手机上先点「🔄 同步」或从 GitHub 拉一次即可。</p>
+  </div>
+
+  <div class="card">
+    <h2>和原来那套的关系</h2>
+    <p style="margin:6px 0">电脑上那套服务<b>可以彻底不用了</b>。本脚本导出的数据格式和原来完全一致（<code>unread.json</code>），原来的手机端 HTML 照常能读。</p>
+    <p style="margin:6px 0">如果你还想留着电脑端自动跑，也不冲突 —— 两边推的是同一份 <code>unread.json</code>，谁后推谁为准。</p>
+  </div>
+</div>
+
+<script>
+function copyBm(){
+  var t=document.getElementById('bm');
+  t.select(); t.setSelectionRange(0,999999);
+  var ok=false;
+  try{ ok=document.execCommand('copy'); }catch(e){}
+  if(!ok && navigator.clipboard){ navigator.clipboard.writeText(t.value).then(function(){alert('已复制');}); return; }
+  alert(ok?'已复制，去新建书签粘贴即可':'复制失败，请手动长按选中上面的代码复制');
+}
+function copyRaw(){
+  var u='https://raw.githubusercontent.com/maidang0706/douyin/main/抖音手机助手.user.js';
+  if(navigator.clipboard){ navigator.clipboard.writeText(u).then(function(){alert('已复制');}); }
+  else alert(u);
+}
+</script>
+</body>
+</html>
