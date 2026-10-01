@@ -65,8 +65,15 @@
     <textarea id="bm" readonly>javascript:(function(){if(!/douyin\.com/.test(location.href)){alert('请先在手机浏览器打开 www.douyin.com（桌面版）再点这个书签');return;}if(window.__DY_HELPER_LOADED__){alert('助手已经启动了，看右下角 🎯 按钮');return;}var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/gh/maidang0706/douyin@main/%E6%8A%96%E9%9F%B3%E6%89%8B%E6%9C%BA%E5%8A%A9%E6%89%8B.user.js?t='+Date.now();s.onload=function(){alert('抖音关注助手已启动，看右下角 🎯 按钮');};s.onerror=function(){alert('加载失败，请检查网络后重试');};document.body.appendChild(s);})();</textarea>
     <button class="btn" onclick="copyBm()">📋 复制书签代码</button>
     <div class="info">脚本本体托管在 jsDelivr CDN，<b>以后我更新了脚本，你这个书签不用改</b>，自动就是新版。</div>
-    <div class="warn"><b>华为 / 荣耀自带浏览器等会提示「无效网址」、存不了</b>（它们的书签只接受 <code>http/https</code> 开头的地址）。先试下面的曲线救国；还不行就直接用 <b>方式 B（Via 浏览器）</b>，完全不用书签。</div>
-    <div class="info"><b>曲线救国（不一定成功，30 秒试一下）</b>：先在华为浏览器里收藏<b>任意普通网页</b>（比如 <code>https://www.douyin.com</code>）→ 进「书签/收藏」<b>长按</b>它 → <b>编辑</b> → 把网址整段删掉、<b>粘贴上面的代码</b> → 保存。部分版本编辑时不校验协议就能存下来；如果还是提示无效，别折腾了，走方式 B。</div>
+    <div class="warn"><b>提示「无效网址」是正常的</b>：书签新建时那一行只接受 <code>http://</code> / <code>https://</code> 开头的地址，<code>javascript:</code> 开头的代码会被当成非法网址拦掉。<b>华为 / 荣耀自带浏览器还会连「编辑已有书签」也一起校验</b>，所以这条路在它上面基本是死的。</div>
+    <div class="info"><b>通用绕过法（不装任何东西，先花 1 分钟试）</b> —— 关键：<b>不要点「新建书签」</b>，改成「先存一个普通书签，再改写它」：
+      <ol>
+        <li>打开 <code>https://www.douyin.com</code> → 菜单 → <b>收藏 / 添加书签</b>（存成普通 https 书签）</li>
+        <li>书签管理（我的 → 书签）里 <b>长按</b>这条 → <b>编辑</b></li>
+        <li>网址栏整段<b>删除</b>（删干净，别留残留字符）→ <b>粘贴上面的 javascript 代码</b> → 保存</li>
+      </ol>
+      Chrome / Edge / Kiwi 上的成功率接近 100%；<b>华为自带浏览器大概率还是提示无效</b>。
+      如果提示无效 —— 别再试了，这是浏览器本身的设计限制，直接走<b>方式 B（Via 浏览器）</b>或<b>方式 D（换 Chrome）</b>。</div>
 
     <p style="margin:16px 0 4px"><b>方式 B · Via 浏览器原生脚本</b><span class="tag g">华为/荣耀自带浏览器推荐 · 免书签</span></p>
     <ol>
@@ -88,6 +95,15 @@
     </ol>
     <code>https://raw.githubusercontent.com/maidang0706/douyin/main/抖音手机助手.user.js</code>
     <button class="btn gray" onclick="copyRaw()">📋 复制安装地址</button>
+
+    <p style="margin:16px 0 4px"><b>方式 D · 不想多装 App？换 Chrome / Edge，用「先存后改」绕过</b><span class="tag g">30 秒搞定</span></p>
+    <ol>
+      <li>装一个 Chromium 内核浏览器（<b>Chrome</b>、<b>Edge</b>、<b>华为手机上也能装的「VIA / X / 夸克 / QQ浏览器」</b>任选一个）</li>
+      <li>打开 <code>https://www.douyin.com</code> → 右上角 ⋮ → <b>书签（加星标）</b>，先存成普通书签</li>
+      <li>⋮ → <b>书签</b> → 找到刚才那条，<b>编辑</b>（ pencil 图标）→ 删掉网址 → <b>粘贴 javascript 代码</b> → 保存</li>
+      <li>回到 douyin.com 点一下这个书签，右下角出现 🎯</li>
+    </ol>
+    <div class="ok"><b>成功率最高的一条路。</b>Chromium 系只在「新建」时校验协议，<b>编辑已有书签不做校验</b>，所以这一步基本必成。如果你实在不想装 Via，就用这个。</div>
   </div>
 
   <div class="card">
@@ -108,9 +124,12 @@
   <div class="card">
     <h2>常见问题</h2>
     <p style="margin:6px 0"><b>Q：保存书签时提示「无效网址」，存不了？</b><br>说明这个浏览器的书签<b>只接受 http/https 开头的地址</b>，<code>javascript:</code> 被当成非法网址拦掉了（华为/荣耀自带浏览器就是这样）。<br>
-    两条路：<br>
-    ① 先收藏一个普通网页，再进书签里<b>编辑</b>、把网址改成代码保存（部分版本可以）；<br>
-    ② 直接用 <b>方式 B（Via 浏览器）</b> —— 它原生支持脚本，<b>根本不需要书签</b>，装一次永久生效。</p>
+    这不是你操作错了，是浏览器<b>只认 http/https 的书签地址</b>。<b>华为 / 荣耀自带浏览器连「编辑已有书签」也校验</b>，所以这条路在它身上走不通。<br>
+    <b>顺带一提</b>：如果你只是想存个普通网页链接（比如这个说明页 <code>https://maidang0706.github.io/douyin/安装说明.html</code>），那是正常的 https 地址，直接存就行，不会报无效。<br>
+    想跑脚本，从这三条里挑一条：<br>
+    ① 换 Chromium 内核浏览器（Chrome / Edge / QQ浏览器等）→ <b>先存普通书签再编辑改代码</b>，成功率近 100%（<b>方式 D</b>）；<br>
+    ② 装 Via 浏览器 → 原生脚本，<b>不需要书签</b>，一步到位（<b>方式 B</b>，最省事）；<br>
+    ③ Kiwi + 油猴（<b>方式 C</b>）。</p>
     <p style="margin:6px 0"><b>Q：抓未读要多久？</b><br>约 400 个账号、每个间隔 1~2.5 秒，大约 <b>10~15 分钟</b>。期间把手机屏幕保持亮着、别切走这个标签页。</p>
     <p style="margin:6px 0"><b>Q：显示失败很多？</b><br>多半是抖音风控冷却中，过 20~30 分钟再抓一次。脚本本身遇错会自动退避等待，不会硬闯。</p>
     <p style="margin:6px 0"><b>Q：取关失败 / 提示验证码？</b><br>取关是用「隐藏 iframe 打开对方主页 → 点真实关注按钮」实现的。抖音对<i>新建的页面上下文</i>比较敏感，你当天抓取频繁时会弹「验证码中间页」导致失败。<br>
