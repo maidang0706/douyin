@@ -33,13 +33,14 @@
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6 },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12 },
       selfSecUid: '',
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
       readIds: [],       // 已读视频 awemeId
       lastExport: 0,
-      lastScanAt: 0
+      lastScanAt: 0,
+      scanJob: null      // 断点：{sig, startIdx, cursor, ts}，中断/被杀后下次从这里续
     };
     try {
       var raw = localStorage.getItem(LS);
@@ -47,9 +48,14 @@
       var o = JSON.parse(raw);
       for (var k in def) if (!(k in o)) o[k] = def[k];
       if (!o.cfg) o.cfg = def.cfg;
-      /* 一次性提速迁移：老用户的 scanConc 还是旧默认值（3），自动提到 6，只迁这一回。
-         实测抖音 www.douyin.com 是 HTTP/2，同域并发可以放心开到 8~12（不受 HTTP/1.1 的 6 连接限制） */
-      if (!o._spdMig) { o.cfg.scanConc = 6; o._spdMig = 1; }
+      if (!o.cfg.scanConc) o.cfg.scanConc = 6;
+      if (!o.cfg.scanBudget) o.cfg.scanBudget = 12;
+      /* ★ 一次性迁移（2026-10-02）：老版本 scanConc 被上一轮迁移统一提到 6，
+         结果一上来 6 并发猛打 → 失败率飙升 + 超时卡死。改回「上限 6，但开局只用 3」。
+         断点（scanJob）也顺手清掉，免得带着半程状态起跑。 */
+      if (!o._spdMig2) {
+        o.cfg.scanConc = 6; o.cfg.scanBudget = 12; o.scanJob = null; o._spdMig2 = 1;
+      }
       return o;
     } catch (e) { return def; }
   }
@@ -129,21 +135,63 @@
     for (var k in params) parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
     return parts.join('&');
   }
-  // 同源请求：不带任何签名（实测真实浏览器内请求无需 X-Bogus），cookie 由浏览器自动附加
-  // 抖音偶尔会返回空 body（风控抖动），所以解析失败时自动重试一次
-  function dyGet(base, params, _retry) {
-    return fetch(base + '?' + q(params), {
+  /* 同源请求：不带任何签名（实测真实浏览器内请求无需 X-Bogus），cookie 由浏览器自动附加。
+     ★ 2026-10-02 加固（原来会「失败多 + 卡死」的两个根因都在这里）：
+       1) 之前 fetch 没有超时 —— 抖音偶尔不回响应头、连接挂着不动，fetch 就永远 pending，
+          对应的那个并发槽位再也不回来，整轮就「停在那儿不动了」。现在每个请求都有【硬超时】，
+          到点直接掐断算失败，绝不干等。
+       2) 之前一律「解析失败就 sleep 900ms 重试一次」，把风控页也当普通抖动，白等还打得更凶。
+          现在先判断是否风控页（是就直接上报风险、整轮降速冷却），其余才按 0.5s/1.1s 退避重试。 */
+  function httpErr(msg, code, isTimeout, isRisk) {
+    var e = new Error(msg);
+    e.code = code || 0; e.timeout = !!isTimeout; e.risk = !!isRisk;
+    return e;
+  }
+  function parseJsonSafe(t) {
+    try { return JSON.parse(t); } catch (e) { }
+    var s = String(t == null ? '' : t).slice(0, 300);
+    if (/verify|captcha|seccheck|滑块|验证码|请登录|login|risk/i.test(s)) {
+      throw httpErr('抖音返回了风控/验证页，请求被拦', 0, false, true);
+    }
+    throw httpErr('返回内容不是 JSON（可能被风控）：' + s.slice(0, 40));
+  }
+  function rawFetch(url, timeoutMs, parentSignal) {
+    var ctrl = null;
+    if (typeof AbortController === 'function') { try { ctrl = new AbortController(); } catch (e) { } }
+    if (ctrl && parentSignal && parentSignal.addEventListener) {
+      try { parentSignal.addEventListener('abort', function () { try { ctrl.abort(); } catch (e) { } }); } catch (e) { }
+    }
+    var timer = setTimeout(function () { if (ctrl) { try { ctrl.abort(); } catch (e) { } } }, timeoutMs);
+    var cleanup = function () { clearTimeout(timer); };
+    return fetch(url, {
       credentials: 'include',
-      headers: { 'Accept': 'application/json, text/plain, */*', 'Referer': 'https://www.douyin.com/' }
+      headers: { 'Accept': 'application/json, text/plain, */*', 'Referer': 'https://www.douyin.com/' },
+      signal: ctrl ? ctrl.signal : parentSignal
     }).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var risk = (r.status === 403 || r.status === 429 || r.status === 461 || r.status === 419);
+      if (!r.ok) throw httpErr('HTTP ' + r.status, r.status, false, risk);
       return r.text();
-    }).then(function (t) {
-      try { return JSON.parse(t); } catch (e) {
-        if (_retry) throw new Error('返回内容不是 JSON（可能被风控）：' + String(t).slice(0, 60));
-        return sleep(900).then(function () { return dyGet(base, params, 1); });
-      }
-    });
+    }).catch(function (e) {
+      if (e && (e.risk || e.timeout)) throw e;
+      if (e && /abort/i.test(e.name || '')) throw httpErr('请求超时（' + Math.round(timeoutMs / 1000) + 's 未响应）', 0, true);
+      throw e;
+    }).then(function (v) { cleanup(); return v; }, function (e) { cleanup(); throw e; });
+  }
+  // opt: { tries, backoff, timeout, signal }  —— signal 用于「停止抓取」时一次性掐掉所有在途请求
+  function dyGet(base, params, opt) {
+    opt = opt || {};
+    var tries = (opt.tries == null) ? 2 : opt.tries;      // 除首次外额外重试次数
+    var back = opt.backoff || [500, 1100, 2200];
+    var timeout = opt.timeout || 8000;
+    function once(n) {
+      return rawFetch(base + '?' + q(params), timeout, opt.signal).then(parseJsonSafe).catch(function (e) {
+        if (e && (e.risk || e.timeout)) throw e;           // 风控 / 超时：不硬扛重试，交给上层退避降速
+        if (n >= tries) throw e;
+        var w = back[Math.min(n, back.length - 1)] + Math.floor(Math.random() * 240);
+        return sleep(w).then(function () { return once(n + 1); });
+      });
+    }
+    return once(0);
   }
 
   /* 拿到「我自己」的 sec_uid：先本地页面找，再拉 /user/self 的 HTML */
@@ -205,9 +253,9 @@
     });
   }
 
-  /* 抓单个账号的最新作品 */
-  function fetchPosts(secUid) {
-    return dyGet(API_POST, commonParams({ sec_user_id: secUid, count: '20', max_cursor: '0' }))
+  /* 抓单个账号的最新作品（opt.signal 可传入用于整体停止） */
+  function fetchPosts(secUid, opt) {
+    return dyGet(API_POST, commonParams({ sec_user_id: secUid, count: '20', max_cursor: '0' }), opt)
       .then(function (j) {
         var list = j.aweme_list || [];
         return list.map(function (a) {
@@ -441,126 +489,229 @@
   }
 
   /* ----------------------------- 全量抓未读 ----------------------------- */
-  var scanning = false;
+  /* ★ 2026-10-02 重写。老版本（滑动窗口 + 固定并发 6）的两个死穴：
+       ① 失败多：一上来就 6 个并发猛打，抖音限流 → 403 / 返回验证页 → 失败率飙升，
+          失败又要重试，越重试越慢越容易被盯，形成恶性循环。
+       ② 会卡死：fetch 没有超时，抖音只要有一次「连接挂着不回响应头」，那个并发槽位
+          就永远还不回来，整轮停在半路、进度条也不动 —— 表现就是「卡死」。
+     新版按四个目标重做：
+       A. 绝不卡死：请求硬超时 + 单账号 45s 兜底 + 整轮看门狗（默认 12 分钟自动收尾）
+          + 随时可按「🛑 停止」+ 每个并发槽位必定归还。
+       B. 尽量不失败：开局只开 3 并发；自适应并发（AIMD）——连成 5 个才 +1（最多到设置的上限），
+          连挂 2 个立刻砍半并冷却 1.8~3s；识别到风控信号直接降到 1 并发、冷却 5s 慢慢来。
+          失败不干等，主流程跑完再用同样的并发窗口补抓一遍。
+       C. 断点续抓：进度落盘，中途切 App / 熄屏 / Via 被杀 / 网络断，下次从断点继续，不从头来。
+       D. 更快：错峰 0~60ms、失败退避缩短、落盘去抖 2.5s、进度上报 120ms。 */
+  var scanning = false, scanCtrl = null, stopFlag = false, stopped = false, lastScanFailed = [];
+
+  function accountSig() {
+    return S.accounts.length + '|' + (S.accounts[0] ? S.accounts[0].secUserId : '') +
+      '|' + (S.accounts[S.accounts.length - 1] ? S.accounts[S.accounts.length - 1].secUserId : '');
+  }
+  /* 给 Promise 套一个硬性上限：到点就 reject，保证不会永远挂着 */
+  function hardLimit(pr, ms) {
+    var settled = false;
+    return new Promise(function (resolve, reject) {
+      var t = setTimeout(function () {
+        if (settled) return; settled = true;
+        reject({ message: '该账号超过 ' + Math.round(ms / 1000) + 's 没回应，已跳过（不会卡住整轮）', timeout: true });
+      }, ms);
+      pr.then(function (v) { if (settled) return; settled = true; clearTimeout(t); resolve(v); },
+              function (e) { if (settled) return; settled = true; clearTimeout(t); reject(e); });
+    });
+  }
+
   function scanUnread(statusCb, limitOverride) {
     if (scanning) return Promise.resolve({ ok: false, error: '已有抓取在进行中' });
     if (!S.accounts.length) return Promise.resolve({ ok: false, error: '先点「📥 刷新我的关注列表」' });
-    scanning = true;
-    // 分批：设置里填了「每次抓前 N 个」就只跑这么多（0 / 留空 = 全部）。留空时就是全量抓取。
+    scanning = true; stopFlag = false; stopped = false; lastScanFailed = [];
+    try { scanCtrl = new AbortController(); } catch (e) { scanCtrl = null; }
+
+    /* 断点：只有「关注列表没变 + 上次确实没抓完」才续跑 */
+    var j = S.scanJob || null;
+    var resumeFrom = 0;
+    if (j && j.sig === accountSig() && j.cursor > 0 && j.cursor < S.accounts.length) resumeFrom = j.cursor;
+
     var lim = parseInt(limitOverride != null ? limitOverride : S.cfg.scanLimit, 10);
     if (!lim || lim <= 0 || lim > S.accounts.length) lim = S.accounts.length;
-    var plan = S.accounts.slice(0, lim);
-    /* ★ 提速关键 1：浏览器里可以【并发】发请求（同源带 cookie、有设备指纹，抖音放行），
-       不必像电脑端那样一个一个串行等。注意抖音 www.douyin.com 是 HTTP/2，
-       同域下是单连接多路复用（不是 HTTP/1.1 的 6 连接上限），所以并发可以放心开到 8~12。 */
-    var conc = Math.max(1, Math.min(12, parseInt(S.cfg.scanConc, 10) || 6));
-    var newCount = 0, errors = 0, okCount = 0, consecFail = 0;
-    var failed = [];
-    var known = {};
+    var plan = S.accounts.slice(resumeFrom, Math.min(S.accounts.length, resumeFrom + lim));
+    if (!plan.length) { scanning = false; return Promise.resolve({ ok: false, error: '没有待抓的账号' }); }
+    S.scanJob = { sig: accountSig(), startIdx: resumeFrom, cursor: 0, ts: Date.now() };
+
+    var newCount = 0, errors = 0, okCount = 0;
+    var consecOk = 0, consecFail = 0, coolUntil = 0, riskHits = 0, riskStreak = 0, bailout = false, dispatched = 0;
+    // 上限取设置里的值（默认 6），但【开局只用 3 个】——先探路，顺了再往上加
+    var maxConc = Math.max(1, Math.min(10, parseInt(S.cfg.scanConc, 10) || 6));
+    var conc = Math.min(3, maxConc);
+    var known = {}, readMap = {}, failed = [];
     for (var i = 0; i < S.videos.length; i++) known[S.videos[i].awemeId] = 1;
-    var readMap = {};
     for (var r = 0; r < S.readIds.length; r++) readMap[S.readIds[r]] = 1;
 
     function absorb(list) {
-      var added = 0;
       for (var k = 0; k < list.length; k++) {
         var v = list[k];
-        if (!known[v.awemeId] && !readMap[v.awemeId]) { S.videos.push(v); known[v.awemeId] = 1; newCount++; added++; }
+        if (!known[v.awemeId] && !readMap[v.awemeId]) { S.videos.push(v); known[v.awemeId] = 1; newCount++; }
       }
-      return added;
     }
-    /* 进度上报节流：并发时 report 会调用得非常密集，每一次都要改 innerHTML，
-       抢主线程反而拖慢抓取。150ms 一次足够看，结束前强制补一次。 */
-    var lastReportAt = 0;
+    // AIMD：顺了才加速，卡了立刻减速
+    function onGood() {
+      consecOk++; consecFail = 0;
+      if (consecOk >= 5 && conc < maxConc) { conc++; consecOk = 0; }
+    }
+    function onBad(e) {
+      errors++; consecOk = 0; consecFail++;
+      if (e && e.risk) {                                   // 风控：降到底 + 长冷却，宁慢也别被封
+        riskHits++; riskStreak++; consecFail = 0;
+        conc = 1;
+        coolUntil = Date.now() + 4000 + Math.random() * 2000;
+        // 连续 3 次被风控 = 抖音正在盯你：别再硬磨了，直接收工，剩下的记进断点下次补
+        if (riskStreak >= 3) { bailout = true; stopped = true; toast('抖音连续拒绝 3 次（风控中），本轮先收尾；没抓完的账号下次会从断点补。', 6000); }
+      } else if (consecFail >= 2) {                        // 普通连挂：砍半 + 短冷却
+        consecFail = 0; riskStreak = 0;
+        conc = Math.max(1, Math.floor(conc / 2));
+        coolUntil = Date.now() + 1800 + Math.random() * 1200;
+      }
+    }
+    function shouldStop() { return stopFlag || bailout; }
+
+    var lastReportAt = 0, startedAt = Date.now(), lastSnap = null;
+    function snap(name) {
+      var now = Date.now();
+      var elapsed = now - startedAt;
+      var cur = Math.min(okCount + errors, plan.length);
+      return {
+        cur: cur, total: plan.length, name: name || (lastSnap ? lastSnap.name : ''), newCount: newCount, errors: errors,
+        conc: conc, maxConc: maxConc, risk: riskHits, stopped: stopped,
+        elapsed: elapsed,
+        eta: (plan.length - cur) > 0 ? Math.round((plan.length - cur) * (cur ? elapsed / cur : 0)) : 0,
+        cool: coolUntil > now
+      };
+    }
     function report(name, force) {
       var now = Date.now();
-      if (!force && now - lastReportAt < 150) return;
+      if (!force && now - lastReportAt < 120) return;
       lastReportAt = now;
-      if (statusCb) statusCb({ cur: okCount + errors, total: plan.length, name: name || '', newCount: newCount, errors: errors, conc: conc });
+      lastSnap = snap(name);
+      if (statusCb) statusCb(lastSnap);
     }
+    // 兜底心跳：就算某个回调被吞了（页面节流/异常），进度条也会自动往前走
+    var beatTimer = setInterval(function () { if (shouldStop()) return; report(); }, 1500);
+    function stopBeat() { clearInterval(beatTimer); }
 
     keepAwake(true);   // 抓的过程中别让手机熄屏（熄屏 = 页面被冻结 = 抓取停住）
 
-    /* 本地落盘去抖：save() 是同步 JSON.stringify 整个 state（可能上万条视频），
-       每 10 个存一次会在几百个账号时反复卡主线程。改成「最后一次写完就算」。 */
     var saveTimer = null;
     function scheduleSave() {
       if (saveTimer) clearTimeout(saveTimer);
-      saveTimer = setTimeout(function () { saveTimer = null; save(); }, 3000);
+      saveTimer = setTimeout(function () { saveTimer = null; save(); }, 2500);
     }
 
-    // 发一个账号的请求；失败只记下来立刻丢进补抓队列，绝不在这儿长等（长等是最大 TIME KILLER）
-    var cursor = 0;
-    function worker() {
-      if (cursor >= plan.length) return Promise.resolve();
-      var idx = cursor++;
-      var acc = plan[idx];
-      // 错峰：出发前随机等 0~110ms，让并发请求呈「漏斗」而不是「齐射」，更像真人翻列表
-      return sleep(Math.floor(Math.random() * 110)).then(function () {
-        return fetchPosts(acc.secUserId).then(function (list) {
-          consecFail = 0; okCount++;
-          acc.lastCount = list.length; acc.lastError = '';
-          absorb(list);
-          scheduleSave();                // 去抖：全程只在停手后写 1~2 次，不再反复卡主线程
-          report(acc.name);
-        }).catch(function (e) {
-          errors++; consecFail++;
-          acc.lastError = e.message;
-          failed.push(acc);
-        });
+    // 跑一个账号；无论成功失败都会 resolve，绝不把并发槽位漏掉（漏槽位 = 卡死的元凶）
+    function runItem(acc) {
+      var waitMs = Math.max(0, coolUntil - Date.now()) + Math.floor(Math.random() * 60); // 错峰 + 冷却
+      dispatched++;
+      return sleep(waitMs).then(function () {
+        if (shouldStop()) return;
+        return hardLimit(fetchPosts(acc.secUserId, { signal: scanCtrl ? scanCtrl.signal : null })
+          .then(function (list) {
+            if (shouldStop()) return;
+            okCount++; acc.lastError = ''; acc.lastCount = list.length;
+            absorb(list); onGood(); scheduleSave(); report(acc.name);
+          }), 45000).catch(function (e) {
+            if (shouldStop()) return;
+            acc.lastError = (e && e.message) || '抓取失败';
+            onBad(e);
+            failed.push(acc);
+            report(acc.name);
+          });
       });
     }
 
-    /* ★ 提速关键 2：用【滑动窗口】而不是「一批一批」。
-       批次方案每批结束都要空等 300~800ms，而且批尾那几个槽位是白等的（尾巴占 1/conc 的时间）；
-       滑动窗口是「谁回来谁立刻补位」，任何时候都有 conc 个请求在飞，等于把批间隔摊薄掉。 */
-    function pump() {
+    // 滑动窗口：谁回来谁补位；冷却期间由 runItem 自己等，槽位不空转
+    function pump(items) {
       return new Promise(function (resolve) {
-        var active = 0, done = 0;
-        function loop() {
-          while (active < conc && cursor < plan.length) {
+        var cursor = 0, active = 0, done = 0, ended = false;
+        function finish() { if (ended) return; ended = true; resolve(); }
+        function tick() {
+          if (shouldStop()) { finish(); return; }
+          while (active < conc && cursor < items.length) {
             active++;
-            worker().then(function () {
+            runItem(items[cursor]).then(function () {
               active--; done++;
-              if (done >= plan.length) { resolve(); return; }
-              loop();                      // 立刻补位，绝不空等
+              if (shouldStop() || done >= items.length) finish(); else tick();
             });
           }
-          if (done >= plan.length) resolve();
+          if (shouldStop() || done >= items.length) finish();
         }
-        loop();
+        tick();
       });
     }
 
-    // 主流程跑完后，把刚才失败的账号补抓一遍（仍用滑动窗口，间隔缩到 0.4~0.9 秒：既快又不漏数据）
-    function retryFailed() {
-      var queue = failed.slice();
-      failed = [];
-      if (!queue.length) return Promise.resolve(0);
-      function one() {
-        if (!queue.length) return Promise.resolve(0);
-        var acc = queue.shift();
-        return sleep(Math.floor(Math.random() * 400)).then(function () {
-          return fetchPosts(acc.secUserId).then(function (list) {
-            okCount++; acc.lastError = ''; absorb(list); scheduleSave();
-          }).catch(function () { /* 补完还失败就保持错误计数 */ });
-        }).then(one);
+    // 看门狗：整轮超时自动收尾，剩下的账号留给断点续跑，绝不停在「半死不活」
+    var wdTimer = setInterval(function () {
+      if (stopFlag) return;
+      var budgetMs = (parseInt(S.cfg.scanBudget, 10) || 12) * 60000;
+      if (Date.now() - startedAt > budgetMs) {
+        stopped = true; stopFlag = true;
+        if (scanCtrl) { try { scanCtrl.abort(); } catch (e) { } }
+        toast('本轮超过 ' + Math.round(budgetMs / 60000) + ' 分钟，已自动收尾；没抓到的账号下次会从断点继续。', 6000);
       }
-      return one();
+    }, 4000);
+
+    function cleanup() {
+      clearInterval(wdTimer); stopBeat();
+      scanning = false; keepAwake(false); stopFlag = false;
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      // 没跑完 → 进度写进断点（下次从这里续）；跑完了 → 断点标记「已全部完成」
+      // 中途收尾时，断点回退到「失败的那几个」之前 —— 下次续跑会先把它们补上，一个都不漏
+      S.scanJob = stopped
+        ? { sig: accountSig(), startIdx: resumeFrom, cursor: resumeFrom + Math.max(0, Math.min(dispatched, plan.length) - failed.length), ts: Date.now() }
+        : { sig: accountSig(), startIdx: 0, cursor: S.accounts.length, ts: Date.now() };
+      save();
+    }
+    function resultObj() {
+      if (failed.length) {
+        var seenN = {};
+        lastScanFailed = [];
+        for (var fn = 0; fn < failed.length; fn++) {
+          var nm = failed[fn].name || failed[fn].secUserId;
+          if (!seenN[nm]) { seenN[nm] = 1; lastScanFailed.push(nm); }
+        }
+      }
+      // 还差点没抓到：总账号数 − 断点之前就已成功的 − 本轮成功的
+      var left = Math.max(0, S.accounts.length - resumeFrom - okCount);
+      return {
+        ok: true, newCount: newCount, errors: errors, okCount: okCount, scanned: plan.length,
+        conc: conc, risk: riskHits, stopped: stopped, resumeAt: resumeFrom, left: left,
+        names: lastScanFailed.slice(0, 20)
+      };
     }
 
-    return pump().then(retryFailed).then(function () {
-      scanning = false;
-      keepAwake(false);
-      S.lastScanAt = Date.now();
-      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-      save();
-      report('', true);
-      return { ok: true, newCount: newCount, errors: errors, okCount: okCount, scanned: plan.length, conc: conc, failedAgain: failed.length };
+    return pump(plan).then(function () {
+      // 主流程跑完，把失败的账号用同样的并发窗口补抓一遍（比原来「一个一个串行」快得多）
+      // 注意：如果是被风控逼停的，就不补抓了——再打也是同样的拒绝，留到下次断点重试
+      if (failed.length && !shouldStop()) {
+        var retryList = failed.slice(); failed = [];
+        return pump(retryList).then(function () {
+          cleanup(); report('', true);
+          return resultObj();
+        });
+      }
+      cleanup(); report('', true);
+      return resultObj();
     }).catch(function (e) {
-      scanning = false; keepAwake(false); save();
-      return { ok: false, error: e.message };
+      clearInterval(wdTimer); stopBeat(); scanning = false; keepAwake(false); stopFlag = false;
+      try { save(); } catch (err) { }
+      return { ok: false, error: (e && e.message) || '未知错误' };
     });
+  }
+
+  /* 抓取中随时可以喊停：掐掉所有在途请求，让当前批次立刻收尾，未跑完的记进断点 */
+  function stopScan() {
+    if (!scanning) return;
+    stopped = true; stopFlag = true;
+    if (scanCtrl) { try { scanCtrl.abort(); } catch (e) { } }
+    toast('正在停止…', 3000);
   }
 
   /* ----------------------------- 面板 UI ----------------------------- */
@@ -650,12 +801,16 @@
     h += '<label class="dyh-lb">Token</label><input id="dyh-token" class="dyh-input" type="password" value="' + esc(S.cfg.token) + '" placeholder="ghp_xxx">';
     h += '<label class="dyh-lb">每次抓前几个账号（留空 = 全部 ' + S.accounts.length + ' 个）</label>' +
       '<input id="dyh-limit" class="dyh-input" type="number" min="0" inputmode="numeric" value="' + (S.cfg.scanLimit || 0) + '">';
-    h += '<label class="dyh-lb">同时抓几个账号（并发数 1~12，默认 6）</label>' +
-      '<input id="dyh-conc" class="dyh-input" type="number" min="1" max="12" inputmode="numeric" value="' + (S.cfg.scanConc || 6) + '">';
-    h += '<div class="dyh-tip"><b>留空 = 全部抓</b>。全部 ' + S.accounts.length + ' 个账号一轮：' +
-      '并发 <b>6</b> 约 <b>2~4 分钟</b>（默认，最快最稳）、并发 <b>3</b> 约 4~6 分钟、并发 <b>1</b> 最慢但最不容易被风控。<br>' +
-      '想再快就填 <b>9~10</b>；<b>进度条上「失败」突然变多</b>说明打太猛了，往回降到 3~4。</div>';
+    h += '<label class="dyh-lb">并发【上限】1~10（默认 6）</label>' +
+      '<input id="dyh-conc" class="dyh-input" type="number" min="1" max="10" inputmode="numeric" value="' + (S.cfg.scanConc || 6) + '">';
+    h += '<label class="dyh-lb">整轮最长几分钟（超时自动收尾，0 = 不限制）</label>' +
+      '<input id="dyh-budget" class="dyh-input" type="number" min="0" max="60" inputmode="numeric" value="' + (S.cfg.scanBudget || 12) + '">';
+    h += '<div class="dyh-tip"><b>不用改设置也能跑得又快又稳</b>：开局只打 <b>3</b> 个，抖音不拒绝就慢慢加到上限；' +
+      '一旦连续失败或看到风控提示，立刻砍半并冷却，绝不会把整轮搞崩。<br>' +
+      '想更快 → 上限填 <b>8~10</b>；还是失败多 → 上限填 <b>3~4</b>（慢一点但几乎不失败）。<br>' +
+      '全部 ' + S.accounts.length + ' 个账号：上限 6 大约 2~5 分钟，上限 3 大约 4~8 分钟。</div>';
     h += '<button class="dyh-btn primary" data-act="save-settings">💾 保存</button>';
+    h += '<button class="dyh-btn gray" data-act="clear-job">🧹 清掉抓取断点（下次全部重抓）</button>';
     h += '<button class="dyh-btn" data-act="export">📤 导出数据到手机本地（下载 json）</button>';
     h += '<button class="dyh-btn gray" data-act="clear">🗑 清空本地数据</button>';
     h += '<div class="dyh-tip">已读记录 ' + S.readIds.length + ' 条 · 视频库 ' + S.videos.length + ' 条</div>';
@@ -773,30 +928,74 @@
       return;
     }
 
-    if (act === 'scan') {
-      setBody('<div class="dyh-back" data-act="home">← 返回</div><div class="dyh-prog" id="dyh-prog">准备抓取…</div>' +
-        '<div class="dyh-tip">本轮计划抓 <b>' + (S.cfg.scanLimit > 0 ? '前 ' + S.cfg.scanLimit + ' 个' : '全部 ' + S.accounts.length + ' 个') +
-        '</b>。抓的时候<b>屏幕会一直亮着、别切走 App</b>：切到别的 App 抓取会<b>暂停</b>（不是后台继续），' +
-        '切回来会自动接着跑；如果Via被系统杀后台，这轮会重来（已抓到的视频不会丢）。<br>' +
-        '<b>同时并发 ' + ((S.cfg.scanConc || 6)) + ' 个账号一起抓</b>（浏览器内并发请求，抖音放行；用的是滑动窗口，' +
-        '谁抓完谁立刻补位，不空等）。失败的账号主流程跑完会自动补抓一遍，不会漏。</div>');
+    if (act === 'scan' || act === 'scan-resume') {
+      var resumeIdx = 0;
+      var jobGot = S.scanJob || null;
+      if (act === 'scan' && jobGot && jobGot.sig === accountSig() && jobGot.cursor > 0 && jobGot.cursor < S.accounts.length) {
+        resumeIdx = jobGot.cursor;
+      }
+      var scopeTxt = (S.cfg.scanLimit > 0 ? '前 ' + S.cfg.scanLimit + ' 个' : '全部 ' + S.accounts.length + ' 个');
+      if (act === 'scan' && resumeIdx > 0) {
+        // 上次没抓完 → 先问：继续剩下的，还是从头再来？
+        setBody('<div class="dyh-back" data-act="home">← 返回</div>' +
+          '<div class="dyh-card"><div class="dyh-row"><b>上次抓到</b><span>' + resumeIdx + ' / ' + S.accounts.length + '</span></div>' +
+          '<div class="dyh-row"><b>未完成</b><span>' + (S.accounts.length - resumeIdx) + ' 个</span></div></div>' +
+          '<div class="dyh-tip">断点还在。可以直接把剩下的 <b>' + (S.accounts.length - resumeIdx) + ' 个</b>补完' +
+          '（已抓过的不会重复请求，最快、也最不容易被抖音盯上），或者重头抓一遍。</div>' +
+          '<button class="dyh-btn primary" data-act="scan-resume">▶ 从断点继续（补剩下 ' + (S.accounts.length - resumeIdx) + ' 个）</button>' +
+          '<button class="dyh-btn gray" data-act="scan-fresh">↻ 重头全部抓一遍</button>' +
+          '<button class="dyh-btn gray" data-act="clear-job">🧹 清掉这个断点（下次直接全抓）</button>');
+        return;
+      }
+      if (act === 'scan-fresh') { S.scanJob = null; save(); }
+      setBody('<div class="dyh-back" data-act="home">← 返回</div>' +
+        '<div class="dyh-prog" id="dyh-prog">准备抓取…</div>' +
+        '<div class="dyh-tip">本轮计划抓 <b>' + scopeTxt + '</b>（' +
+        (resumeIdx > 0 ? '从断点 <b>' + resumeIdx + '</b> 之后的 ' + (S.accounts.length - resumeIdx) + ' 个开始' : '全部') + '）。<br>' +
+        '· 开局同时抓 <b>3</b> 个，跑得顺会自动加（最多 ' + (S.cfg.scanConc || 6) + ' 个），发现抖音不理人就自动降速冷却；<br>' +
+        '· 每个请求都有超时保护，单个账号最多卡 45 秒，整轮最长 ' + (S.cfg.scanBudget || 12) + ' 分钟，<b>不会卡死</b>；<br>' +
+        '· 抓到一半切走 App / 熄屏 / 断网也没事：下次打开<b>自动从断点接着抓</b>；<br>' +
+        '· 想马上收工就按「🛑 停止」，没抓完的会记进断点。</div>');
       scanUnread(function (s) {
         var p = document.getElementById('dyh-prog');
-        if (p) p.innerHTML = '已抓 <b>' + s.cur + '/' + s.total + '</b>　新增 <b>' + s.newCount + '</b>' +
-          (s.errors ? '　失败 ' + s.errors : '') + '<br>当前：' + esc(s.name);
+        if (!p) return;
+        var mm = function (ms) { var x = Math.max(0, Math.round(ms / 1000)); return Math.floor(x / 60) + '分' + (x % 60) + '秒'; };
+        var bar = Math.round(s.cur / Math.max(1, s.total) * 20);
+        p.innerHTML = '已抓 <b>' + s.cur + '/' + s.total + '</b>　新增 <b>' + s.newCount + '</b>' +
+          (s.errors ? '　失败 ' + s.errors : '') + '<br>' +
+          '<span style="color:#c9cdd4">' + '█'.repeat(bar) + '<span style="opacity:.35">' + '░'.repeat(20 - bar) + '</span></span><br>' +
+          '并发 <b>' + s.conc + '/' + s.maxConc + '</b>　已用 ' + mm(s.elapsed) +
+          (s.eta ? '　预计还要 ' + mm(s.eta) : '') + '<br>' +
+          (s.cool ? '<b style="color:#ff7d00">⚠ 抖音在冷却，正在降速（不顺就慢，但不会失败）</b><br>' : '') +
+          (s.risk ? '风控命中 ' + s.risk + ' 次　' : '') + '当前：' + esc(s.name) +
+          '<div style="margin-top:10px"><button class="dyh-btn gray" data-act="stop-scan">🛑 停止（已抓到的都保留）</button></div>';
       }).then(function (r) {
-        if (!r.ok) { setBody('<div class="dyh-back" data-act="home">← 返回</div><div class="dyh-tip">' + esc(r.error) + '</div>'); return; }
-        S.lastScanAt = Date.now(); save();
-        setBody('<div class="dyh-back" data-act="home">← 返回</div>' +
+        var p = document.getElementById('dyh-prog');
+        if (p && p.parentNode) p.parentNode.style.display = 'none';
+        if (!r.ok) { setBody('<div class="dyh-back" data-act="home">← 返回</div><div class="dyh-tip" style="color:#f53f3f">' + esc(r.error) + '</div>'); return; }
+        S.lastScanAt = Date.now();
+        var h = '<div class="dyh-back" data-act="home">← 返回</div>' +
           '<div class="dyh-card"><div class="dyh-row"><b>新增未读</b><span class="dyh-hl">' + r.newCount + ' 条</span></div>' +
-          '<div class="dyh-row"><b>成功账号</b><span>' + r.okCount + '</span></div>' +
-          '<div class="dyh-row"><b>失败账号</b><span>' + r.errors + '</span></div></div>' +
-          '<button class="dyh-btn primary" data-act="push">☁️ 推到 GitHub</button>' +
+          '<div class="dyh-row"><b>处理账号</b><span>' + r.scanned + (r.resumeAt ? '（断点续 ' + r.resumeAt + '）' : '') + '</span></div>' +
+          '<div class="dyh-row"><b>成功 / 失败</b><span>' + r.okCount + ' / ' + r.errors + '</span></div>' +
+          (r.risk ? '<div class="dyh-row"><b>风控命中</b><span>' + r.risk + ' 次</span></div>' : '');
+        if (r.left) h += '<div class="dyh-row"><b>还剩没抓到</b><span>' + r.left + ' 个（已记入断点）</span></div>';
+        h += '</div>';
+        if (r.names && r.names.length) {
+          h += '<div class="dyh-tip">这次没抓成的（下次会自动补）：' + esc(r.names.join('、')) +
+            (r.names.length >= 20 ? ' 等' : '') + '</div>';
+        }
+        h += '<button class="dyh-btn primary" data-act="push">☁️ 推到 GitHub</button>' +
           '<button class="dyh-btn" data-act="list">📺 看未读列表</button>' +
-          (r.errors > r.okCount ? '<div class="dyh-tip" style="color:#f53f3f">失败数偏多，多半是抖音风控冷却中，过 20~30 分钟再抓一次即可。</div>' : ''));
+          '<button class="dyh-btn gray" data-act="scan">🔁 再抓一轮（自动补剩下的）</button>';
+        if (r.left) h += '<div class="dyh-tip">还有 ' + r.left + ' 个没抓到，点上面「再抓一轮」即可从断点补完，不会重复请求。</div>';
+        setBody(h);
       });
       return;
     }
+
+    if (act === 'stop-scan') { stopScan(); return; }
+    if (act === 'clear-job') { S.scanJob = null; save(); toast('断点已清除，下次会全部重抓'); open('home'); return; }
 
     if (act === 'push') {
       setBody('<div class="dyh-back" data-act="home">← 返回</div><div class="dyh-prog" id="dyh-prog">正在推送到 GitHub…</div>');
@@ -933,8 +1132,10 @@
       var lim = parseInt((document.getElementById('dyh-limit') || {}).value, 10);
       S.cfg.scanLimit = (lim > 0) ? lim : 0;
       var cc = parseInt((document.getElementById('dyh-conc') || {}).value, 10);
-      S.cfg.scanConc = (cc >= 1 && cc <= 12) ? cc : 6;
-      save(); toast('已保存' + (S.cfg.scanLimit ? '（每轮抓前 ' + S.cfg.scanLimit + ' 个）' : '（全部抓取，并发 ' + S.cfg.scanConc + '）')); open('home');
+      S.cfg.scanConc = (cc >= 1 && cc <= 10) ? cc : (S.cfg.scanConc || 6);
+      var bg = parseInt((document.getElementById('dyh-budget') || {}).value, 10);
+      S.cfg.scanBudget = (!bg || bg < 0) ? 0 : Math.min(60, bg);
+      save(); toast('已保存' + (S.cfg.scanLimit ? '（每轮抓前 ' + S.cfg.scanLimit + ' 个）' : '（全部抓取，并发上限 ' + S.cfg.scanConc + '）')); open('home');
       return;
     }
 
@@ -978,6 +1179,7 @@
     setFollow: setFollow,
     buildPayload: buildPayload,
     scan: scanUnread,
+    stop: stopScan,
     push: function () { return ghPush('unread.json', JSON.stringify(buildPayload()), '手机端更新 ' + fmtTime(Date.now())); },
     openPanel: function () { open('home'); }
   };
