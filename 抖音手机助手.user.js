@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      1.4.0
+// @version      1.5.0
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -30,7 +30,7 @@
   var LS = 'dy_phone_helper_v1';
   /* ★ 版本号：每次改动本脚本都要 +1（1.1 → 1.2 → 1.3 …），并同步改 @version。
      面板标题后面会显示 v1.2，用户一眼就能确认手机上跑的是不是最新版。 */
-  var VER = '1.4';
+  var VER = '1.5';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -542,8 +542,11 @@
     if (!plan.length) { scanning = false; return Promise.resolve({ ok: false, error: '没有待抓的账号' }); }
     S.scanJob = { sig: accountSig(), startIdx: resumeFrom, cursor: 0, ts: Date.now() };
 
-    var newCount = 0, errors = 0, okCount = 0;
+    /* errors  = 失败「尝试」次数（给 AIMD 调速用，同一账号重试/补抓会累加）
+       failAcc = 最终没抓到的「账号」数（去重，同一账号只算一次）—— 界面上显示的失败就是这个 */
+    var newCount = 0, errors = 0, okCount = 0, failAcc = 0;
     var consecOk = 0, consecFail = 0, coolUntil = 0, riskHits = 0, riskStreak = 0, bailout = false, dispatched = 0;
+    var retries = 0, stalled = false;
     // 上限取设置里的值（默认 6），但【开局只用 3 个】——先探路，顺了再往上加
     var maxConc = Math.max(1, Math.min(10, parseInt(S.cfg.scanConc, 10) || 6));
     var conc = Math.min(3, maxConc);
@@ -557,23 +560,35 @@
         if (!known[v.awemeId] && !readMap[v.awemeId]) { S.videos.push(v); known[v.awemeId] = 1; newCount++; }
       }
     }
-    // AIMD：顺了才加速，卡了立刻减速
+    // AIMD：顺了才加速，卡了立刻减速（降到 1 之后恢复得更快：连成 4 个就 +1）
     function onGood() {
-      consecOk++; consecFail = 0;
-      if (consecOk >= 5 && conc < maxConc) { conc++; consecOk = 0; }
+      consecOk++; consecFail = 0; riskStreak = 0;
+      var need = conc <= 1 ? 4 : 6;
+      if (consecOk >= need && conc < maxConc) { conc++; consecOk = 0; }
     }
-    function onBad(e) {
+    function onBad(e, acc) {
       errors++; consecOk = 0; consecFail++;
-      if (e && e.risk) {                                   // 风控：降到底 + 长冷却，宁慢也别被封
+      if (acc && !acc._failCounted) { acc._failCounted = 1; failAcc++; }   // 同一账号只记一次
+      if (e && e.risk) {                                   // 风控：降到 1 并发 + 长冷却，慢慢来（不再轻易收工）
         riskHits++; riskStreak++; consecFail = 0;
         conc = 1;
-        coolUntil = Date.now() + 4000 + Math.random() * 2000;
-        // 连续 3 次被风控 = 抖音正在盯你：别再硬磨了，直接收工，剩下的记进断点下次补
-        if (riskStreak >= 3) { bailout = true; stopped = true; toast('抖音连续拒绝 3 次（风控中），本轮先收尾；没抓完的账号下次会从断点补。', 6000); }
-      } else if (consecFail >= 2) {                        // 普通连挂：砍半 + 短冷却
+        coolUntil = Date.now() + 4000 + Math.random() * 3500;
+        if (riskStreak === 4) toast('抖音开始限流了，已自动降到最慢速度继续抓（不会失败，只是慢一点）。', 5000);
+        /* 什么时候才真的收工？不能「开头挂几个就整轮放弃」——那会把偶发抖动误判成全局风控。
+           这里用成功率判断：至少试过 12 个账号，且成功率不到 25%，才认定抖音在全局限流，收工。
+           剩下的进断点，下次自动补（硬磨下去只会被盯得更死）。 */
+        if (riskStreak >= 6) {
+          var done2 = okCount + failAcc;
+          var hitRate = done2 ? okCount / done2 : 0;
+          if (done2 >= 12 && hitRate < 0.25) {
+            bailout = true; stopped = true;
+            toast('抖音正在全局限流（成功率过低），本轮先收尾；没抓完的账号下次会从断点补。', 6000);
+          }
+        }
+      } else if (consecFail >= 3) {                        // 普通连挂：砍半 + 短冷却
         consecFail = 0; riskStreak = 0;
         conc = Math.max(1, Math.floor(conc / 2));
-        coolUntil = Date.now() + 1800 + Math.random() * 1200;
+        coolUntil = Date.now() + 1500 + Math.random() * 1200;
       }
     }
     function shouldStop() { return stopFlag || bailout; }
@@ -582,10 +597,13 @@
     function snap(name) {
       var now = Date.now();
       var elapsed = now - startedAt;
-      var cur = Math.min(okCount + errors, plan.length);
+      // 进度按「已出结果的账号数」算（成功 + 去重后的失败），补抓时不会回退，也不会冲过 100%
+      var cur = Math.min(okCount + failAcc, plan.length);
       return {
-        cur: cur, total: plan.length, name: name || (lastSnap ? lastSnap.name : ''), newCount: newCount, errors: errors,
-        conc: conc, maxConc: maxConc, risk: riskHits, stopped: stopped,
+        cur: cur, total: plan.length, name: name || (lastSnap ? lastSnap.name : ''), newCount: newCount,
+        errors: failAcc, okCount: okCount, attempts: errors,
+        conc: conc, maxConc: maxConc, risk: riskHits, stopped: stopped, retries: retries, stalled: stalled,
+        pct: Math.min(100, Math.round(cur / Math.max(1, plan.length) * 100)),
         elapsed: elapsed,
         eta: (plan.length - cur) > 0 ? Math.round((plan.length - cur) * (cur ? elapsed / cur : 0)) : 0,
         cool: coolUntil > now
@@ -610,38 +628,62 @@
       saveTimer = setTimeout(function () { saveTimer = null; save(); }, 2500);
     }
 
-    // 跑一个账号；无论成功失败都会 resolve，绝不把并发槽位漏掉（漏槽位 = 卡死的元凶）
+    /* 跑一个账号：内置「就地重试」——抖一下就成功的不算失败，只有连试 3 次都不成才记失败。
+       无论成败都一定 resolve，绝不漏掉并发槽位（漏槽位 = 卡死的元凶）。 */
+    var MAX_TRY = 2;   // 首次之外再额外试 2 次
     function runItem(acc) {
-      var waitMs = Math.max(0, coolUntil - Date.now()) + Math.floor(Math.random() * 60); // 错峰 + 冷却
+      // 错峰：别让几个请求在同一毫秒齐射出去（齐射最像机器人，容易被盯）
+      var waitMs = Math.max(0, coolUntil - Date.now()) + 80 + Math.floor(Math.random() * 220);
       dispatched++;
-      return sleep(waitMs).then(function () {
-        if (shouldStop()) return;
-        return hardLimit(fetchPosts(acc.secUserId, { signal: scanCtrl ? scanCtrl.signal : null })
+      return sleep(waitMs).then(function () { return step(0); });
+
+      function step(n) {
+        if (shouldStop()) return Promise.resolve();
+        return hardLimit(fetchPosts(acc.secUserId, { signal: scanCtrl ? scanCtrl.signal : null }), 45000)
           .then(function (list) {
             if (shouldStop()) return;
             okCount++; acc.lastError = ''; acc.lastCount = list.length;
             absorb(list); onGood(); scheduleSave(); report(acc.name);
-          }), 45000).catch(function (e) {
+          })
+          .catch(function (e) {
             if (shouldStop()) return;
-            acc.lastError = (e && e.message) || '抓取失败';
-            onBad(e);
-            failed.push(acc);
-            report(acc.name);
+            if (n >= MAX_TRY) {                     // 3 次都没成，才算真失败（进补抓队列）
+              acc.lastError = (e && e.message) || '抓取失败';
+              onBad(e, acc); failed.push(acc); report(acc.name); return;
+            }
+            retries++;                              // 就地重试：退避后立刻再来，不用等最后统一补
+            var w = (e && e.risk) ? (2500 + Math.random() * 2500)   // 风控：等久一点
+                                  : (700 + n * 900 + Math.random() * 900);
+            report(acc.name + '（第 ' + (n + 1) + ' 次重试）');
+            return sleep(w).then(function () { return step(n + 1); });
           });
-      });
+      }
     }
 
-    // 滑动窗口：谁回来谁补位；冷却期间由 runItem 自己等，槽位不空转
+    /* 滑动窗口：谁回来谁补位；冷却期间由 runItem 自己等，槽位不空转。
+       ★ cursor++ 必须在取元素的同一行 —— 少了它，所有并发会重复请求同一个账号
+         （这是之前「失败一大片」的真正原因，别再改回去）。 */
     function pump(items) {
       return new Promise(function (resolve) {
-        var cursor = 0, active = 0, done = 0, ended = false;
-        function finish() { if (ended) return; ended = true; resolve(); }
+        var cursor = 0, active = 0, done = 0, ended = false, lastProgress = Date.now();
+        function finish() { if (ended) return; ended = true; clearInterval(stallTimer); resolve(); }
+        // 停滞看门狗：90 秒一点进展都没有 = 真卡住了，强制收尾（剩下的进断点，绝不无限等）
+        var stallTimer = setInterval(function () {
+          if (ended) return;
+          if (Date.now() - lastProgress > 90000) {
+            stalled = true; stopped = true; stopFlag = true;
+            if (scanCtrl) { try { scanCtrl.abort(); } catch (e) { } }
+            toast('超过 90 秒没有任何进展，已强制收尾；没抓完的已记进断点，下次自动补。', 6000);
+            finish();
+          }
+        }, 5000);
         function tick() {
           if (shouldStop()) { finish(); return; }
           while (active < conc && cursor < items.length) {
+            var acc = items[cursor++];
             active++;
-            runItem(items[cursor]).then(function () {
-              active--; done++;
+            runItem(acc).then(function () {
+              active--; done++; lastProgress = Date.now();
               if (shouldStop() || done >= items.length) finish(); else tick();
             });
           }
@@ -685,22 +727,25 @@
       // 还差点没抓到：总账号数 − 断点之前就已成功的 − 本轮成功的
       var left = Math.max(0, S.accounts.length - resumeFrom - okCount);
       return {
-        ok: true, newCount: newCount, errors: errors, okCount: okCount, scanned: plan.length,
+        ok: true, newCount: newCount, errors: failAcc, okCount: okCount, scanned: plan.length,
         conc: conc, risk: riskHits, stopped: stopped, resumeAt: resumeFrom, left: left,
+        retries: retries, attempts: errors, stalled: stalled,
+        pct: Math.min(100, Math.round(okCount / Math.max(1, plan.length) * 100)),
         names: lastScanFailed.slice(0, 20)
       };
     }
 
-    return pump(plan).then(function () {
-      // 主流程跑完，把失败的账号用同样的并发窗口补抓一遍（比原来「一个一个串行」快得多）
-      // 注意：如果是被风控逼停的，就不补抓了——再打也是同样的拒绝，留到下次断点重试
-      if (failed.length && !shouldStop()) {
-        var retryList = failed.slice(); failed = [];
-        return pump(retryList).then(function () {
-          cleanup(); report('', true);
-          return resultObj();
-        });
-      }
+    /* 一轮跑完，把「3 次都没成」的账号再补最多 2 轮（每轮之间整体歇一下，别连着猛打）。
+       配合就地重试，绝大多数抖动在这一步就被消化掉了 —— 最终剩下的失败会非常少。 */
+    function runPass(list, pass) {
+      return pump(list).then(function () {
+        if (shouldStop() || !failed.length || pass >= 2) return;
+        var again = failed.slice(); failed = [];
+        return sleep(2500 + pass * 4000).then(function () { return runPass(again, pass + 1); });
+      });
+    }
+
+    return runPass(plan, 0).then(function () {
       cleanup(); report('', true);
       return resultObj();
     }).catch(function (e) {
@@ -873,7 +918,26 @@
       '.dyh-input{width:100%;box-sizing:border-box;padding:15px 16px;border:1px solid #e5e6eb;border-radius:8px;' +
       'font-size:20px;margin:4px 0 13px}' +
       '.dyh-lb{font-size:18px;color:#86909c;display:block;margin-top:11px}' +
-      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:16px 18px;margin:12px 0;font-size:19px;line-height:1.75}';
+      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:16px 18px;margin:12px 0;font-size:19px;line-height:1.75}' +
+      /* ---- 抓取进度条 ---- */
+      '.dyh-pwrap{background:#fff;border:1px solid #e5e6eb;border-radius:12px;padding:16px 18px;margin:12px 0}' +
+      '.dyh-ptop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}' +
+      '.dyh-pnum{font-size:36px;font-weight:700;color:#fe2c55;line-height:1.1}' +
+      '.dyh-pnum small{font-size:20px;font-weight:600}' +
+      '.dyh-pcnt{font-size:19px;color:#4e5969;margin-left:auto}' +
+      '.dyh-pbar{position:relative;height:22px;background:#eceef1;border-radius:11px;overflow:hidden;margin:12px 0 10px}' +
+      '.dyh-pin{height:100%;width:0;border-radius:11px;transition:width .35s ease;' +
+      'background:linear-gradient(90deg,#fe2c55,#ff7d00);' +
+      'background-size:28px 28px;' +
+      'animation:dyhmove .9s linear infinite}' +
+      '.dyh-pin.cool{background:linear-gradient(90deg,#ff9a2e,#ffc60a)}' +
+      '.dyh-pin.risk{background:linear-gradient(90deg,#f53f3f,#ff7d00)}' +
+      '.dyh-pin.done{animation:none;background:linear-gradient(90deg,#00b42a,#0fc95d)}' +
+      '@keyframes dyhmove{from{background-position:0 0}to{background-position:28px 0}}' +
+      '.dyh-pmeta{font-size:17px;color:#86909c;line-height:1.65}' +
+      '.dyh-pmeta b{color:#1d2129;font-weight:600}' +
+      '.dyh-pnow{font-size:17px;color:#4e5969;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '.dyh-pwarn{margin-top:8px;font-size:17px;color:#ff7d00;font-weight:600}';
     document.head.appendChild(st);
 
     fab = document.createElement('div');
@@ -992,36 +1056,59 @@
         return;
       }
       if (act === 'scan-fresh') { S.scanJob = null; save(); }
+      var totalN = Math.max(1, (S.cfg.scanLimit > 0
+        ? Math.min(S.cfg.scanLimit, S.accounts.length - resumeIdx)
+        : (S.accounts.length - resumeIdx)));
+      // 进度条骨架只渲染一次，之后只改数字/宽度 —— 这样过渡动画才连贯，按钮也不会被重建
       setBody('<div class="dyh-back" data-act="home">← 返回</div>' +
-        '<div class="dyh-prog" id="dyh-prog">准备抓取…</div>' +
+        '<div class="dyh-pwrap">' +
+        '<div class="dyh-ptop"><span class="dyh-pnum" id="dyh-pnum">0<small>%</small></span>' +
+        '<span class="dyh-pcnt" id="dyh-pcnt">0 / ' + totalN + '</span></div>' +
+        '<div class="dyh-pbar"><div class="dyh-pin" id="dyh-pin"></div></div>' +
+        '<div class="dyh-pmeta" id="dyh-pmeta">正在准备…</div>' +
+        '<div class="dyh-pnow" id="dyh-pnow"></div>' +
+        '<div class="dyh-pwarn" id="dyh-pwarn" style="display:none"></div>' +
+        '</div>' +
         '<div class="dyh-tip">本轮计划抓 <b>' + scopeTxt + '</b>（' +
         (resumeIdx > 0 ? '从断点 <b>' + resumeIdx + '</b> 之后的 ' + (S.accounts.length - resumeIdx) + ' 个开始' : '全部') + '）。<br>' +
-        '· 开局同时抓 <b>3</b> 个，跑得顺会自动加（最多 ' + (S.cfg.scanConc || 6) + ' 个），发现抖音不理人就自动降速冷却；<br>' +
-        '· 每个请求都有超时保护，单个账号最多卡 45 秒，整轮最长 ' + (S.cfg.scanBudget || 12) + ' 分钟，<b>不会卡死</b>；<br>' +
-        '· 抓到一半切走 App / 熄屏 / 断网也没事：下次打开<b>自动从断点接着抓</b>；<br>' +
-        '· 想马上收工就按「🛑 停止」，没抓完的会记进断点。</div>');
+        '· 开局同时抓 <b>3</b> 个，跑得顺自动加（最多 ' + (S.cfg.scanConc || 6) + ' 个），抖音不理人就自动降速；<br>' +
+        '· <b>单个账号失败会就地重试 3 次</b>（退避后再来），整轮结束还会再补最多 2 轮 —— 抖一下不算失败；<br>' +
+        '· 每请求 8 秒超时、单账号 45 秒、整轮 ' + (S.cfg.scanBudget || 12) + ' 分钟，另有 90 秒「无进展」强制收尾，<b>不会卡死</b>；<br>' +
+        '· 抓到一半切走 App / 熄屏 / 断网也没事：下次打开<b>自动从断点接着抓</b>。</div>' +
+        '<button class="dyh-btn gray" data-act="stop-scan">🛑 停止（已抓到的都保留）</button>');
+      var gid = function (id) { return document.getElementById(id); };
+      var mm = function (ms) { var x = Math.max(0, Math.round(ms / 1000)); return Math.floor(x / 60) + '分' + (x % 60) + '秒'; };
       scanUnread(function (s) {
-        var p = document.getElementById('dyh-prog');
-        if (!p) return;
-        var mm = function (ms) { var x = Math.max(0, Math.round(ms / 1000)); return Math.floor(x / 60) + '分' + (x % 60) + '秒'; };
-        var bar = Math.round(s.cur / Math.max(1, s.total) * 20);
-        p.innerHTML = '已抓 <b>' + s.cur + '/' + s.total + '</b>　新增 <b>' + s.newCount + '</b>' +
-          (s.errors ? '　失败 ' + s.errors : '') + '<br>' +
-          '<span style="color:#c9cdd4">' + '█'.repeat(bar) + '<span style="opacity:.35">' + '░'.repeat(20 - bar) + '</span></span><br>' +
-          '并发 <b>' + s.conc + '/' + s.maxConc + '</b>　已用 ' + mm(s.elapsed) +
-          (s.eta ? '　预计还要 ' + mm(s.eta) : '') + '<br>' +
-          (s.cool ? '<b style="color:#ff7d00">⚠ 抖音在冷却，正在降速（不顺就慢，但不会失败）</b><br>' : '') +
-          (s.risk ? '风控命中 ' + s.risk + ' 次　' : '') + '当前：' + esc(s.name) +
-          '<div style="margin-top:10px"><button class="dyh-btn gray" data-act="stop-scan">🛑 停止（已抓到的都保留）</button></div>';
+        var num = gid('dyh-pnum'); if (!num) return;      // 已经离开这一页就不画了
+        num.innerHTML = s.pct + '<small>%</small>';
+        gid('dyh-pcnt').textContent = s.cur + ' / ' + s.total;
+        var bar = gid('dyh-pin');
+        bar.style.width = s.pct + '%';
+        bar.className = 'dyh-pin' + (s.risk ? ' risk' : (s.cool ? ' cool' : ''));
+        gid('dyh-pmeta').innerHTML =
+          '成功 <b>' + (s.okCount || Math.max(0, s.cur - s.errors)) + '</b>　失败 <b>' + s.errors + '</b>　新增 <b>' + s.newCount + '</b><br>' +
+          '并发 <b>' + s.conc + '/' + s.maxConc + '</b>　已用 <b>' + mm(s.elapsed) + '</b>' +
+          (s.eta ? '　预计还需 <b>' + mm(s.eta) + '</b>' : '') +
+          (s.retries ? '　自动重试 <b>' + s.retries + '</b> 次' : '');
+        gid('dyh-pnow').textContent = s.name ? ('当前：' + s.name) : '';
+        var w = gid('dyh-pwarn');
+        if (s.risk) { w.style.display = ''; w.textContent = '⚠ 抖音限流中，已自动降速重试（不会算失败）'; }
+        else if (s.cool) { w.style.display = ''; w.textContent = '⏳ 正在降速冷却，稍等一下就好'; }
+        else { w.style.display = 'none'; }
       }).then(function (r) {
-        var p = document.getElementById('dyh-prog');
-        if (p && p.parentNode) p.parentNode.style.display = 'none';
+        var bar = gid('dyh-pin');
+        if (bar) { bar.style.width = '100%'; bar.className = 'dyh-pin done'; }
+        var num = gid('dyh-pnum');
+        if (num && r.ok) num.innerHTML = (r.pct == null ? 100 : r.pct) + '<small>%</small>';
         if (!r.ok) { setBody('<div class="dyh-back" data-act="home">← 返回</div><div class="dyh-tip" style="color:#f53f3f">' + esc(r.error) + '</div>'); return; }
         S.lastScanAt = Date.now();
         var h = '<div class="dyh-back" data-act="home">← 返回</div>' +
-          '<div class="dyh-card"><div class="dyh-row"><b>新增未读</b><span class="dyh-hl">' + r.newCount + ' 条</span></div>' +
+          '<div class="dyh-card">' +
+          '<div class="dyh-row"><b>完成率</b><span class="dyh-hl">' + (r.pct == null ? 100 : r.pct) + '%</span></div>' +
+          '<div class="dyh-row"><b>新增未读</b><span class="dyh-hl">' + r.newCount + ' 条</span></div>' +
           '<div class="dyh-row"><b>处理账号</b><span>' + r.scanned + (r.resumeAt ? '（断点续 ' + r.resumeAt + '）' : '') + '</span></div>' +
           '<div class="dyh-row"><b>成功 / 失败</b><span>' + r.okCount + ' / ' + r.errors + '</span></div>' +
+          (r.retries ? '<div class="dyh-row"><b>自动重试</b><span>' + r.retries + ' 次（已全部救回）</span></div>' : '') +
           (r.risk ? '<div class="dyh-row"><b>风控命中</b><span>' + r.risk + ' 次</span></div>' : '');
         if (r.left) h += '<div class="dyh-row"><b>还剩没抓到</b><span>' + r.left + ' 个（已记入断点）</span></div>';
         h += '</div>';
