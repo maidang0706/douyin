@@ -62,7 +62,7 @@
       <li>给浏览器<b>新建一个书签</b>，名字随便起（比如「抖音助手」），把网址栏里原来的地址删掉，<b>粘贴这段内容</b>并保存</li>
       <li>以后在抖音页面上点一下这个书签，右下角就会出现 🎯 按钮</li>
     </ol>
-    <textarea id="bm" readonly>javascript:(function(){if(!/douyin\.com/.test(location.href)){alert('请先在手机浏览器打开 www.douyin.com（桌面版）再点这个书签');return;}if(window.__DY_HELPER_LOADED__){alert('助手已经启动了，看右下角 🎯 按钮');return;}var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/gh/maidang0706/douyin@main/%E6%8A%96%E9%9F%B3%E6%89%8B%E6%9C%BA%E5%8A%A9%E6%89%8B.user.js?t='+Date.now();s.onload=function(){alert('抖音关注助手已启动，看右下角 🎯 按钮');};s.onerror=function(){alert('加载失败，请检查网络后重试');};document.body.appendChild(s);})();</textarea>
+    <textarea id="bm" readonly>javascript:(function(){if(!/douyin\.com/.test(location.href)){alert('请先在手机浏览器打开 www.douyin.com（桌面版）再点这个书签');return;}if(window.__DY_HELPER_LOADED__){alert('助手已经启动了，看右下角 🎯 按钮');return;}var s=document.createElement('script');s.src='https://maidang0706.github.io/douyin/%E6%8A%96%E9%9F%B3%E6%89%8B%E6%9C%BA%E5%8A%A9%E6%89%8B.user.js?t='+Date.now();s.onload=function(){alert('抖音关注助手已启动，看右下角 🎯 按钮');};s.onerror=function(){alert('加载失败，请检查网络后重试');};document.body.appendChild(s);})();</textarea>
     <button class="btn" onclick="copyBm()">📋 复制书签代码</button>
     <div class="info">脚本本体托管在 jsDelivr CDN，<b>以后我更新了脚本，你这个书签不用改</b>，自动就是新版。</div>
     <div class="warn"><b>提示「无效网址」是正常的</b>：书签新建时那一行只接受 <code>http://</code> / <code>https://</code> 开头的地址，<code>javascript:</code> 开头的代码会被当成非法网址拦掉。<b>华为 / 荣耀自带浏览器还会连「编辑已有书签」也一起校验</b>，所以这条路在它上面基本是死的。</div>
@@ -76,16 +76,45 @@
       如果提示无效 —— 别再试了，这是浏览器本身的设计限制，直接走<b>方式 B（Via 浏览器）</b>或<b>方式 D（换 Chrome）</b>。</div>
 
     <p style="margin:16px 0 4px"><b>方式 B · Via 浏览器原生脚本</b><span class="tag g">华为/荣耀自带浏览器推荐 · 免书签</span></p>
+    <div class="info"><b>Via 右上角「＋」只有「添加脚本 / 下载脚本 / 导入脚本」三个？这是正常的。</b>
+      「从 URL 安装」只存在于部分版本。三个选项<b>都能用</b>，挑一个顺手的走就行 —— 下面 B-1、B-2、B-3 是三条并联的路，
+      <b>任意一条成功就够，不用都试</b>。</div>
+
+    <p style="margin:14px 0 4px"><b>B-1 · 下载脚本（最省事，优先试）</b></p>
     <ol>
-      <li>应用市场搜「<b>Via 浏览器</b>」安装（体积约 1MB，国产浏览器存不了 javascript 书签时用它最省事）</li>
-      <li>打开 Via → 右下角「三」菜单 → <b>设置</b> → 往下找到 <b>脚本</b> → 右上角 <b>+</b> → 选 <b>从 URL 安装</b></li>
-      <li>粘贴下面的地址 → 安装 → 确认开关是「已启用」，匹配规则为 <code>https://www.douyin.com/*</code></li>
-      <li>在 Via 里打开 <code>www.douyin.com</code>（记得勾「桌面版网站」）→ 登录抖音 → 刷新，右下角出现 🎯</li>
+      <li>先点右边按钮，把<b>安装地址</b>复制到剪贴板</li>
+      <li>Via → 右下角「三」→ <b>设置</b> → 往下找到 <b>脚本</b> → 右上角 <b>＋</b> → 选 <b>下载脚本</b></li>
+      <li>弹窗里把地址<b>粘进去</b> → 确认，浏览器开始下载 <code>.user.js</code></li>
+      <li>出现「用其他应用打开 / 保存」就选 <b>保存</b>；<b>若它直接弹出脚本预览</b>，核对匹配规则是 <code>https://www.douyin.com/*</code>，点「安装」即可</li>
+      <li>回到「脚本」列表，确认这个脚本的开关是<b>已启用</b></li>
     </ol>
-    <code id="viaurl">https://cdn.jsdelivr.net/gh/maidang0706/douyin@main/抖音手机助手.user.js</code>
+    <code id="viaurl">https://maidang0706.github.io/douyin/抖音手机助手.user.js</code>
     <button class="btn" onclick="copyVia()">📋 复制脚本安装地址</button>
-    <div class="info">Via <b>原生支持油猴脚本</b>，不用再装 Tampermonkey。装一次就常驻，以后打开抖音自动生效，我更新了脚本它也会自动拉新版。</div>
-    <div class="warn">如果「从 URL 安装」拉不动（网络问题）：把 <code>抖音手机助手.user.js</code> 这个文件传到手机上（微信/QQ 发给自己），Via → 设置 → 脚本 → + → <b>导入</b> → 选这个文件，效果一样。</div>
+    <div class="warn"><b>注意（很重要）：</b><br>
+      ① <b>地址一定用上面这条 Pages 地址</b>，别用 jsDelivr —— jsDelivr 缓存 7 天，很可能给你<b>旧版本</b>（旧版取关会被验证码页卡死）。<br>
+      ② 下载完建议把文件<b>改名为 <code>dy.js</code></b>（纯英文好认），后面 B-2 选文件时一眼就能找到。</div>
+
+    <p style="margin:14px 0 4px"><b>B-2 · 导入脚本（下载脚本没反应时用这条）</b></p>
+    <ol>
+      <li>先弄一个脚本文件到手机上：<b>①</b> B-1 下载完的那个 <code>.user.js</code>；<b>②</b> 或微信 / QQ 把 <code>抖音手机助手.user.js</code> 发给自己，在手机里保存成文件</li>
+      <li>Via → 设置 → <b>脚本</b> → 右上角 <b>＋</b> → 选 <b>导入脚本</b></li>
+      <li>在文件列表里找到刚才那个文件（<b>改名 <code>dy.js</code> 更容易找</b>）→ 选中</li>
+      <li>弹预览里确认名称、匹配规则是 <code>https://www.douyin.com/*</code> → <b>确认导入</b></li>
+      <li>确认开关是<b>已启用</b></li>
+    </ol>
+
+    <p style="margin:14px 0 4px"><b>B-3 · 添加脚本（兜底，不依赖网络）</b></p>
+    <ol>
+      <li>点右边按钮 <b>📦 复制脚本全文</b>（把 4.4 万字符的完整脚本复制走）</li>
+      <li>Via → 设置 → <b>脚本</b> → 右上角 <b>＋</b> → 选 <b>添加脚本</b></li>
+      <li>在编辑框里<b>长按 → 粘贴</b>，把整段粘进去（名称 / 匹配规则会自动识别，别手改）</li>
+      <li>右上角 <b>保存</b> → 确认开关是<b>已启用</b></li>
+    </ol>
+    <button class="btn" onclick="copySrc()">📦 复制脚本全文</button>
+
+    <div class="info">Via <b>原生支持油猴脚本</b>，不用再装 Tampermonkey。装一次就常驻，以后打开抖音自动生效。</div>
+    <div class="ok"><b>装完验证（30 秒）</b>：Via 里打开 <code>www.douyin.com</code> → 勾「<b>桌面版网站</b>」→ 登录抖音 → <b>下拉刷新一次</b> →
+      看屏幕<b>右下角</b>有没有一个 🎯 圆按钮。有就成了；没有再看 Via「脚本」里这个脚本的开关是不是打开的，然后彻底关掉 Via 重开一次。</div>
 
     <p style="margin:16px 0 4px"><b>方式 C · 用户脚本管理器（Kiwi + 油猴）</b></p>
     <ol>
@@ -200,9 +229,28 @@ function copyBm(){
   alert(ok?'已复制，去新建书签粘贴即可':'复制失败，请手动长按选中上面的代码复制');
 }
 function copyVia(){
-  var u='https://cdn.jsdelivr.net/gh/maidang0706/douyin@main/%E6%8A%96%E9%9F%B3%E6%89%8B%E6%9C%BA%E5%8A%A9%E6%89%8B.user.js';
-  if(navigator.clipboard){ navigator.clipboard.writeText(u).then(function(){alert('已复制，去 Via 里「脚本 → + → 从 URL 安装」粘贴');}); }
+  var u='https://maidang0706.github.io/douyin/%E6%8A%96%E9%9F%B3%E6%89%8B%E6%9C%BA%E5%8A%A9%E6%89%8B.user.js';
+  if(navigator.clipboard){ navigator.clipboard.writeText(u).then(function(){alert('已复制。去 Via：设置 → 脚本 → ＋ → 下载脚本，粘进去确认。');}); }
   else alert(u);
+}
+/* B-3 兜底：把脚本全文（内嵌在下面隐藏 textarea 里）复制到剪贴板 */
+function copySrc(){
+  var t=document.getElementById('srcline');
+  var s=t?t.value:'';
+  if(!s){ alert('脚本全文没读到。请改用 B-1 / B-2 这两条路（下载脚本 / 导入脚本）。'); return; }
+  var n=(s.length/1024).toFixed(0);
+  function ok2(){ alert('脚本全文已复制（'+n+'KB）。\n下一步：Via → 设置 → 脚本 → ＋ → 添加脚本 → 长按粘贴 → 保存。'); }
+  function fallback(){
+    t.style.display='block'; t.style.width='100%'; t.style.height='240px';
+    t.select(); try{ t.setSelectionRange(0, t.value.length); }catch(e){}
+    try{
+      if(document.execCommand('copy')) { ok2(); return; }
+    }catch(e){}
+    alert('已展开全文框。请长按选中框内全部内容（全选）→ 复制，再去 Via「添加脚本」粘贴。');
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(s).then(ok2, fallback);
+  } else fallback();
 }
 function copyRaw(){
   var u='https://raw.githubusercontent.com/maidang0706/douyin/main/抖音手机助手.user.js';
@@ -210,5 +258,873 @@ function copyRaw(){
   else alert(u);
 }
 </script>
+
+<!-- B-3 兜底用的脚本全文（由发布脚本自动注入，勿手改） -->
+<textarea id="srcline" readonly style="display:none">// ==UserScript==
+// @name         抖音关注助手（手机免电脑版）
+// @namespace    dy-phone-helper
+// @version      1.0.0
+// @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
+// @match        https://www.douyin.com/*
+// @grant        none
+// @run-at       document-idle
+// ==/UserScript==
+
+/* ==========================================================================
+   抖音关注助手 · 手机免电脑版
+   --------------------------------------------------------------------------
+   原理：本脚本运行在 www.douyin.com 页面里，和抖音「同源」。
+     - fetch 自动带上你真实登录 cookie，无需签名、无 CORS、无风控拦截；
+     - 取关/关注用「同源 iframe 打开对方主页 → 点真实关注按钮」实现；
+     - 数据存手机 localStorage，可一键推到 GitHub（手机端 HTML 直接看）。
+   这也是为什么它能做到「完全不用电脑」：抖音只在乎是不是真人在真浏览器里操作，
+   而这里每一步都是你自己手机上的真实浏览器行为。
+   ========================================================================== */
+
+(function () {
+  'use strict';
+  if (window.__DY_HELPER_LOADED__) return;
+  window.__DY_HELPER_LOADED__ = true;
+
+  /* ----------------------------- 常量 ----------------------------- */
+  var API_POST = 'https://www.douyin.com/aweme/v1/web/aweme/post/';
+  var API_FOLLOWING = 'https://www.douyin.com/aweme/v1/web/user/following/list/';
+  var LS = 'dy_phone_helper_v1';
+
+  /* ----------------------------- 存储 ----------------------------- */
+  var S = loadState();
+  function loadState() {
+    var def = {
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '' },
+      selfSecUid: '',
+      accounts: [],      // [{name, secUserId, category}]
+      videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
+      readIds: [],       // 已读视频 awemeId
+      lastExport: 0,
+      lastScanAt: 0
+    };
+    try {
+      var raw = localStorage.getItem(LS);
+      if (!raw) return def;
+      var o = JSON.parse(raw);
+      for (var k in def) if (!(k in o)) o[k] = def[k];
+      if (!o.cfg) o.cfg = def.cfg;
+      return o;
+    } catch (e) { return def; }
+  }
+  function save() {
+    try { localStorage.setItem(LS, JSON.stringify(S)); } catch (e) { toast('本地存储写入失败：' + e.message); }
+  }
+
+  /* ----------------------------- 小工具 ----------------------------- */
+  var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+  function esc(s) { return String(s == null ? '' : s).replace(/[&amp;&lt;&gt;"]/g, function (c) { return { '&amp;': '&amp;amp;', '&lt;': '&amp;lt;', '&gt;': '&amp;gt;', '"': '&amp;quot;' }[c]; }); }
+  function fmtTime(ts) {
+    var d = new Date(ts); if (isNaN(d.getTime())) return '';
+    var p = function (n) { return n &lt; 10 ? '0' + n : '' + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  function uniq(a) { var o = {}, r = []; for (var i = 0; i &lt; a.length; i++) { if (!o[a[i]]) { o[a[i]] = 1; r.push(a[i]); } } return r; }
+
+  var toastEl = null;
+  function toast(msg, ms) {
+    if (!toastEl) {
+      toastEl = document.createElement('div');
+      toastEl.style.cssText = 'position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:rgba(0,0,0,.84);color:#fff;' +
+        'padding:10px 16px;border-radius:20px;font-size:14px;z-index:2147483647;max-width:86vw;line-height:1.5;pointer-events:none;transition:opacity .25s';
+      document.body.appendChild(toastEl);
+    }
+    toastEl.innerHTML = msg;
+    toastEl.style.opacity = '1';
+    clearTimeout(toastEl._t);
+    toastEl._t = setTimeout(function () { toastEl.style.opacity = '0'; }, ms || 2600);
+  }
+
+  /* ----------------------------- 抖音接口 ----------------------------- */
+  function commonParams(extra) {
+    var o = {
+      device_platform: 'webapp', aid: '6383', channel: 'channel_pc_web',
+      pc_client_type: '1', version_code: '190500', version_name: '19.5.0',
+      cookie_enabled: 'true', screen_width: String(window.screen.width || 1920),
+      screen_height: String(window.screen.height || 1080),
+      browser_language: 'zh-CN', browser_platform: 'Win32', browser_name: 'Chrome',
+      browser_version: '120.0.0.0', browser_online: 'true',
+      engine_name: 'Blink', engine_version: '120.0.0.0',
+      os_name: 'Windows', os_version: '10', cpu_core_num: '8', device_memory: '8',
+      platform: 'PC', downlink: '10', effective_type: '4g', round_trip_time: '50'
+    };
+    for (var k in (extra || {})) o[k] = extra[k];
+    return o;
+  }
+  function q(params) {
+    var parts = [];
+    for (var k in params) parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
+    return parts.join('&amp;');
+  }
+  // 同源请求：不带任何签名（实测真实浏览器内请求无需 X-Bogus），cookie 由浏览器自动附加
+  // 抖音偶尔会返回空 body（风控抖动），所以解析失败时自动重试一次
+  function dyGet(base, params, _retry) {
+    return fetch(base + '?' + q(params), {
+      credentials: 'include',
+      headers: { 'Accept': 'application/json, text/plain, */*', 'Referer': 'https://www.douyin.com/' }
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).then(function (t) {
+      try { return JSON.parse(t); } catch (e) {
+        if (_retry) throw new Error('返回内容不是 JSON（可能被风控）：' + String(t).slice(0, 60));
+        return sleep(2500).then(function () { return dyGet(base, params, 1); });
+      }
+    });
+  }
+
+  /* 拿到「我自己」的 sec_uid：先本地页面找，再拉 /user/self 的 HTML */
+  function getSelfSecUid() {
+    if (S.selfSecUid) return Promise.resolve(S.selfSecUid);
+    var m = document.documentElement.innerHTML.match(/MS4wLjAB[A-Za-z0-9_\-]{20,}/);
+    if (m) { S.selfSecUid = m[0]; save(); return Promise.resolve(m[0]); }
+    return fetch('https://www.douyin.com/user/self', { credentials: 'include' })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var mm = html.match(/MS4wLjAB[A-Za-z0-9_\-]{20,}/);
+        if (!mm) throw new Error('未登录抖音，或拿不到自己的 sec_uid。请先在本页登录抖音网页版。');
+        S.selfSecUid = mm[0]; save();
+        return mm[0];
+      });
+  }
+
+  /* 抓我关注的全部账号（一直翻页到底，不会被 400 条截断）
+     opts.maxPages：最多翻几页（每页 20 个），用于只想快速看一批的场景 */
+  function fetchFollowing(onProgress, opts) {
+    var maxPages = (opts &amp;&amp; opts.maxPages) || 200;
+    return getSelfSecUid().then(function (self) {
+      var all = [], offset = 0, maxTime = 0, pages = 0;
+      function step() {
+        if (pages &gt;= maxPages) return Promise.resolve(all);
+        return dyGet(API_FOLLOWING, commonParams({
+          user_id: '', sec_user_id: self, offset: String(offset),
+          min_time: '0', max_time: String(maxTime), count: '20',
+          source_type: '4', gps_access: '0', address_book_access: '0', is_top: '1'
+        })).then(function (j) {
+          var list = j.followings || [];
+          for (var i = 0; i &lt; list.length; i++) {
+            var u = list[i] || {};
+            all.push({ name: u.nickname || '', secUserId: u.sec_uid || '', category: '' });
+          }
+          offset += list.length;
+          pages++;
+          if (j.max_time) maxTime = j.max_time;
+          if (onProgress) onProgress(all.length);
+          if (!j.has_more || list.length === 0) return all;
+          return sleep(700).then(step);
+        });
+      }
+      return step().then(function (arr) {
+        // 保留已有分类
+        var oldCat = {};
+        for (var i = 0; i &lt; S.accounts.length; i++) oldCat[S.accounts[i].secUserId] = S.accounts[i].category;
+        var seen = {}, out = [];
+        for (var k = 0; k &lt; arr.length; k++) {
+          var a = arr[k];
+          if (!a.secUserId || seen[a.secUserId]) continue;
+          seen[a.secUserId] = 1;
+          a.category = oldCat[a.secUserId] || '';
+          out.push(a);
+        }
+        S.accounts = out; save();
+        return out;
+      });
+    });
+  }
+
+  /* 抓单个账号的最新作品 */
+  function fetchPosts(secUid) {
+    return dyGet(API_POST, commonParams({ sec_user_id: secUid, count: '20', max_cursor: '0' }))
+      .then(function (j) {
+        var list = j.aweme_list || [];
+        return list.map(function (a) {
+          var cover = (a.video &amp;&amp; a.video.cover &amp;&amp; a.video.cover.url_list &amp;&amp; a.video.cover.url_list[0]) ||
+            (a.video &amp;&amp; a.video.origin_cover &amp;&amp; a.video.origin_cover.url_list &amp;&amp; a.video.origin_cover.url_list[0]) || '';
+          return {
+            awemeId: String(a.aweme_id),
+            account: (a.author &amp;&amp; a.author.nickname) || '',
+            title: (a.desc || '').trim(),
+            url: 'https://www.douyin.com/video/' + a.aweme_id,
+            publishTime: a.create_time ? fmtTime(Number(a.create_time) * 1000) : '',
+            publishedAt: a.create_time ? Number(a.create_time) * 1000 : 0,
+            thumbnail: cover
+          };
+        });
+      });
+  }
+
+  /* ----------------------------- 取关 / 关注 ----------------------------- */
+  /* ★ 2026-10-01 重构：不再用隐藏 iframe（真机实测会被抖音的「验证码中间页」拦），
+     改成「主页面点按钮 → window.open 开一个真实的新标签页 → 本脚本在新标签页里
+     自动点那颗真实的关注按钮 → 结果写回 localStorage → 新标签页自动关闭 → 主页面读结果」。
+
+     为什么这个能成：
+       - 新标签页是 douyin.com 的「真实浏览上下文」，不是被嵌进去的 → 抖音不认它是机器人；
+       - 脚本和抖音同源（@match https://www.douyin.com/*），新标签页里也会跑本脚本，
+         所以「自动点击」是在真页面里发生的；
+       - 主页面的点击是用户手势 → window.open 不会被弹窗拦截。 */
+  function findFollowBtn(root) {
+    var d = root || document;
+    return d.querySelector('button[data-e2e="user-info-follow-btn"]') ||
+      d.querySelector('[data-e2e="user-info"] button') ||
+      d.querySelector('button[data-e2e="follow-btn"]') ||
+      d.querySelector('button:not([disabled]) [data-e2e="follow-btn"]') ||
+      d.querySelector('button .follow-btn, button[class*="follow"]');
+  }
+
+  /* 新标签页侧：在 /user/xxx 页面里，如果检测到有效的待办任务，就自动点按钮 */
+  function autoFollowWorker() {
+    var m = location.pathname.match(/^\/user\/([^\/?#]+)/);
+    if (!m) return;
+    var cur = decodeURIComponent(m[1]).replace(/^@/, '');
+    var P = null;
+    try { P = JSON.parse(localStorage.getItem(LS) || '{}'); } catch (e) { return; }
+    var t = P &amp;&amp; P.pending;
+    if (!t || t.status !== 'running' || Date.now() - t.ts &gt; 180000) return;
+    var want = String(t.secUid || '').replace(/^@/, '');
+    if (want !== cur) return;                       // 不是这次要处理的账号，别乱点
+
+    var tries = 0;
+    var iv = setInterval(function () {
+      tries++;
+      var title = document.title || '';
+      // 抖音对新上下文弹「验证码 / 安全验证」中间页 —— 立刻停手，交给用户
+      if (/验证码|安全验证|滑动|seccheck|verify/i.test(title + location.href)) {
+        t.status = 'captcha'; t.err = '抖音弹出了验证页';
+        try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e) { }
+        clearInterval(iv); closeSelf(); return;
+      }
+      if (tries &gt; 45) {
+        t.status = 'timeout'; t.err = '主页没加载出关注按钮';
+        try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e) { }
+        clearInterval(iv); closeSelf(); return;
+      }
+      var btn = findFollowBtn(document);
+      if (!btn) return;
+      var txt = (btn.innerText || btn.textContent || '').trim();
+      if (!txt) return;
+      var isFollowing = /已关注|互相关注/.test(txt);
+      if (isFollowing === !!t.want) {                // 已经是目标状态，不用点
+        t.status = 'noop'; t.state = txt;
+        try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e) { }
+        clearInterval(iv); closeSelf(); return;
+      }
+      try { btn.click(); } catch (e) {
+        t.status = 'fail'; t.err = '点击失败：' + e.message;
+        try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e2) { }
+        clearInterval(iv); closeSelf(); return;
+      }
+      setTimeout(function () {
+        var t2 = '';
+        try { t2 = (btn.innerText || btn.textContent || '').trim(); } catch (e) { }
+        t.status = 'done'; t.state = t2 || txt;
+        try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e2) { }
+        clearInterval(iv);
+        closeSelf();
+      }, 2600);
+    }, 800);
+  }
+  function closeSelf() { setTimeout(function () { try { window.close(); } catch (e) { } }, 500); }
+
+  /* 主页面侧：开新标签页 → 轮询等新标签页把结果写回来 */
+  function setFollow(secUid, want, name) {
+    return new Promise(function (resolve) {
+      // 清掉上一次没完成的残留
+      try {
+        var prev = JSON.parse(localStorage.getItem(LS) || '{}');
+        prev.pending = { secUid: secUid, want: !!want, name: name, ts: Date.now(), status: 'running' };
+        localStorage.setItem(LS, JSON.stringify(prev));
+      } catch (e) { }
+
+      var w;
+      try { w = window.open('https://www.douyin.com/user/' + encodeURIComponent(secUid), '_blank'); } catch (e) { }
+      if (!w) {
+        try {
+          var p2 = JSON.parse(localStorage.getItem(LS) || '{}'); p2.pending = null;
+          localStorage.setItem(LS, JSON.stringify(p2));
+        } catch (e) { }
+        resolve({ ok: false, error: '浏览器拦住了新标签页。请在浏览器设置里允许抖音「弹出窗口」，或者干脆用面板里的「🌐 打开主页」自己点一下（一样是一次点击就完事）。' });
+        return;
+      }
+
+      var iv = setInterval(function () {
+        var P = null;
+        try { P = JSON.parse(localStorage.getItem(LS) || '{}'); } catch (e) { }
+        var t = P &amp;&amp; P.pending;
+        if (!t) { clearInterval(iv); resolve({ ok: false, error: '任务状态丢失，请重试' }); return; }
+        if (t.status === 'running') {
+          if (Date.now() - t.ts &gt; 180000) { t.status = 'timeout'; t.err = '等待新标签页超时'; try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e) { } }
+          else return;
+        }
+        clearInterval(iv);
+        if (t.status === 'done') resolve({ ok: true, state: t.state || '' });
+        else if (t.status === 'noop') resolve({ ok: true, noop: true, state: t.state || '' });
+        else if (t.status === 'captcha') resolve({
+          ok: false, captcha: true,
+          error: '抖音在新标签页弹了验证页（风控冷却中）。等 20~30 分钟后重试，或点「🌐 打开主页」在新标签页里自己点一下。'
+        });
+        else resolve({ ok: false, error: t.err || '取关/关注失败' });
+      }, 700);
+    });
+  }
+
+  /* ----------------------------- 搜索用户 ----------------------------- */
+  /* 走抖音自己的搜索接口（同源请求，天然带登录态，实测 200）。
+     返回的是视频结果，但每条都带完整的 author 对象，里面有 sec_uid 和 follow_status，
+     正好够「找到账号 + 判断是否已关注」。 */
+  var SEARCH_API = 'https://www.douyin.com/aweme/v1/web/general/search/single/';
+  function searchUsers(kw) {
+    return dyGet(SEARCH_API, commonParams({
+      keyword: kw, search_channel: 'aweme_user_web', search_source: 'normal_search',
+      query_correct_type: '1', is_filter_search: '0', from_source: '',
+      offset: '0', count: '20', need_filter_settings: '1', list_type: 'single',
+      update_version_code: '170400'
+    })).then(function (j) {
+      var data = j.data || [], out = [], seen = {};
+      for (var i = 0; i &lt; data.length; i++) {
+        var d = data[i] || {};
+        var a = (d.aweme_info &amp;&amp; d.aweme_info.author) || d.user_info || null;
+        if (!a || !a.sec_uid) continue;
+        if (seen[a.sec_uid]) continue;
+        seen[a.sec_uid] = 1;
+        out.push({
+          secUid: a.sec_uid,
+          name: a.nickname || a.sec_uid,
+          following: Number(a.follow_status || 0) &gt; 0
+        });
+      }
+      return out;
+    });
+  }
+
+  /* ----------------------------- GitHub 推送 ----------------------------- */
+  function toB64(str) {
+    var bytes = new TextEncoder().encode(str), bin = '', chunk = 0x8000;
+    for (var i = 0; i &lt; bytes.length; i += chunk) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(bin);
+  }
+  function ghApi(p, method, body) {
+    return fetch('https://api.github.com' + p, {
+      method: method || 'GET',
+      headers: {
+        Authorization: 'token ' + (S.cfg.token || ''),
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error('GitHub ' + r.status + '：' + t.slice(0, 160)); });
+      return r.json();
+    });
+  }
+  /* 用 Git Blobs API，突破 Contents API 单文件 1MB 限制（本工具数据常超 1MB） */
+  function ghPush(pathInRepo, content, message) {
+    var O = S.cfg.owner, R = S.cfg.repo, B = S.cfg.branch || 'main';
+    if (!O || !R || !S.cfg.token) throw new Error('未配置 GitHub（设置里填 owner / repo / token）');
+    return ghApi('/repos/' + O + '/' + R + '/git/blobs', 'POST', { content: toB64(content), encoding: 'base64' })
+      .then(function (blob) {
+        return ghApi('/repos/' + O + '/' + R + '/git/ref/heads/' + B).then(function (ref) {
+          return ghApi('/repos/' + O + '/' + R + '/git/commits/' + ref.object.sha).then(function (commit) {
+            return ghApi('/repos/' + O + '/' + R + '/git/trees', 'POST', {
+              base_tree: commit.tree.sha,
+              tree: [{ path: pathInRepo, mode: '100644', type: 'blob', sha: blob.sha }]
+            }).then(function (tree) {
+              return ghApi('/repos/' + O + '/' + R + '/git/commits', 'POST', {
+                message: message || 'update ' + pathInRepo, tree: tree.sha, parents: [ref.object.sha]
+              }).then(function (nc) {
+                return ghApi('/repos/' + O + '/' + R + '/git/refs/heads/' + B, 'PATCH', { sha: nc.sha })
+                  .then(function () { return nc.sha; });
+              });
+            });
+          });
+        });
+      });
+  }
+
+  /* ----------------------------- 导出数据结构（与手机端 HTML 完全一致） ----------------------------- */
+  function buildPayload() {
+    var readMap = {};
+    for (var i = 0; i &lt; S.readIds.length; i++) readMap[S.readIds[i]] = 1;
+    var vids = S.videos.filter(function (v) { return !readMap[v.awemeId]; });
+    vids.sort(function (a, b) { return (b.publishedAt || 0) - (a.publishedAt || 0); });
+    var cats = {};
+    for (var j = 0; j &lt; S.accounts.length; j++) {
+      var a = S.accounts[j];
+      if (a.category) cats[a.category] = (cats[a.category] || 0) + 1;
+    }
+    return {
+      type: 'douyin-unread',
+      exportedAt: fmtTime(Date.now()),
+      calibrated: true,
+      selfProfile: '',
+      categories: Object.keys(cats),
+      accounts: S.accounts.map(function (a) { return { name: a.name, category: a.category || '' }; }),
+      videos: vids,
+      readVideoIds: S.readIds,
+      orderByCat: {}
+    };
+  }
+
+  /* ----------------------------- 全量抓未读 ----------------------------- */
+  var scanning = false;
+  function scanUnread(statusCb) {
+    if (scanning) return Promise.resolve({ ok: false, error: '已有抓取在进行中' });
+    if (!S.accounts.length) return Promise.resolve({ ok: false, error: '先点「📥 刷新我的关注列表」' });
+    scanning = true;
+    var newCount = 0, errors = 0, okCount = 0, consecFail = 0;
+    var known = {};
+    for (var i = 0; i &lt; S.videos.length; i++) known[S.videos[i].awemeId] = 1;
+    var readMap = {};
+    for (var r = 0; r &lt; S.readIds.length; r++) readMap[S.readIds[r]] = 1;
+
+    function step(idx) {
+      if (idx &gt;= S.accounts.length) {
+        scanning = false;
+        S.lastScanAt = Date.now(); save();
+        return Promise.resolve({ ok: true, newCount: newCount, errors: errors, okCount: okCount });
+      }
+      var acc = S.accounts[idx];
+      if (statusCb) statusCb({ cur: idx + 1, total: S.accounts.length, name: acc.name, newCount: newCount, errors: errors });
+      return fetchPosts(acc.secUserId).then(function (list) {
+        consecFail = 0; okCount++;
+        for (var k = 0; k &lt; list.length; k++) {
+          var v = list[k];
+          if (!known[v.awemeId] &amp;&amp; !readMap[v.awemeId]) { S.videos.push(v); known[v.awemeId] = 1; newCount++; }
+        }
+        acc.lastCount = list.length;
+        if (idx % 10 === 0) save();
+        // 防风控：真人翻列表的节奏，1~2.5 秒随机间隔（血泪教训：无间隔会被整轮打成 444）
+        return sleep(1000 + Math.floor(Math.random() * 1500)).then(function () { return step(idx + 1); });
+      }).catch(function (e) {
+        errors++; consecFail++;
+        acc.lastError = e.message;
+        var wait = consecFail &gt;= 8 ? 30000 : 3000;
+        if (statusCb) statusCb({ cur: idx + 1, total: S.accounts.length, name: acc.name + '（失败，等待 ' + (wait / 1000) + 's）', newCount: newCount, errors: errors });
+        return sleep(wait).then(function () { return step(idx + 1); });
+      });
+    }
+    return step(0);
+  }
+
+  /* ----------------------------- 面板 UI ----------------------------- */
+  var CATS = ['朋友', '军事', '学习', '工作', '实时新闻', '钓鱼', '娱乐'];
+
+  function renderHome() {
+    var unread = unreadVideos();
+    var h = '';
+    h += '&lt;div class="dyh-card"&gt;';
+    h += '&lt;div class="dyh-row"&gt;&lt;b&gt;账号&lt;/b&gt;&lt;span&gt;' + (S.selfSecUid ? '已登录' : '未识别') + '&lt;/span&gt;&lt;/div&gt;';
+    h += '&lt;div class="dyh-row"&gt;&lt;b&gt;关注公众号&lt;/b&gt;&lt;span&gt;' + S.accounts.length + ' 个&lt;/span&gt;&lt;/div&gt;';
+    h += '&lt;div class="dyh-row"&gt;&lt;b&gt;未读视频&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + unread.length + ' 条&lt;/span&gt;&lt;/div&gt;';
+    h += '&lt;div class="dyh-row"&gt;&lt;b&gt;上次抓取&lt;/b&gt;&lt;span&gt;' + (S.lastScanAt ? fmtTime(S.lastScanAt) : '从未') + '&lt;/span&gt;&lt;/div&gt;';
+    h += '&lt;/div&gt;';
+    h += '&lt;button class="dyh-btn primary" data-act="scan"&gt;🔍 抓最新未读视频&lt;/button&gt;';
+    h += '&lt;button class="dyh-btn" data-act="refresh"&gt;📥 刷新我的关注列表&lt;/button&gt;';
+    h += '&lt;button class="dyh-btn" data-act="list"&gt;📺 看未读列表（' + unread.length + '）&lt;/button&gt;';
+    h += '&lt;button class="dyh-btn" data-act="manage"&gt;🚫 批量取关 / 管理分类&lt;/button&gt;';
+    h += '&lt;button class="dyh-btn" data-act="search"&gt;🔎 搜索并关注新账号&lt;/button&gt;';
+    h += '&lt;button class="dyh-btn" data-act="push"&gt;☁️ 推到 GitHub（手机端 HTML 可看）&lt;/button&gt;';
+    h += '&lt;button class="dyh-btn gray" data-act="settings"&gt;⚙️ 设置（GitHub / 数据）&lt;/button&gt;';
+    return h;
+  }
+
+  function unreadVideos() {
+    var readMap = {};
+    for (var i = 0; i &lt; S.readIds.length; i++) readMap[S.readIds[i]] = 1;
+    return S.videos.filter(function (v) { return !readMap[v.awemeId]; })
+      .sort(function (a, b) { return (b.publishedAt || 0) - (a.publishedAt || 0); });
+  }
+
+  function renderList() {
+    var v = unreadVideos();
+    var h = '&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;';
+    h += '&lt;div class="dyh-tip"&gt;共 ' + v.length + ' 条未读，点「已读」标记，点标题用抖音打开&lt;/div&gt;';
+    var n = Math.min(v.length, 300);
+    for (var i = 0; i &lt; n; i++) {
+      var it = v[i];
+      h += '&lt;div class="dyh-item"&gt;' +
+        '&lt;div class="dyh-item-t" data-act="open" data-url="' + esc(it.url) + '"&gt;' + esc(it.title || '（无标题）') + '&lt;/div&gt;' +
+        '&lt;div class="dyh-item-m"&gt;&lt;span&gt;' + esc(it.account || '') + '&lt;/span&gt;&lt;span&gt;' + esc(it.publishTime || '') + '&lt;/span&gt;' +
+        '&lt;a href="javascript:;" data-act="read" data-id="' + esc(it.awemeId) + '"&gt;已读&lt;/a&gt;&lt;/div&gt;&lt;/div&gt;';
+    }
+    if (v.length &gt; n) h += '&lt;div class="dyh-tip"&gt;仅显示最新 300 条（共 ' + v.length + ' 条）&lt;/div&gt;';
+    return h;
+  }
+
+  function renderManage() {
+    var h = '&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;';
+    h += '&lt;div class="dyh-tip"&gt;选分类可批量取关；也可单独给账号设分类&lt;/div&gt;';
+    h += '&lt;div class="dyh-card"&gt;&lt;div class="dyh-row"&gt;&lt;b&gt;按分类批量取关&lt;/b&gt;&lt;span&gt;&lt;/span&gt;&lt;/div&gt;';
+    for (var c = 0; c &lt; CATS.length; c++) {
+      var cnt = S.accounts.filter(function (a) { return a.category === CATS[c]; }).length;
+      h += '&lt;div class="dyh-row"&gt;&lt;b&gt;' + esc(CATS[c]) + '&lt;/b&gt;&lt;a href="javascript:;" data-act="unfollow-cat" data-cat="' + esc(CATS[c]) + '"&gt;' +
+        (cnt ? '取关这 ' + cnt + ' 个' : '无') + '&lt;/a&gt;&lt;/div&gt;';
+    }
+    var noCat = S.accounts.filter(function (a) { return !a.category; }).length;
+    if (noCat) h += '&lt;div class="dyh-row"&gt;&lt;b&gt;未分类&lt;/b&gt;&lt;a href="javascript:;" data-act="unfollow-cat" data-cat=""&gt;取关这 ' + noCat + ' 个&lt;/a&gt;&lt;/div&gt;';
+    h += '&lt;/div&gt;';
+    h += '&lt;div class="dyh-tip"&gt;单个账号（点右侧 ✕ 取关，点分类名改分类）&lt;/div&gt;';
+    var list = S.accounts.slice(0, 200);
+    for (var i = 0; i &lt; list.length; i++) {
+      var a = list[i];
+      h += '&lt;div class="dyh-item"&gt;&lt;div class="dyh-item-t"&gt;' + esc(a.name || a.secUserId) + '&lt;/div&gt;' +
+        '&lt;div class="dyh-item-m"&gt;' +
+        '&lt;a href="javascript:;" data-act="open-home" data-sec="' + esc(a.secUserId) + '"&gt;🌐 主页&lt;/a&gt;' +
+        '&lt;a href="javascript:;" data-act="setcat" data-sec="' + esc(a.secUserId) + '"&gt;' + esc(a.category || '设分类') + '&lt;/a&gt;' +
+        '&lt;a href="javascript:;" data-act="unfollow-one" data-sec="' + esc(a.secUserId) + '" data-name="' + esc(a.name) + '"&gt;✕ 取关&lt;/a&gt;&lt;/div&gt;&lt;/div&gt;';
+    }
+    return h;
+  }
+
+  function renderSearch() {
+    return '&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;' +
+      '&lt;div class="dyh-tip"&gt;输入昵称/关键词搜索，结果里点「关注」&lt;/div&gt;' +
+      '&lt;input id="dyh-kw" class="dyh-input" placeholder="请输入抖音昵称或关键词"&gt;' +
+      '&lt;button class="dyh-btn primary" data-act="do-search"&gt;🔎 搜索&lt;/button&gt;' +
+      '&lt;div id="dyh-results"&gt;&lt;/div&gt;';
+  }
+
+  function renderSettings() {
+    var h = '&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;';
+    h += '&lt;div class="dyh-tip"&gt;填一次会记住。Token 需要有 repo 权限的 classic PAT&lt;/div&gt;';
+    h += '&lt;label class="dyh-lb"&gt;GitHub 用户名&lt;/label&gt;&lt;input id="dyh-owner" class="dyh-input" value="' + esc(S.cfg.owner) + '"&gt;';
+    h += '&lt;label class="dyh-lb"&gt;仓库名&lt;/label&gt;&lt;input id="dyh-repo" class="dyh-input" value="' + esc(S.cfg.repo) + '"&gt;';
+    h += '&lt;label class="dyh-lb"&gt;分支&lt;/label&gt;&lt;input id="dyh-branch" class="dyh-input" value="' + esc(S.cfg.branch) + '"&gt;';
+    h += '&lt;label class="dyh-lb"&gt;Token&lt;/label&gt;&lt;input id="dyh-token" class="dyh-input" type="password" value="' + esc(S.cfg.token) + '" placeholder="ghp_xxx"&gt;';
+    h += '&lt;button class="dyh-btn primary" data-act="save-settings"&gt;💾 保存&lt;/button&gt;';
+    h += '&lt;button class="dyh-btn" data-act="export"&gt;📤 导出数据到手机本地（下载 json）&lt;/button&gt;';
+    h += '&lt;button class="dyh-btn gray" data-act="clear"&gt;🗑 清空本地数据&lt;/button&gt;';
+    h += '&lt;div class="dyh-tip"&gt;已读记录 ' + S.readIds.length + ' 条 · 视频库 ' + S.videos.length + ' 条&lt;/div&gt;';
+    return h;
+  }
+
+  /* ----------------------------- 面板骨架 ----------------------------- */
+  var fab = null, panel = null, bodyEl = null;
+
+  function ensureUI() {
+    if (fab) return;
+    var st = document.createElement('style');
+    st.textContent =
+      '.dyh-fab{position:fixed;right:14px;bottom:calc(24px + env(safe-area-inset-bottom));z-index:2147483640;' +
+      'width:54px;height:54px;border-radius:50%;background:#fe2c55;color:#fff;font-size:24px;line-height:54px;' +
+      'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.28);user-select:none}' +
+      '.dyh-panel{position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483645;background:rgba(0,0,0,.5);' +
+      'display:none;align-items:flex-end;justify-content:center}' +
+      '.dyh-box{background:#fff;width:100%;max-height:86%;overflow:auto;border-radius:16px 16px 0 0;' +
+      'padding:14px 14px calc(20px + env(safe-area-inset-bottom));font-size:14px;color:#1d2129}' +
+      '.dyh-box h3{margin:2px 0 12px;font-size:16px;display:flex;align-items:center}' +
+      '.dyh-box h3 span{margin-left:auto;font-size:24px;color:#c9cdd4;padding:0 6px}' +
+      '.dyh-btn{display:block;width:100%;margin:8px 0;padding:12px 14px;border:1px solid #e5e6eb;border-radius:10px;' +
+      'background:#fff;font-size:15px;color:#1d2129;text-align:left}' +
+      '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
+      '.dyh-btn.gray{color:#86909c}' +
+      '.dyh-card{background:#f7f8fa;border-radius:10px;padding:10px 12px;margin-bottom:10px}' +
+      '.dyh-row{display:flex;align-items:center;padding:7px 0;border-bottom:1px solid #f0f0f0;font-size:14px}' +
+      '.dyh-row:last-child{border-bottom:0}' +
+      '.dyh-row b{font-weight:500;color:#4e5969}' +
+      '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
+      '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
+      '.dyh-item{padding:10px 0;border-bottom:1px solid #f2f3f5}' +
+      '.dyh-item-t{font-size:14px;line-height:1.5;color:#1d2129}' +
+      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:6px;font-size:12px;color:#86909c}' +
+      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:2px 8px}' +
+      '.dyh-tip{font-size:12px;color:#86909c;line-height:1.6;margin:8px 0}' +
+      '.dyh-back{font-size:14px;color:#fe2c55;margin-bottom:10px}' +
+      '.dyh-input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e6eb;border-radius:8px;' +
+      'font-size:15px;margin:4px 0 10px}' +
+      '.dyh-lb{font-size:12px;color:#86909c;display:block;margin-top:8px}' +
+      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px;line-height:1.6}';
+    document.head.appendChild(st);
+
+    fab = document.createElement('div');
+    fab.className = 'dyh-fab';
+    fab.textContent = '🎯';
+    fab.onclick = function () { open('home'); };
+    document.body.appendChild(fab);
+
+    panel = document.createElement('div');
+    panel.className = 'dyh-panel';
+    panel.innerHTML = '&lt;div class="dyh-box"&gt;&lt;h3&gt;抖音关注助手&lt;span data-act="close"&gt;×&lt;/span&gt;&lt;div id="dyh-body"&gt;&lt;/div&gt;&lt;/h3&gt;&lt;/div&gt;';
+    // 修正结构：h3 不应包裹 body，重建
+    panel.innerHTML = '&lt;div class="dyh-box"&gt;&lt;h3&gt;抖音关注助手&lt;span data-act="close"&gt;×&lt;/span&gt;&lt;/h3&gt;&lt;div id="dyh-body"&gt;&lt;/div&gt;&lt;/div&gt;';
+    panel.addEventListener('click', function (e) {
+      if (e.target === panel) { panel.style.display = 'none'; return; }
+      var el = e.target.closest ? e.target.closest('[data-act]') : null;
+      if (!el) return;
+      var act = el.getAttribute('data-act');
+      if (act === 'close') { panel.style.display = 'none'; return; }
+      onAction(act, el);
+    });
+    document.body.appendChild(panel);
+    bodyEl = panel.querySelector('#dyh-body');
+  }
+
+  function open(view) {
+    ensureUI();
+    panel.style.display = 'flex';
+    if (view === 'home') bodyEl.innerHTML = renderHome();
+    else if (view === 'list') bodyEl.innerHTML = renderList();
+    else if (view === 'manage') bodyEl.innerHTML = renderManage();
+    else if (view === 'search') bodyEl.innerHTML = renderSearch();
+    else if (view === 'settings') bodyEl.innerHTML = renderSettings();
+    else bodyEl.innerHTML = renderHome();
+    panel.querySelector('.dyh-box').scrollTop = 0;
+  }
+  function setBody(html) { bodyEl.innerHTML = html; panel.querySelector('.dyh-box').scrollTop = 0; }
+
+  function onAction(act, el) {
+    var i;
+    if (act === 'home') { open('home'); return; }
+    if (act === 'list') { open('list'); return; }
+    if (act === 'manage') { open('manage'); return; }
+    if (act === 'search') { open('search'); return; }
+    if (act === 'settings') { open('settings'); return; }
+
+    if (act === 'open') { var u = el.getAttribute('data-url'); if (u) window.open(u, '_blank'); return; }
+
+    if (act === 'read') {
+      var id = el.getAttribute('data-id');
+      S.readIds.push(id); save();
+      var p = el.parentNode;
+      if (p &amp;&amp; p.parentNode) p.parentNode.style.opacity = '.4';
+      toast('已标记已读'); return;
+    }
+
+    if (act === 'refresh') {
+      setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;&lt;div class="dyh-prog" id="dyh-prog"&gt;正在读取你的关注列表…&lt;/div&gt;');
+      fetchFollowing(function (n) {
+        var p = document.getElementById('dyh-prog');
+        if (p) p.innerHTML = '已读取 ' + n + ' 个关注账号…';
+      }).then(function (arr) {
+        toast('已刷新：' + arr.length + ' 个关注账号');
+        open('home');
+      }).catch(function (e) {
+        setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;&lt;div class="dyh-tip" style="color:#f53f3f"&gt;失败：' + esc(e.message) +
+          '&lt;br&gt;&lt;br&gt;多半是没登录抖音网页版。请在本页面登录后再试。&lt;/div&gt;');
+      });
+      return;
+    }
+
+    if (act === 'scan') {
+      setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;&lt;div class="dyh-prog" id="dyh-prog"&gt;准备抓取…&lt;/div&gt;' +
+        '&lt;div class="dyh-tip"&gt;抓取期间请不要关掉这个页面。每个账号之间会自动间隔 1~2.5 秒，避免被抖音风控。&lt;/div&gt;');
+      scanUnread(function (s) {
+        var p = document.getElementById('dyh-prog');
+        if (p) p.innerHTML = '已抓 &lt;b&gt;' + s.cur + '/' + s.total + '&lt;/b&gt;　新增 &lt;b&gt;' + s.newCount + '&lt;/b&gt;' +
+          (s.errors ? '　失败 ' + s.errors : '') + '&lt;br&gt;当前：' + esc(s.name);
+      }).then(function (r) {
+        if (!r.ok) { setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;&lt;div class="dyh-tip"&gt;' + esc(r.error) + '&lt;/div&gt;'); return; }
+        S.lastScanAt = Date.now(); save();
+        setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;' +
+          '&lt;div class="dyh-card"&gt;&lt;div class="dyh-row"&gt;&lt;b&gt;新增未读&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + r.newCount + ' 条&lt;/span&gt;&lt;/div&gt;' +
+          '&lt;div class="dyh-row"&gt;&lt;b&gt;成功账号&lt;/b&gt;&lt;span&gt;' + r.okCount + '&lt;/span&gt;&lt;/div&gt;' +
+          '&lt;div class="dyh-row"&gt;&lt;b&gt;失败账号&lt;/b&gt;&lt;span&gt;' + r.errors + '&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;' +
+          '&lt;button class="dyh-btn primary" data-act="push"&gt;☁️ 推到 GitHub&lt;/button&gt;' +
+          '&lt;button class="dyh-btn" data-act="list"&gt;📺 看未读列表&lt;/button&gt;' +
+          (r.errors &gt; r.okCount ? '&lt;div class="dyh-tip" style="color:#f53f3f"&gt;失败数偏多，多半是抖音风控冷却中，过 20~30 分钟再抓一次即可。&lt;/div&gt;' : ''));
+      });
+      return;
+    }
+
+    if (act === 'push') {
+      setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;&lt;div class="dyh-prog" id="dyh-prog"&gt;正在推送到 GitHub…&lt;/div&gt;');
+      var payload = buildPayload();
+      ghPush('unread.json', JSON.stringify(payload), '手机端更新 ' + fmtTime(Date.now()))
+        .then(function (sha) {
+          S.lastExport = Date.now(); save();
+          setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;' +
+            '&lt;div class="dyh-card"&gt;&lt;div class="dyh-row"&gt;&lt;b&gt;未读视频&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + payload.videos.length + ' 条&lt;/span&gt;&lt;/div&gt;' +
+            '&lt;div class="dyh-row"&gt;&lt;b&gt;账号&lt;/b&gt;&lt;span&gt;' + payload.accounts.length + ' 个&lt;/span&gt;&lt;/div&gt;' +
+            '&lt;div class="dyh-row"&gt;&lt;b&gt;commit&lt;/b&gt;&lt;span&gt;' + esc(String(sha).slice(0, 7)) + '&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;' +
+            '&lt;div class="dyh-tip"&gt;推送成功。现在打开手机端 HTML 点「🔄 同步」，或直接访问 raw 地址即可看到最新数据。&lt;/div&gt;');
+        })
+        .catch(function (e) {
+          setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;&lt;div class="dyh-tip" style="color:#f53f3f"&gt;推送失败：' + esc(e.message) + '&lt;/div&gt;' +
+            '&lt;button class="dyh-btn" data-act="settings"&gt;⚙️ 去设置检查 GitHub 配置&lt;/button&gt;');
+        });
+      return;
+    }
+
+    if (act === 'do-search') {
+      var kwEl = document.getElementById('dyh-kw');
+      var kw = kwEl ? kwEl.value.trim() : '';
+      var box = document.getElementById('dyh-results');
+      if (!kw) { if (box) box.innerHTML = '&lt;div class="dyh-tip"&gt;先输入昵称&lt;/div&gt;'; return; }
+      if (box) box.innerHTML = '&lt;div class="dyh-tip"&gt;搜索中…&lt;/div&gt;';
+      searchUsers(kw).then(function (list) {
+        if (!box) return;
+        if (!list.length) { box.innerHTML = '&lt;div class="dyh-tip"&gt;没搜到账号。抖音搜索页结构可能变了，也可以直接在上面搜索框里手动关注。&lt;/div&gt;'; return; }
+        var h = '';
+        for (i = 0; i &lt; list.length; i++) {
+          h += '&lt;div class="dyh-item"&gt;&lt;div class="dyh-item-t"&gt;' + esc(list[i].name) + '&lt;/div&gt;' +
+            '&lt;div class="dyh-item-m"&gt;&lt;span&gt;' + (list[i].following ? '已关注' : '未关注') + '&lt;/span&gt;' +
+            (list[i].following ? '' : '&lt;a href="javascript:;" data-act="follow" data-sec="' + esc(list[i].secUid) + '" data-name="' + esc(list[i].name) + '"&gt;＋ 关注&lt;/a&gt;') +
+            '&lt;/div&gt;&lt;/div&gt;';
+        }
+        box.innerHTML = h;
+      }).catch(function (e) {
+        if (box) box.innerHTML = '&lt;div class="dyh-tip" style="color:#f53f3f"&gt;搜索失败：' + esc(e.message) + '&lt;/div&gt;';
+      });
+      return;
+    }
+
+    if (act === 'follow') {
+      var sec = el.getAttribute('data-sec'), nm = el.getAttribute('data-name');
+      toast('正在关注 ' + nm + '…', 8000);
+      setFollow(sec, true, nm).then(function (r) {
+        toast(r.ok ? ('✅ 已关注 ' + nm) : ('关注失败：' + (r.error || r.state)));
+        S.accounts.push({ name: nm, secUserId: sec, category: '' }); save();
+      });
+      return;
+    }
+
+    if (act === 'open-home') {
+      var sh = el.getAttribute('data-sec');
+      var w = window.open('https://www.douyin.com/user/' + encodeURIComponent(sh), '_blank');
+      if (!w) toast('浏览器拦截了新标签页，请允许弹出窗口');
+      return;
+    }
+
+    if (act === 'unfollow-one') {
+      var s1 = el.getAttribute('data-sec'), n1 = el.getAttribute('data-name');
+      if (!confirm('确定要在抖音里取关「' + n1 + '」吗？')) return;
+      toast('正在取关…', 8000);
+      setFollow(s1, false, n1).then(function (r) {
+        if (r.ok || r.noop) {
+          S.accounts = S.accounts.filter(function (a) { return a.secUserId !== s1; }); save();
+          toast('✅ 已取关 ' + n1); open('manage');
+          return;
+        }
+        setBody('&lt;div class="dyh-back" data-act="manage"&gt;← 返回&lt;/div&gt;' +
+          '&lt;div class="dyh-tip" style="color:#f53f3f"&gt;取关「' + esc(n1) + '」失败：' + esc(r.error || r.state || '未知原因') + '&lt;/div&gt;' +
+          '&lt;button class="dyh-btn primary" data-act="open-home" data-sec="' + esc(s1) + '"&gt;🌐 打开 TA 的主页手动取关&lt;/button&gt;' +
+          '&lt;div class="dyh-tip"&gt;在新标签页里点一下「已关注」按钮即可。手动操作走的是真实页面，不会被验证码拦。&lt;/div&gt;');
+      });
+      return;
+    }
+
+    if (act === 'unfollow-cat') {
+      var cat = el.getAttribute('data-cat');
+      var targets = S.accounts.filter(function (a) { return (a.category || '') === cat; });
+      if (!targets.length) { toast('该分类下没有账号'); return; }
+      if (!confirm('确定要取关「' + (cat || '未分类') + '」下的 ' + targets.length + ' 个账号吗？此操作会真的取消抖音关注，不可撤销。')) return;
+      setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;&lt;div class="dyh-prog" id="dyh-prog"&gt;开始批量取关 0/' + targets.length + '&lt;/div&gt;');
+      var doneN = 0, failN = 0;
+      function next(i2) {
+        if (i2 &gt;= targets.length) {
+          save();
+          setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;' +
+            '&lt;div class="dyh-card"&gt;&lt;div class="dyh-row"&gt;&lt;b&gt;取关成功&lt;/b&gt;&lt;span&gt;' + doneN + '&lt;/span&gt;&lt;/div&gt;' +
+            '&lt;div class="dyh-row"&gt;&lt;b&gt;失败&lt;/b&gt;&lt;span&gt;' + failN + '&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;' +
+            '&lt;button class="dyh-btn" data-act="manage"&gt;← 回到管理&lt;/button&gt;');
+          return Promise.resolve();
+        }
+        var p = document.getElementById('dyh-prog');
+        if (p) p.innerHTML = '取关中 ' + (i2 + 1) + '/' + targets.length + '：' + esc(targets[i2].name);
+        return setFollow(targets[i2].secUserId, false, targets[i2].name).then(function (r) {
+          if (r.ok || r.noop) {
+            doneN++;
+            S.accounts = S.accounts.filter(function (a) { return a.secUserId !== targets[i2].secUserId; });
+          } else failN++;
+          return sleep(2200).then(function () { return next(i2 + 1); });
+        });
+      }
+      next(0);
+      return;
+    }
+
+    if (act === 'setcat') {
+      var sec2 = el.getAttribute('data-sec');
+      var cur = '';
+      for (i = 0; i &lt; S.accounts.length; i++) if (S.accounts[i].secUserId === sec2) cur = S.accounts[i].category || '';
+      var h2 = '&lt;div class="dyh-back" data-act="manage"&gt;← 返回&lt;/div&gt;&lt;div class="dyh-tip"&gt;选择分类&lt;/div&gt;';
+      for (i = 0; i &lt; CATS.length; i++) {
+        h2 += '&lt;button class="dyh-btn' + (CATS[i] === cur ? ' primary' : '') + '" data-act="do-setcat" data-sec="' + esc(sec2) + '" data-cat="' + esc(CATS[i]) + '"&gt;' + esc(CATS[i]) + '&lt;/button&gt;';
+      }
+      h2 += '&lt;button class="dyh-btn gray" data-act="do-setcat" data-sec="' + esc(sec2) + '" data-cat=""&gt;清除分类&lt;/button&gt;';
+      setBody(h2);
+      return;
+    }
+
+    if (act === 'do-setcat') {
+      var sec3 = el.getAttribute('data-sec'), cat3 = el.getAttribute('data-cat');
+      for (i = 0; i &lt; S.accounts.length; i++) if (S.accounts[i].secUserId === sec3) S.accounts[i].category = cat3;
+      save(); toast('已设为「' + (cat3 || '未分类') + '」'); open('manage');
+      return;
+    }
+
+    if (act === 'save-settings') {
+      S.cfg.owner = (document.getElementById('dyh-owner') || {}).value || S.cfg.owner;
+      S.cfg.repo = (document.getElementById('dyh-repo') || {}).value || S.cfg.repo;
+      S.cfg.branch = (document.getElementById('dyh-branch') || {}).value || S.cfg.branch;
+      S.cfg.token = (document.getElementById('dyh-token') || {}).value || '';
+      save(); toast('已保存'); open('home');
+      return;
+    }
+
+    if (act === 'export') {
+      var blob = new Blob([JSON.stringify(buildPayload())], { type: 'application/json' });
+      var a2 = document.createElement('a');
+      a2.href = URL.createObjectURL(blob);
+      a2.download = '抖音未读-' + Date.now() + '.json';
+      document.body.appendChild(a2); a2.click();
+      setTimeout(function () { URL.revokeObjectURL(a2.href); a2.remove(); }, 1500);
+      toast('已下载'); return;
+    }
+
+    if (act === 'clear') {
+      if (!confirm('确定清空本机保存的关注列表、视频库和已读记录吗？（不影响抖音账号本身）')) return;
+      S.accounts = []; S.videos = []; S.readIds = []; save(); toast('已清空'); open('home');
+      return;
+    }
+  }
+
+  /* ----------------------------- 启动 ----------------------------- */
+  function boot() {
+    if (!/www\.douyin\.com/.test(location.host)) return;
+    /* 如果这是一个被脚本打开的「取关/关注」用标签页，先让它自动点完按钮再挂面板 */
+    try { autoFollowWorker(); } catch (e) { console.warn('[抖音关注助手] 自动点击异常：', e); }
+    ensureUI();
+    console.log('[抖音关注助手] 已加载。右下角 🎯 按钮打开面板。');
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+
+  /* 暴露内部能力，方便在控制台排查（无害，也可当作高级用法入口） */
+  window.DYHelper = {
+    version: '1.0.0',
+    state: function () { return S; },
+    save: save,
+    getSelfSecUid: getSelfSecUid,
+    fetchFollowing: fetchFollowing,
+    fetchPosts: fetchPosts,
+    searchUsers: searchUsers,
+    setFollow: setFollow,
+    buildPayload: buildPayload,
+    scan: scanUnread,
+    push: function () { return ghPush('unread.json', JSON.stringify(buildPayload()), '手机端更新 ' + fmtTime(Date.now())); },
+    openPanel: function () { open('home'); }
+  };
+})();
+</textarea>
+
+<div class="wrap">
+  <div class="card">
+    <h2>📌 更新记录</h2>
+    <details>
+      <summary style="cursor:pointer;color:#86909c;font-size:13px">点开看历次改动（最新在上）</summary>
+      <ul style="list-style:none;padding:0;margin:10px 0 0">
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> 安装地址换成 <b>GitHub Pages 直链</b>（jsDelivr 缓存 7 天，会给旧版脚本，旧版取关会被验证码页卡死）；新增三条 Via 安装路径 <b>B-1 下载脚本 / B-2 导入脚本 / B-3 添加脚本</b>，覆盖「加号只有三个选项」的各种 Via 版本；新增 <b>📦 复制脚本全文</b> 按钮，<b>添加脚本</b>这条路也能离线用。</li>
+      </ul>
+    </details>
+  </div>
+</div>
 </body>
 </html>
