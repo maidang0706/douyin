@@ -33,7 +33,7 @@
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12 },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l' },
       selfSecUid: '',
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -48,6 +48,7 @@
       var o = JSON.parse(raw);
       for (var k in def) if (!(k in o)) o[k] = def[k];
       if (!o.cfg) o.cfg = def.cfg;
+      if (!o.cfg.uiScale) o.cfg.uiScale = 'l';   // 老用户升级后自动用「更大」
       if (!o.cfg.scanConc) o.cfg.scanConc = 6;
       if (!o.cfg.scanBudget) o.cfg.scanBudget = 12;
       /* ★ 一次性迁移（2026-10-02）：老版本 scanConc 被上一轮迁移统一提到 6，
@@ -799,6 +800,12 @@
     h += '<label class="dyh-lb">仓库名</label><input id="dyh-repo" class="dyh-input" value="' + esc(S.cfg.repo) + '">';
     h += '<label class="dyh-lb">分支</label><input id="dyh-branch" class="dyh-input" value="' + esc(S.cfg.branch) + '">';
     h += '<label class="dyh-lb">Token</label><input id="dyh-token" class="dyh-input" type="password" value="' + esc(S.cfg.token) + '" placeholder="ghp_xxx">';
+    h += '<label class="dyh-lb">助手界面大小（点了立刻生效，不用重开）</label><div style="display:flex;gap:8px;margin:4px 0 2px">' +
+      '<button class="dyh-btn' + (S.cfg.uiScale === 's' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="s">小</button>' +
+      '<button class="dyh-btn' + (S.cfg.uiScale === 'm' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="m">中</button>' +
+      '<button class="dyh-btn' + (S.cfg.uiScale === 'l' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="l">更大</button>' +
+      '</div>' +
+      '<div class="dyh-tip" style="margin-top:2px">默认「更大」= 宽占屏幕 96%、高占 93%，四周只留一点点边，字也跟着放大了一档。越小越省屏幕、越看得清全貌。</div>';
     h += '<label class="dyh-lb">每次抓前几个账号（留空 = 全部 ' + S.accounts.length + ' 个）</label>' +
       '<input id="dyh-limit" class="dyh-input" type="number" min="0" inputmode="numeric" value="' + (S.cfg.scanLimit || 0) + '">';
     h += '<label class="dyh-lb">并发【上限】1~10（默认 6）</label>' +
@@ -829,32 +836,36 @@
       'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.28);user-select:none}' +
       '.dyh-panel{position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483645;background:rgba(0,0,0,.55);' +
       'display:none;align-items:center;justify-content:center}' +
-      '.dyh-box{background:#fff;width:66.6%;max-width:560px;height:66.6%;max-height:66.6%;overflow:hidden;' +
-      'border-radius:16px;padding:12px 14px calc(16px + env(safe-area-inset-bottom));font-size:15px;color:#1d2129;' +
+      /* 默认「更大」：宽 96% / 高 93%，四周只留一点点边，几乎就是铺满手机屏（10-02 按用户要求放大） */
+      '.dyh-box{background:#fff;width:96%;max-width:980px;height:93%;max-height:920px;overflow:hidden;' +
+      'border-radius:14px;padding:14px 16px calc(18px + env(safe-area-inset-bottom));font-size:17px;color:#1d2129;' +
       'display:flex;flex-direction:column}' +
-      '.dyh-box h3{margin:0 0 10px;font-size:17px;display:flex;align-items:center;flex:0 0 auto}' +
-      '.dyh-box h3 span{margin-left:auto;font-size:26px;color:#c9cdd4;padding:0 6px}' +
+      '.dyh-box.sz-s{width:74%;max-width:540px;height:70%;max-height:560px;font-size:15px}' +
+      '.dyh-box.sz-m{width:88%;max-width:720px;height:85%;max-height:720px;font-size:16px}' +
+      '.dyh-box.sz-l{width:96%;max-width:980px;height:93%;max-height:920px;font-size:17px}' +
+      '.dyh-box h3{margin:0 0 12px;font-size:19px;display:flex;align-items:center;flex:0 0 auto}' +
+      '.dyh-box h3 span{margin-left:auto;font-size:32px;color:#c9cdd4;padding:0 8px}' +
       '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
-      '.dyh-btn{display:block;width:100%;margin:8px 0;padding:14px 16px;border:1px solid #e5e6eb;border-radius:10px;' +
-      'background:#fff;font-size:16px;color:#1d2129;text-align:left}' +
+      '.dyh-btn{display:block;width:100%;margin:8px 0;padding:15px 16px;border:1px solid #e5e6eb;border-radius:10px;' +
+      'background:#fff;font-size:17px;color:#1d2129;text-align:left}' +
       '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
       '.dyh-btn.gray{color:#86909c}' +
-      '.dyh-card{background:#f7f8fa;border-radius:10px;padding:10px 12px;margin-bottom:10px}' +
-      '.dyh-row{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid #f0f0f0;font-size:15px}' +
+      '.dyh-card{background:#f7f8fa;border-radius:10px;padding:11px 13px;margin-bottom:10px}' +
+      '.dyh-row{display:flex;align-items:center;padding:11px 0;border-bottom:1px solid #f0f0f0;font-size:16px}' +
       '.dyh-row:last-child{border-bottom:0}' +
       '.dyh-row b{font-weight:500;color:#4e5969}' +
       '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
       '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
-      '.dyh-item{padding:10px 0;border-bottom:1px solid #f2f3f5}' +
-      '.dyh-item-t{font-size:15px;line-height:1.5;color:#1d2129}' +
-      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:6px;font-size:13px;color:#86909c}' +
-      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:4px 10px}' +
-      '.dyh-tip{font-size:13px;color:#86909c;line-height:1.6;margin:8px 0}' +
-      '.dyh-back{font-size:14px;color:#fe2c55;margin-bottom:10px}' +
-      '.dyh-input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e6eb;border-radius:8px;' +
-      'font-size:15px;margin:4px 0 10px}' +
-      '.dyh-lb{font-size:12px;color:#86909c;display:block;margin-top:8px}' +
-      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px;line-height:1.6}';
+      '.dyh-item{padding:11px 0;border-bottom:1px solid #f2f3f5}' +
+      '.dyh-item-t{font-size:16px;line-height:1.5;color:#1d2129}' +
+      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:6px;font-size:14px;color:#86909c}' +
+      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:6px 12px}' +
+      '.dyh-tip{font-size:14px;color:#86909c;line-height:1.6;margin:8px 0}' +
+      '.dyh-back{font-size:15px;color:#fe2c55;margin-bottom:10px}' +
+      '.dyh-input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #e5e6eb;border-radius:8px;' +
+      'font-size:16px;margin:4px 0 10px}' +
+      '.dyh-lb{font-size:13px;color:#86909c;display:block;margin-top:8px}' +
+      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:11px 13px;margin:10px 0;font-size:14px;line-height:1.6}';
     document.head.appendChild(st);
 
     fab = document.createElement('div');
@@ -878,6 +889,18 @@
     });
     document.body.appendChild(panel);
     bodyEl = panel.querySelector('#dyh-body');
+    applyBoxSize();   // 按设置里的「界面大小」把面板调好
+  }
+
+  /* 界面大小三档：s=小(74%) / m=中(88%) / l=更大(96%，默认) */
+  function applyBoxSize() {
+    if (!panel) return;
+    var box = panel.querySelector('.dyh-box');
+    if (!box) return;
+    var s = (S.cfg && S.cfg.uiScale) || 'l';
+    if (s !== 's' && s !== 'm') s = 'l';
+    box.className = 'dyh-box sz-' + s;
+    box.style.width = ''; box.style.height = '';
   }
 
   function open(view) {
@@ -996,6 +1019,16 @@
 
     if (act === 'stop-scan') { stopScan(); return; }
     if (act === 'clear-job') { S.scanJob = null; save(); toast('断点已清除，下次会全部重抓'); open('home'); return; }
+
+    if (act === 'ui-size') {
+      var sz = el.getAttribute('data-size');
+      if (sz === 's' || sz === 'm' || sz === 'l') {
+        S.cfg.uiScale = sz; save(); applyBoxSize();
+        toast('界面已改成「' + (sz === 's' ? '小' : sz === 'm' ? '中' : '更大') + '」');
+      }
+      open('settings');   // 重新渲染，让选中态亮起来
+      return;
+    }
 
     if (act === 'push') {
       setBody('<div class="dyh-back" data-act="home">← 返回</div><div class="dyh-prog" id="dyh-prog">正在推送到 GitHub…</div>');

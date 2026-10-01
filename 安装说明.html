@@ -246,12 +246,15 @@
     </div>
 
     <div class="card">
-      <h2>② 界面尺寸（10-01 已调整，现在更大更好点）</h2>
+      <h2>② 界面尺寸（10-02 又放大：现在只比手机屏小一圈）</h2>
       <ul>
-        <li><b>🎯 悬浮球</b>：直径从 54px 放大到 <b>66px</b>，右下角更显眼、手指更好点</li>
-        <li><b>面板窗口</b>：原来是撑满整屏的下拉抽屉，现在改成<b>居中圆角卡片，占屏幕宽高的 2/3</b>
-          （宽 66.6%、高 66.6%，最大不超过 560px），左右上下都留边，一眼能看出是弹窗而不是整页</li>
-        <li><b>字号</b>：按钮 15→16px、列表标题 14→15px、说明文字 12→13px，内容区点开后自己滚动，不会被裁掉</li>
+        <li><b>🎯 悬浮球</b>：直径 <b>66px</b>，右下角更显眼、手指更好点（入口，不跟着改）</li>
+        <li><b>面板窗口</b>：<b>宽占屏幕 96%、高占 93%</b>（最大 980×920 兜底），四周只留细细一圈边 ——
+          基本就是<b>铺满整屏</b>，但还能看出是浮层，想关随时关</li>
+        <li><b>能自己在三档之间切</b>：⚙️ <b>设置</b> 页最上面就是「助手界面大小」→
+          <b>小</b>(74%×70%) / <b>中</b>(88%×85%) / <b>更大</b>(96%×93%，默认)。<b>点了立刻生效，不用重开、也不用改别的设置</b></li>
+        <li><b>字号跟着放大一档</b>：标题 17→<b>19px</b>、按钮 16→<b>17px</b>、列表行 15→<b>16px</b>、
+          说明文字 13→<b>14px</b>，内容区点开后自己滚动，不会被裁掉</li>
         <li>想关掉：点面板<b>外面空白处</b>或右上角 <b>×</b> 就行</li>
       </ul>
       <div class="warn">如果改完<b>还是旧样子</b>，说明浏览器跑的还是缓存里的老脚本 —— 按下面的「③」重载一次就好了。
@@ -457,7 +460,7 @@ function copyRaw(){
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12 },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l' },
       selfSecUid: '',
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -472,6 +475,7 @@ function copyRaw(){
       var o = JSON.parse(raw);
       for (var k in def) if (!(k in o)) o[k] = def[k];
       if (!o.cfg) o.cfg = def.cfg;
+      if (!o.cfg.uiScale) o.cfg.uiScale = 'l';   // 老用户升级后自动用「更大」
       if (!o.cfg.scanConc) o.cfg.scanConc = 6;
       if (!o.cfg.scanBudget) o.cfg.scanBudget = 12;
       /* ★ 一次性迁移（2026-10-02）：老版本 scanConc 被上一轮迁移统一提到 6，
@@ -1223,6 +1227,12 @@ function copyRaw(){
     h += '&lt;label class="dyh-lb"&gt;仓库名&lt;/label&gt;&lt;input id="dyh-repo" class="dyh-input" value="' + esc(S.cfg.repo) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;分支&lt;/label&gt;&lt;input id="dyh-branch" class="dyh-input" value="' + esc(S.cfg.branch) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;Token&lt;/label&gt;&lt;input id="dyh-token" class="dyh-input" type="password" value="' + esc(S.cfg.token) + '" placeholder="ghp_xxx"&gt;';
+    h += '&lt;label class="dyh-lb"&gt;助手界面大小（点了立刻生效，不用重开）&lt;/label&gt;&lt;div style="display:flex;gap:8px;margin:4px 0 2px"&gt;' +
+      '&lt;button class="dyh-btn' + (S.cfg.uiScale === 's' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="s"&gt;小&lt;/button&gt;' +
+      '&lt;button class="dyh-btn' + (S.cfg.uiScale === 'm' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="m"&gt;中&lt;/button&gt;' +
+      '&lt;button class="dyh-btn' + (S.cfg.uiScale === 'l' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="l"&gt;更大&lt;/button&gt;' +
+      '&lt;/div&gt;' +
+      '&lt;div class="dyh-tip" style="margin-top:2px"&gt;默认「更大」= 宽占屏幕 96%、高占 93%，四周只留一点点边，字也跟着放大了一档。越小越省屏幕、越看得清全貌。&lt;/div&gt;';
     h += '&lt;label class="dyh-lb"&gt;每次抓前几个账号（留空 = 全部 ' + S.accounts.length + ' 个）&lt;/label&gt;' +
       '&lt;input id="dyh-limit" class="dyh-input" type="number" min="0" inputmode="numeric" value="' + (S.cfg.scanLimit || 0) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;并发【上限】1~10（默认 6）&lt;/label&gt;' +
@@ -1253,32 +1263,36 @@ function copyRaw(){
       'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.28);user-select:none}' +
       '.dyh-panel{position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483645;background:rgba(0,0,0,.55);' +
       'display:none;align-items:center;justify-content:center}' +
-      '.dyh-box{background:#fff;width:66.6%;max-width:560px;height:66.6%;max-height:66.6%;overflow:hidden;' +
-      'border-radius:16px;padding:12px 14px calc(16px + env(safe-area-inset-bottom));font-size:15px;color:#1d2129;' +
+      /* 默认「更大」：宽 96% / 高 93%，四周只留一点点边，几乎就是铺满手机屏（10-02 按用户要求放大） */
+      '.dyh-box{background:#fff;width:96%;max-width:980px;height:93%;max-height:920px;overflow:hidden;' +
+      'border-radius:14px;padding:14px 16px calc(18px + env(safe-area-inset-bottom));font-size:17px;color:#1d2129;' +
       'display:flex;flex-direction:column}' +
-      '.dyh-box h3{margin:0 0 10px;font-size:17px;display:flex;align-items:center;flex:0 0 auto}' +
-      '.dyh-box h3 span{margin-left:auto;font-size:26px;color:#c9cdd4;padding:0 6px}' +
+      '.dyh-box.sz-s{width:74%;max-width:540px;height:70%;max-height:560px;font-size:15px}' +
+      '.dyh-box.sz-m{width:88%;max-width:720px;height:85%;max-height:720px;font-size:16px}' +
+      '.dyh-box.sz-l{width:96%;max-width:980px;height:93%;max-height:920px;font-size:17px}' +
+      '.dyh-box h3{margin:0 0 12px;font-size:19px;display:flex;align-items:center;flex:0 0 auto}' +
+      '.dyh-box h3 span{margin-left:auto;font-size:32px;color:#c9cdd4;padding:0 8px}' +
       '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
-      '.dyh-btn{display:block;width:100%;margin:8px 0;padding:14px 16px;border:1px solid #e5e6eb;border-radius:10px;' +
-      'background:#fff;font-size:16px;color:#1d2129;text-align:left}' +
+      '.dyh-btn{display:block;width:100%;margin:8px 0;padding:15px 16px;border:1px solid #e5e6eb;border-radius:10px;' +
+      'background:#fff;font-size:17px;color:#1d2129;text-align:left}' +
       '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
       '.dyh-btn.gray{color:#86909c}' +
-      '.dyh-card{background:#f7f8fa;border-radius:10px;padding:10px 12px;margin-bottom:10px}' +
-      '.dyh-row{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid #f0f0f0;font-size:15px}' +
+      '.dyh-card{background:#f7f8fa;border-radius:10px;padding:11px 13px;margin-bottom:10px}' +
+      '.dyh-row{display:flex;align-items:center;padding:11px 0;border-bottom:1px solid #f0f0f0;font-size:16px}' +
       '.dyh-row:last-child{border-bottom:0}' +
       '.dyh-row b{font-weight:500;color:#4e5969}' +
       '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
       '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
-      '.dyh-item{padding:10px 0;border-bottom:1px solid #f2f3f5}' +
-      '.dyh-item-t{font-size:15px;line-height:1.5;color:#1d2129}' +
-      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:6px;font-size:13px;color:#86909c}' +
-      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:4px 10px}' +
-      '.dyh-tip{font-size:13px;color:#86909c;line-height:1.6;margin:8px 0}' +
-      '.dyh-back{font-size:14px;color:#fe2c55;margin-bottom:10px}' +
-      '.dyh-input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e6eb;border-radius:8px;' +
-      'font-size:15px;margin:4px 0 10px}' +
-      '.dyh-lb{font-size:12px;color:#86909c;display:block;margin-top:8px}' +
-      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px;line-height:1.6}';
+      '.dyh-item{padding:11px 0;border-bottom:1px solid #f2f3f5}' +
+      '.dyh-item-t{font-size:16px;line-height:1.5;color:#1d2129}' +
+      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:6px;font-size:14px;color:#86909c}' +
+      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:6px 12px}' +
+      '.dyh-tip{font-size:14px;color:#86909c;line-height:1.6;margin:8px 0}' +
+      '.dyh-back{font-size:15px;color:#fe2c55;margin-bottom:10px}' +
+      '.dyh-input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #e5e6eb;border-radius:8px;' +
+      'font-size:16px;margin:4px 0 10px}' +
+      '.dyh-lb{font-size:13px;color:#86909c;display:block;margin-top:8px}' +
+      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:11px 13px;margin:10px 0;font-size:14px;line-height:1.6}';
     document.head.appendChild(st);
 
     fab = document.createElement('div');
@@ -1302,6 +1316,18 @@ function copyRaw(){
     });
     document.body.appendChild(panel);
     bodyEl = panel.querySelector('#dyh-body');
+    applyBoxSize();   // 按设置里的「界面大小」把面板调好
+  }
+
+  /* 界面大小三档：s=小(74%) / m=中(88%) / l=更大(96%，默认) */
+  function applyBoxSize() {
+    if (!panel) return;
+    var box = panel.querySelector('.dyh-box');
+    if (!box) return;
+    var s = (S.cfg &amp;&amp; S.cfg.uiScale) || 'l';
+    if (s !== 's' &amp;&amp; s !== 'm') s = 'l';
+    box.className = 'dyh-box sz-' + s;
+    box.style.width = ''; box.style.height = '';
   }
 
   function open(view) {
@@ -1420,6 +1446,16 @@ function copyRaw(){
 
     if (act === 'stop-scan') { stopScan(); return; }
     if (act === 'clear-job') { S.scanJob = null; save(); toast('断点已清除，下次会全部重抓'); open('home'); return; }
+
+    if (act === 'ui-size') {
+      var sz = el.getAttribute('data-size');
+      if (sz === 's' || sz === 'm' || sz === 'l') {
+        S.cfg.uiScale = sz; save(); applyBoxSize();
+        toast('界面已改成「' + (sz === 's' ? '小' : sz === 'm' ? '中' : '更大') + '」');
+      }
+      open('settings');   // 重新渲染，让选中态亮起来
+      return;
+    }
 
     if (act === 'push') {
       setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;&lt;div class="dyh-prog" id="dyh-prog"&gt;正在推送到 GitHub…&lt;/div&gt;');
@@ -1616,6 +1652,7 @@ function copyRaw(){
     <details>
       <summary style="cursor:pointer;color:#86909c;font-size:13px">点开看历次改动（最新在上）</summary>
       <ul style="list-style:none;padding:0;margin:10px 0 0">
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02（今）</b> <b>界面再放大：面板从占屏 2/3 改成「只比手机屏小一圈」</b>。① 面板窗口 <b>66.6%×66.6%（最大 560px）→ 96%×93%（最大 980×920）</b>，四周只留细细一圈边，几乎铺满整屏；② <b>设置页新增「助手界面大小」三档</b>：小 74%×70% / 中 88%×85% / 更大 96%×93%（默认），<b>点一下立刻生效</b>，新增 <code>applyBoxSize()</code> 在面板创建时按 <code>S.cfg.uiScale</code> 应用；③ 字号再升一档：标题 17→<b>19px</b>、按钮 16→<b>17px</b>、列表行 15→<b>16px</b>、正文 15→<b>17px</b>、说明 13→<b>14px</b>、输入框 15→<b>16px</b>、关闭按钮 26→<b>32px</b>；④ 老用户升级<b>自动用「更大」</b>（<code>if(!o.cfg.uiScale) o.cfg.uiScale='l'</code>，不用手动改）。只动 UI，抓取逻辑一行没改（回归仿真全过）。说明页「② 界面尺寸」整节重写。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> <b>抓未读时能不能切 App（附加强化）</b>：先说死答案 —— <b>网页不能后台自动跑</b>，切 App = 暂停、切回来 = 续跑，锁屏 = 冻结重来。脚本新增 <b>Screen Wake Lock（抓的时候屏幕常亮）</b> + <code>visibilitychange</code> 回前台自动续申请；新增 <b>「每次抓前 N 个账号」</b>（<code>S.cfg.scanLimit</code>，设置页输入框，填 80 ≈ 4 分钟一轮）把 15 分钟的长任务拆短；扫描进度提示改成讲清「暂停/续跑/重来」三种情况。说明页新增「④ 抓未读的时候，能切到别的 App 吗」一节。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02（今）</b> <b>重写抓取引擎：「失败太多」和「抓一半卡死」一起修掉，顺手还更快了</b>。① <b>请求硬超时</b>（原 fetch 没超时，抖音一挂起就永久 pending，并发槽位要不回来 = 卡死真凶）：每请求 8 秒 + 单账号 45 秒兜底 + 整轮 12 分钟看门狗 + 「🛑 停止」随时收工；② <b>自适应并发</b>：开局只 3 个，连成 5 个才 +1（上限默认 6），连挂 2 个砍半冷却 2~3 秒，识别风控降到 1 个冷却 4~6 秒、连中 3 次直接收工不硬磨；③ <b>断点续抓</b>：进度落盘，切 App / 熄屏 / 被杀 / 断网都能接着抓，断点自动回退到失败那几个之前，<b>一个不漏</b>；④ 风控页不再被当成普通抖动，直接识别并降速；⑤ 进度条显示 <b>当前并发 / 已用时间 / 预计剩余</b>、冷却时明确提示、结束列出没抓成的账号；⑥ 设置项改成「并发上限 1~10」+「整轮最长几分钟」+「🧹 清掉抓取断点」。修掉一个大坑：rawFetch 用 <code>.then(cleanup, cleanup)</code> 收尾，cleanup 无返回值会把整个 Promise 解析成 <code>undefined</code>（会让每个请求都「不是 JSON」）。模拟验证：120 账号 0.87 秒 0 失败、25% 请求永久挂起也能在 45 秒内跑完不卡死、全量风控 0.04 秒优雅收尾、断点续跑正确跳过已抓账号。说明页新增「⑤-3 这一版」。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02</b> <b>二次提速：批次改滑动窗口 + 并发 3→6（上限 12），一轮再快一倍</b>。① <b>滑动窗口</b>：原来「一批一批」每批空等 0.3~0.8 秒、批尾槽位白转，现在<b>谁抓完谁立刻补位</b>；② 并发默认 <b>3→6</b>（抖音是 HTTP/2 单连接多路复用，不受 6 连接限制，可填到 12），<b>旧版本会自动迁移到 6</b>；③ 落盘<b>去抖</b>（停手 3 秒写一次，全程只写 1~2 次，不再反复卡主线程）；④ 进度显示 <b>150ms 节流</b>。设置项改成「同时抓几个账号（1~12）」。已用 392/20/5/1 账号组合模拟验证：覆盖完整、不漏号、不早停。说明页新增「⑤-2 还想更快」一节。</li>
