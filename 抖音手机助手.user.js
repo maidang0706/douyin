@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      1.0.0
+// @version      1.1.0
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -28,6 +28,7 @@
   var API_POST = 'https://www.douyin.com/aweme/v1/web/aweme/post/';
   var API_FOLLOWING = 'https://www.douyin.com/aweme/v1/web/user/following/list/';
   var LS = 'dy_phone_helper_v1';
+  var VER = '1.1';   // 面板右上角显示 v1.1 —— 一眼确认手机上跑的是不是最新版
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -734,6 +735,7 @@
     h += '<button class="dyh-btn" data-act="search">🔎 搜索并关注新账号</button>';
     h += '<button class="dyh-btn" data-act="push">☁️ 推到 GitHub（手机端 HTML 可看）</button>';
     h += '<button class="dyh-btn gray" data-act="settings">⚙️ 设置（GitHub / 数据）</button>';
+    h += '<div class="dyh-tip">面板右上角的 <b>⤢</b> 可以切换界面大小（小 / 中 / 更大），点一下立刻变；标题后面那个 <b>v' + VER + '</b> 是版本号，用来确认手机上跑的是不是最新版。</div>';
     return h;
   }
 
@@ -836,31 +838,35 @@
       'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.28);user-select:none}' +
       '.dyh-panel{position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483645;background:rgba(0,0,0,.55);' +
       'display:none;align-items:center;justify-content:center}' +
-      /* 默认「更大」：宽 96% / 高 93%，四周只留一点点边，几乎就是铺满手机屏（10-02 按用户要求放大） */
-      '.dyh-box{background:#fff;width:96%;max-width:980px;height:93%;max-height:920px;overflow:hidden;' +
-      'border-radius:14px;padding:14px 16px calc(18px + env(safe-area-inset-bottom));font-size:17px;color:#1d2129;' +
-      'display:flex;flex-direction:column}' +
-      '.dyh-box.sz-s{width:74%;max-width:540px;height:70%;max-height:560px;font-size:15px}' +
-      '.dyh-box.sz-m{width:88%;max-width:720px;height:85%;max-height:720px;font-size:16px}' +
-      '.dyh-box.sz-l{width:96%;max-width:980px;height:93%;max-height:920px;font-size:17px}' +
-      '.dyh-box h3{margin:0 0 12px;font-size:19px;display:flex;align-items:center;flex:0 0 auto}' +
-      '.dyh-box h3 span{margin-left:auto;font-size:32px;color:#c9cdd4;padding:0 8px}' +
+      /* 默认「更大」：宽 96% / 高 93%，四周只留一点点边，几乎就是铺满手机屏（10-02 按用户要求放大）
+         ★ 关键尺寸一律 !important：抖音自己后插入的样式表压不掉我们（否则面板会缩回老样子） */
+      '.dyh-box{background:#fff!important;width:96%!important;max-width:980px;height:93%!important;max-height:920px;overflow:hidden;' +
+      'border-radius:14px;padding:14px 16px calc(18px + env(safe-area-inset-bottom));font-size:17px!important;color:#1d2129;' +
+      'display:flex!important;flex-direction:column;box-sizing:border-box}' +
+      '.dyh-box.sz-s{width:74%!important;max-width:540px;height:70%!important;max-height:560px;font-size:15px!important}' +
+      '.dyh-box.sz-m{width:88%!important;max-width:720px;height:85%!important;max-height:720px;font-size:16px!important}' +
+      '.dyh-box.sz-l{width:96%!important;max-width:980px;height:93%!important;max-height:920px;font-size:17px!important}' +
+      '.dyh-box h3{margin:0 0 12px!important;font-size:19px!important;display:flex!important;align-items:center;flex:0 0 auto}' +
+      '.dyh-box h3 span{margin-left:auto;font-size:32px!important;color:#c9cdd4;padding:0 8px}' +
+      '.dyh-ver{font-size:12px!important;color:#c9cdd4;font-weight:400;margin-left:6px!important}' +
+      '.dyh-zbtn{font-size:22px!important;color:#4e5969;background:#f2f3f5;border-radius:8px;' +
+      'padding:2px 9px;margin-left:auto!important}' +
       '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
       '.dyh-btn{display:block;width:100%;margin:8px 0;padding:15px 16px;border:1px solid #e5e6eb;border-radius:10px;' +
-      'background:#fff;font-size:17px;color:#1d2129;text-align:left}' +
+      'background:#fff;font-size:17px!important;color:#1d2129;text-align:left}' +
       '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
       '.dyh-btn.gray{color:#86909c}' +
       '.dyh-card{background:#f7f8fa;border-radius:10px;padding:11px 13px;margin-bottom:10px}' +
-      '.dyh-row{display:flex;align-items:center;padding:11px 0;border-bottom:1px solid #f0f0f0;font-size:16px}' +
+      '.dyh-row{display:flex;align-items:center;padding:11px 0;border-bottom:1px solid #f0f0f0;font-size:16px!important}' +
       '.dyh-row:last-child{border-bottom:0}' +
       '.dyh-row b{font-weight:500;color:#4e5969}' +
       '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
       '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
       '.dyh-item{padding:11px 0;border-bottom:1px solid #f2f3f5}' +
-      '.dyh-item-t{font-size:16px;line-height:1.5;color:#1d2129}' +
+      '.dyh-item-t{font-size:16px!important;line-height:1.5;color:#1d2129}' +
       '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:6px;font-size:14px;color:#86909c}' +
       '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:6px 12px}' +
-      '.dyh-tip{font-size:14px;color:#86909c;line-height:1.6;margin:8px 0}' +
+      '.dyh-tip{font-size:14px!important;color:#86909c;line-height:1.6;margin:8px 0}' +
       '.dyh-back{font-size:15px;color:#fe2c55;margin-bottom:10px}' +
       '.dyh-input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #e5e6eb;border-radius:8px;' +
       'font-size:16px;margin:4px 0 10px}' +
@@ -876,9 +882,10 @@
 
     panel = document.createElement('div');
     panel.className = 'dyh-panel';
-    panel.innerHTML = '<div class="dyh-box"><h3>抖音关注助手<span data-act="close">×</span><div id="dyh-body"></div></h3></div>';
-    // 修正结构：h3 不应包裹 body，重建
-    panel.innerHTML = '<div class="dyh-box"><h3>抖音关注助手<span data-act="close">×</span></h3><div id="dyh-body"></div></div>';
+    // 结构：h3 只放标题/版本号/⤢缩放/关闭，正文单独 #dyh-body（h3 不能包裹 body，否则内容区会缩成一行）
+    panel.innerHTML = '<div class="dyh-box"><h3>抖音关注助手<span class="dyh-ver">v' + VER + '</span>' +
+      '<span class="dyh-zbtn" data-act="cycle-size" title="点一下换界面大小">⤢</span>' +
+      '<span data-act="close">×</span></h3><div id="dyh-body"></div></div>';
     panel.addEventListener('click', function (e) {
       if (e.target === panel) { panel.style.display = 'none'; return; }
       var el = e.target.closest ? e.target.closest('[data-act]') : null;
@@ -890,9 +897,15 @@
     document.body.appendChild(panel);
     bodyEl = panel.querySelector('#dyh-body');
     applyBoxSize();   // 按设置里的「界面大小」把面板调好
+    // 转屏 / 分屏 / 地址栏收放都会改变视口，跟着重算一次，避免面板尺寸不对
+    var reSize = function () { if (panel && panel.style.display === 'flex') applyBoxSize(); };
+    window.addEventListener('resize', reSize);
+    window.addEventListener('orientationchange', function () { setTimeout(reSize, 300); });
   }
 
-  /* 界面大小三档：s=小(74%) / m=中(88%) / l=更大(96%，默认) */
+  /* 界面大小三档：s=小(74%×70%) / m=中(88%×85%) / l=更大(96%×93%，默认)
+     ★ 双保险：class 用百分比（!important 防抖音样式覆盖）+ inline style 直接写算好的 px
+       （inline 优先级最高，即使 CSS 类没命中、或页面样式再怎么压，尺寸也不会退回去） */
   function applyBoxSize() {
     if (!panel) return;
     var box = panel.querySelector('.dyh-box');
@@ -900,12 +913,18 @@
     var s = (S.cfg && S.cfg.uiScale) || 'l';
     if (s !== 's' && s !== 'm') s = 'l';
     box.className = 'dyh-box sz-' + s;
-    box.style.width = ''; box.style.height = '';
+    var W = window.innerWidth || 390, H = window.innerHeight || 844;
+    var pct = s === 's' ? [74, 70] : (s === 'm' ? [88, 85] : [96, 93]);
+    var cap = s === 's' ? [540, 560] : (s === 'm' ? [720, 720] : [980, 920]);
+    box.style.width = Math.min(Math.round(W * pct[0] / 100), cap[0]) + 'px';
+    box.style.height = Math.min(Math.round(H * pct[1] / 100), cap[1]) + 'px';
+    box.style.maxWidth = 'none'; box.style.maxHeight = 'none';
   }
 
   function open(view) {
     ensureUI();
     panel.style.display = 'flex';
+    applyBoxSize();   // 每次打开都重算一次（视口可能变了，也防止尺寸被页面样式顶回去）
     if (view === 'home') bodyEl.innerHTML = renderHome();
     else if (view === 'list') bodyEl.innerHTML = renderList();
     else if (view === 'manage') bodyEl.innerHTML = renderManage();
@@ -1019,6 +1038,18 @@
 
     if (act === 'stop-scan') { stopScan(); return; }
     if (act === 'clear-job') { S.scanJob = null; save(); toast('断点已清除，下次会全部重抓'); open('home'); return; }
+
+    // 标题栏 ⤢：小 → 中 → 更大 → 小 …… 点了立刻变，并报出实际像素，方便确认到底生效没有
+    if (act === 'cycle-size') {
+      var order = ['s', 'm', 'l'];
+      var ci = order.indexOf(S.cfg.uiScale);
+      var nx = order[(ci < 0 ? 2 : ci + 1) % 3];
+      S.cfg.uiScale = nx; save(); applyBoxSize();
+      var bx = panel.querySelector('.dyh-box');
+      var px = bx ? Math.round(bx.getBoundingClientRect().width) + '×' + Math.round(bx.getBoundingClientRect().height) + 'px' : '';
+      toast('界面：' + (nx === 's' ? '小' : nx === 'm' ? '中' : '更大') + '（' + px + '）');
+      return;
+    }
 
     if (act === 'ui-size') {
       var sz = el.getAttribute('data-size');
