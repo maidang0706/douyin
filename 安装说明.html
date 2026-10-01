@@ -113,8 +113,9 @@
     <button class="btn" onclick="copySrc()">📦 复制脚本全文</button>
 
     <div class="info">Via <b>原生支持油猴脚本</b>，不用再装 Tampermonkey。装一次就常驻，以后打开抖音自动生效。</div>
-    <div class="ok"><b>装完验证（30 秒）</b>：Via 里打开 <code>www.douyin.com</code> → 勾「<b>桌面版网站</b>」→ 登录抖音 → <b>下拉刷新一次</b> →
-      看屏幕<b>右下角</b>有没有一个 🎯 圆按钮。有就成了；没有再看 Via「脚本」里这个脚本的开关是不是打开的，然后彻底关掉 Via 重开一次。</div>
+    <div class="ok"><b>装完验证（30 秒）</b>：Via 里打开 <code>www.douyin.com</code>（<b>手机版就行</b>）→ 登录抖音 → <b>下拉刷新一次</b> →
+      看屏幕<b>右下角</b>有没有一个 🎯 圆按钮。有就成了；没有再看 Via「脚本」里这个脚本的开关是不是打开的，然后彻底关掉 Via 重开一次。
+      <br><b>还是没有？</b> 检查地址栏是不是<b>跳到了 <code>m.douyin.com</code> 或被挡成「下载 App」页</b>：前者说明网址不对（重新手输 <code>www.douyin.com</code>），后者开一次「电脑模式」再刷新。</div>
 
     <p style="margin:16px 0 4px"><b>方式 C · 用户脚本管理器（Kiwi + 油猴）</b></p>
     <ol>
@@ -211,13 +212,17 @@
         <li>回到脚本列表：开关是<b>已启用</b>，匹配规则是 <code>https://www.douyin.com/*</code></li>
       </ol>
 
-      <p style="margin:12px 0 2px"><b>第 5 步 · 开「电脑模式」并登录抖音</b></p>
+      <p style="margin:12px 0 2px"><b>第 5 步 · 登录抖音</b></p>
       <ol>
         <li>Via 地址栏输入 <code>www.douyin.com</code> 回车</li>
-        <li>右下 <b>「三」</b> → 找到 <b>「电脑模式」</b> 点一下（再点一下切回手机版）<br>
-          <b>这步必须做</b>：脚本只在<b>桌面版</b>的页面上挂那个 🎯 按钮，手机版拿不到</li>
+        <li><b>手机版就够了，不用切电脑模式</b>：脚本的 🎯 按钮是它自己用代码画在页面上的悬浮球，
+          只要网址是 <code>www.douyin.com</code> 就出现，跟「手机版 / 电脑版」没关系</li>
         <li>正常登录抖音（扫码 / 验证码都行）</li>
       </ol>
+      <div class="info"><b>什么时候才需要「电脑模式」？（几乎用不到）</b>
+        只有当抖音把页面强制跳成「下载 App」中间页、或页面一片空白时，才需要切电脑模式绕过去。
+        位置：右下 <b>「三」</b> → 点 <b>「电脑模式」</b>（再点一下切回手机版）；
+        或者 <b>「三」→ 设置 → 浏览器标识 / UA标识 → 选「PC / 电脑版」</b>。切完回到这一步刷新即可。</div>
 
       <p style="margin:12px 0 2px"><b>第 6 步 · 验证装好了</b></p>
       <ol>
@@ -232,7 +237,7 @@
     <div class="card">
       <h2>① 以后怎么用（平时就这四步）</h2>
       <ol>
-        <li>Via 打开 <code>www.douyin.com</code>（<b>记得还是「电脑模式」</b>，已经登录就直接进）</li>
+        <li>Via 打开 <code>www.douyin.com</code>（<b>手机版就行，不用电脑模式</b>，已经登录就直接进）</li>
         <li>点右下角 <b>🎯</b> → <b>📥 刷新关注列表</b> → <b>🔍 抓最新未读</b>（约 10~15 分钟，<b>别息屏、别切走</b>）</li>
         <li>点 <b>🎯</b> → <b>☁️ 推到 GitHub</b>（10 秒内搞定）</li>
         <li>打开<b>抖音更新提醒-手机端.html</b> → <b>🔄 同步</b> → 看未读清单、点标题跳视频、标记已读</li>
@@ -254,7 +259,7 @@
     <div class="ok"><b>注意</b>：上面「① 以后怎么用」就是完整的日常流程（每周点两回）。
       下面这段和它是一回事，只是记个要点：
       <ol>
-        <li>打开装脚本的浏览器 → <code>www.douyin.com</code>（<b>电脑模式</b>）→ 登录</li>
+        <li>打开装脚本的浏览器 → <code>www.douyin.com</code>（<b>手机版即可</b>）→ 登录</li>
         <li>🎯 → <b>📥 刷新关注列表</b> → <b>🔍 抓最新未读</b>（约 10~15 分钟，手机别息屏）</li>
         <li>🎯 → <b>☁️ 推到 GitHub</b>（10 秒内）</li>
         <li>打开<b>抖音更新提醒-手机端.html</b> → <b>🔄 同步</b> → 看未读列表、跳视频、标记已读</li>
@@ -1178,6 +1183,7 @@ function copyRaw(){
     <details>
       <summary style="cursor:pointer;color:#86909c;font-size:13px">点开看历次改动（最新在上）</summary>
       <ul style="list-style:none;padding:0;margin:10px 0 0">
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> <b>修正上一版误判：脚本「不需要电脑模式 / 桌面版」。🎯 是脚本自己用代码画的悬浮球（<code>position:fixed</code>），只要网址是 <code>www.douyin.com</code> 就出现，与手机版/电脑版无关。</b> 已把第 5 步改成「直接登录即可」，并在下面写明「电脑模式」的确切位置与用途（仅强制跳 App / 页面空白时才用）。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> 新增「⓪ 从头到尾装一遍」六步清单（含 Via「电脑模式」的确切位置：右下「三」→ 电脑模式），以及「① 以后怎么用」日常四步。<b>B-1 下载脚本这条路已实测走通。</b></li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> 安装地址换成 <b>GitHub Pages 直链</b>（jsDelivr 缓存 7 天，会给旧版脚本，旧版取关会被验证码页卡死）；新增三条 Via 安装路径 <b>B-1 下载脚本 / B-2 导入脚本 / B-3 添加脚本</b>，覆盖「加号只有三个选项」的各种 Via 版本；新增 <b>📦 复制脚本全文</b> 按钮，<b>添加脚本</b>这条路也能离线用。</li>
       </ul>
