@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      1.2.0
+// @version      1.3.0
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -30,7 +30,7 @@
   var LS = 'dy_phone_helper_v1';
   /* ★ 版本号：每次改动本脚本都要 +1（1.1 → 1.2 → 1.3 …），并同步改 @version。
      面板标题后面会显示 v1.2，用户一眼就能确认手机上跑的是不是最新版。 */
-  var VER = '1.2';
+  var VER = '1.3';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -109,7 +109,7 @@
     if (!toastEl) {
       toastEl = document.createElement('div');
       toastEl.style.cssText = 'position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:rgba(0,0,0,.84);color:#fff;' +
-        'padding:12px 18px;border-radius:20px;font-size:16px;z-index:2147483647;max-width:86vw;line-height:1.55;pointer-events:none;transition:opacity .25s';
+        'padding:13px 20px;border-radius:20px;font-size:17px;z-index:2147483647;max-width:86vw;line-height:1.6;pointer-events:none;transition:opacity .25s';
       document.body.appendChild(toastEl);
     }
     toastEl.innerHTML = msg;
@@ -843,37 +843,37 @@
       /* 默认「更大」：宽 96% / 高 93%，四周只留一点点边，几乎就是铺满手机屏（10-02 按用户要求放大）
          ★ 关键尺寸一律 !important：抖音自己后插入的样式表压不掉我们（否则面板会缩回老样子） */
       '.dyh-box{background:#fff!important;width:96%!important;max-width:980px;height:93%!important;max-height:920px;overflow:hidden;' +
-      'border-radius:14px;padding:16px 18px calc(20px + env(safe-area-inset-bottom));font-size:18px!important;color:#1d2129;' +
-      'display:flex!important;flex-direction:column;box-sizing:border-box;line-height:1.55}' +
-      '.dyh-box.sz-s{width:74%!important;max-width:540px;height:70%!important;max-height:560px;font-size:16px!important}' +
-      '.dyh-box.sz-m{width:88%!important;max-width:720px;height:85%!important;max-height:720px;font-size:17px!important}' +
-      '.dyh-box.sz-l{width:96%!important;max-width:980px;height:93%!important;max-height:920px;font-size:18px!important}' +
-      '.dyh-box h3{margin:0 0 14px!important;font-size:22px!important;display:flex!important;align-items:center;flex:0 0 auto}' +
-      '.dyh-box h3 span{margin-left:auto;font-size:34px!important;color:#c9cdd4;padding:0 8px}' +
-      '.dyh-ver{font-size:13px!important;color:#c9cdd4;font-weight:400;margin-left:7px!important}' +
-      '.dyh-zbtn{font-size:24px!important;color:#4e5969;background:#f2f3f5;border-radius:8px;' +
-      'padding:3px 11px;margin-left:auto!important}' +
+      'border-radius:14px;padding:18px 18px calc(22px + env(safe-area-inset-bottom));font-size:20px!important;color:#1d2129;' +
+      'display:flex!important;flex-direction:column;box-sizing:border-box;line-height:1.6}' +
+      '.dyh-box.sz-s{width:74%!important;max-width:540px;height:70%!important;max-height:560px;font-size:18px!important}' +
+      '.dyh-box.sz-m{width:88%!important;max-width:720px;height:85%!important;max-height:720px;font-size:19px!important}' +
+      '.dyh-box.sz-l{width:96%!important;max-width:980px;height:93%!important;max-height:920px;font-size:20px!important}' +
+      '.dyh-box h3{margin:0 0 15px!important;font-size:24px!important;display:flex!important;align-items:center;flex:0 0 auto}' +
+      '.dyh-box h3 span{margin-left:auto;font-size:36px!important;color:#c9cdd4;padding:0 8px}' +
+      '.dyh-ver{font-size:14px!important;color:#c9cdd4;font-weight:400;margin-left:8px!important}' +
+      '.dyh-zbtn{font-size:26px!important;color:#4e5969;background:#f2f3f5;border-radius:8px;' +
+      'padding:3px 12px;margin-left:auto!important}' +
       '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
-      '.dyh-btn{display:block;width:100%;margin:9px 0;padding:16px 18px;border:1px solid #e5e6eb;border-radius:10px;' +
-      'background:#fff;font-size:18px!important;color:#1d2129;text-align:left}' +
+      '.dyh-btn{display:block;width:100%;margin:10px 0;padding:17px 18px;border:1px solid #e5e6eb;border-radius:10px;' +
+      'background:#fff;font-size:20px!important;color:#1d2129;text-align:left}' +
       '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
       '.dyh-btn.gray{color:#86909c}' +
-      '.dyh-card{background:#f7f8fa;border-radius:10px;padding:12px 14px;margin-bottom:10px}' +
-      '.dyh-row{display:flex;align-items:center;padding:13px 0;border-bottom:1px solid #f0f0f0;font-size:18px!important}' +
+      '.dyh-card{background:#f7f8fa;border-radius:10px;padding:13px 15px;margin-bottom:11px}' +
+      '.dyh-row{display:flex;align-items:center;padding:14px 0;border-bottom:1px solid #f0f0f0;font-size:20px!important}' +
       '.dyh-row:last-child{border-bottom:0}' +
       '.dyh-row b{font-weight:500;color:#4e5969}' +
       '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
       '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
-      '.dyh-item{padding:13px 0;border-bottom:1px solid #f2f3f5}' +
-      '.dyh-item-t{font-size:18px!important;line-height:1.5;color:#1d2129}' +
-      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:7px;font-size:16px;color:#86909c}' +
-      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:7px 14px}' +
-      '.dyh-tip{font-size:16px!important;color:#86909c;line-height:1.65;margin:9px 0}' +
-      '.dyh-back{font-size:17px;color:#fe2c55;margin-bottom:11px}' +
-      '.dyh-input{width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #e5e6eb;border-radius:8px;' +
-      'font-size:17px;margin:4px 0 11px}' +
-      '.dyh-lb{font-size:15px;color:#86909c;display:block;margin-top:9px}' +
-      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:13px 15px;margin:10px 0;font-size:16px;line-height:1.65}';
+      '.dyh-item{padding:14px 0;border-bottom:1px solid #f2f3f5}' +
+      '.dyh-item-t{font-size:20px!important;line-height:1.5;color:#1d2129}' +
+      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:8px;font-size:17px;color:#86909c}' +
+      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:8px 15px}' +
+      '.dyh-tip{font-size:17px!important;color:#86909c;line-height:1.7;margin:10px 0}' +
+      '.dyh-back{font-size:18px;color:#fe2c55;margin-bottom:12px}' +
+      '.dyh-input{width:100%;box-sizing:border-box;padding:13px 14px;border:1px solid #e5e6eb;border-radius:8px;' +
+      'font-size:18px;margin:4px 0 12px}' +
+      '.dyh-lb{font-size:16px;color:#86909c;display:block;margin-top:10px}' +
+      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:14px 16px;margin:11px 0;font-size:17px;line-height:1.7}';
     document.head.appendChild(st);
 
     fab = document.createElement('div');
