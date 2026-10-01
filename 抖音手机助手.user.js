@@ -550,30 +550,32 @@
     if (fab) return;
     var st = document.createElement('style');
     st.textContent =
-      '.dyh-fab{position:fixed;right:14px;bottom:calc(24px + env(safe-area-inset-bottom));z-index:2147483640;' +
-      'width:54px;height:54px;border-radius:50%;background:#fe2c55;color:#fff;font-size:24px;line-height:54px;' +
+      '.dyh-fab{position:fixed;right:16px;bottom:calc(28px + env(safe-area-inset-bottom));z-index:2147483640;' +
+      'width:66px;height:66px;border-radius:50%;background:#fe2c55;color:#fff;font-size:32px;line-height:66px;' +
       'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.28);user-select:none}' +
-      '.dyh-panel{position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483645;background:rgba(0,0,0,.5);' +
-      'display:none;align-items:flex-end;justify-content:center}' +
-      '.dyh-box{background:#fff;width:100%;max-height:86%;overflow:auto;border-radius:16px 16px 0 0;' +
-      'padding:14px 14px calc(20px + env(safe-area-inset-bottom));font-size:14px;color:#1d2129}' +
-      '.dyh-box h3{margin:2px 0 12px;font-size:16px;display:flex;align-items:center}' +
-      '.dyh-box h3 span{margin-left:auto;font-size:24px;color:#c9cdd4;padding:0 6px}' +
-      '.dyh-btn{display:block;width:100%;margin:8px 0;padding:12px 14px;border:1px solid #e5e6eb;border-radius:10px;' +
-      'background:#fff;font-size:15px;color:#1d2129;text-align:left}' +
+      '.dyh-panel{position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483645;background:rgba(0,0,0,.55);' +
+      'display:none;align-items:center;justify-content:center}' +
+      '.dyh-box{background:#fff;width:66.6%;max-width:560px;height:66.6%;max-height:66.6%;overflow:hidden;' +
+      'border-radius:16px;padding:12px 14px calc(16px + env(safe-area-inset-bottom));font-size:15px;color:#1d2129;' +
+      'display:flex;flex-direction:column}' +
+      '.dyh-box h3{margin:0 0 10px;font-size:17px;display:flex;align-items:center;flex:0 0 auto}' +
+      '.dyh-box h3 span{margin-left:auto;font-size:26px;color:#c9cdd4;padding:0 6px}' +
+      '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
+      '.dyh-btn{display:block;width:100%;margin:8px 0;padding:14px 16px;border:1px solid #e5e6eb;border-radius:10px;' +
+      'background:#fff;font-size:16px;color:#1d2129;text-align:left}' +
       '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
       '.dyh-btn.gray{color:#86909c}' +
       '.dyh-card{background:#f7f8fa;border-radius:10px;padding:10px 12px;margin-bottom:10px}' +
-      '.dyh-row{display:flex;align-items:center;padding:7px 0;border-bottom:1px solid #f0f0f0;font-size:14px}' +
+      '.dyh-row{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid #f0f0f0;font-size:15px}' +
       '.dyh-row:last-child{border-bottom:0}' +
       '.dyh-row b{font-weight:500;color:#4e5969}' +
       '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
       '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
       '.dyh-item{padding:10px 0;border-bottom:1px solid #f2f3f5}' +
-      '.dyh-item-t{font-size:14px;line-height:1.5;color:#1d2129}' +
-      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:6px;font-size:12px;color:#86909c}' +
-      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:2px 8px}' +
-      '.dyh-tip{font-size:12px;color:#86909c;line-height:1.6;margin:8px 0}' +
+      '.dyh-item-t{font-size:15px;line-height:1.5;color:#1d2129}' +
+      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:6px;font-size:13px;color:#86909c}' +
+      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:4px 10px}' +
+      '.dyh-tip{font-size:13px;color:#86909c;line-height:1.6;margin:8px 0}' +
       '.dyh-back{font-size:14px;color:#fe2c55;margin-bottom:10px}' +
       '.dyh-input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e6eb;border-radius:8px;' +
       'font-size:15px;margin:4px 0 10px}' +
@@ -613,9 +615,11 @@
     else if (view === 'search') bodyEl.innerHTML = renderSearch();
     else if (view === 'settings') bodyEl.innerHTML = renderSettings();
     else bodyEl.innerHTML = renderHome();
-    panel.querySelector('.dyh-box').scrollTop = 0;
+    resetScroll();
   }
-  function setBody(html) { bodyEl.innerHTML = html; panel.querySelector('.dyh-box').scrollTop = 0; }
+  function setBody(html) { bodyEl.innerHTML = html; resetScroll(); }
+  // 内容现在由 #dyh-body 自己滚动，每次换页都要把滚动条拉回顶部
+  function resetScroll() { if (bodyEl) bodyEl.scrollTop = 0; }
 
   function onAction(act, el) {
     var i;

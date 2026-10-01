@@ -245,6 +245,37 @@
       <div class="ok">走完这一趟，手机上就有一份完整的待看清单了。<b>电脑全程不用管。</b></div>
     </div>
 
+    <div class="card">
+      <h2>② 界面尺寸（10-01 已调整，现在更大更好点）</h2>
+      <ul>
+        <li><b>🎯 悬浮球</b>：直径从 54px 放大到 <b>66px</b>，右下角更显眼、手指更好点</li>
+        <li><b>面板窗口</b>：原来是撑满整屏的下拉抽屉，现在改成<b>居中圆角卡片，占屏幕宽高的 2/3</b>
+          （宽 66.6%、高 66.6%，最大不超过 560px），左右上下都留边，一眼能看出是弹窗而不是整页</li>
+        <li><b>字号</b>：按钮 15→16px、列表标题 14→15px、说明文字 12→13px，内容区点开后自己滚动，不会被裁掉</li>
+        <li>想关掉：点面板<b>外面空白处</b>或右上角 <b>×</b> 就行</li>
+      </ul>
+      <div class="warn">如果改完<b>还是旧样子</b>，说明浏览器跑的还是缓存里的老脚本 —— 按下面的「③」重载一次就好了。
+        <b>数据不会丢</b>（都存在手机 localStorage 里，重载完刷新关注列表即可恢复）。</div>
+    </div>
+
+    <div class="card">
+      <h2>③ 怎么把新脚本装回去（我改了脚本之后这么重载）</h2>
+      <p style="margin:6px 0">步骤和当初装的时候<b>一模一样</b>，不用重新走六步：</p>
+      <ol>
+        <li>Via → 右下 <b>「三」</b> → <b>设置</b> → <b>脚本</b></li>
+        <li>在脚本列表里<b>长按</b>「抖音关注助手（手机免电脑版）」→ 选 <b>删除</b>（删掉旧的那份）</li>
+        <li>右上角 <b>＋</b> → <b>下载脚本</b> → 粘贴<b>脚本安装地址</b> → 保存
+          <br><code>https://maidang0706.github.io/douyin/抖音手机助手.user.js</code>
+          <button class="btn gray" onclick="copyVia()">📋 复制安装地址</button></li>
+        <li>回到列表确认开关是<b>已启用</b></li>
+        <li>Via 里打开 <code>www.douyin.com</code>，<b>下拉刷新一次</b>（或彻底关掉 Via 重开）→ 右下角 🎯 变大 = 生效</li>
+      </ol>
+      <div class="info"><b>偷懒办法</b>：先看看 Via 脚本列表里那条脚本有没有「<b>更新</b>」按钮（部分版本有），
+        有的话点一下就能直接升级，连删除都不用。<b>没有就照上面五步做，稳。</b></div>
+      <div class="ok"><b>不影响数据</b>：未读清单、已读记录、分类都存手机本地，删脚本只会让按钮消失，
+        <b>删完装回来刷新一次就全在</b>。所以放心删。</div>
+    </div>
+
     <table>
       <tr><th>能力</th><th>纯手机能不能做</th></tr>
       <tr><td>抓关注列表 / 抓最新未读视频</td><td>✅ 脚本自己抓，不需要电脑</td></tr>
@@ -874,30 +905,32 @@ function copyRaw(){
     if (fab) return;
     var st = document.createElement('style');
     st.textContent =
-      '.dyh-fab{position:fixed;right:14px;bottom:calc(24px + env(safe-area-inset-bottom));z-index:2147483640;' +
-      'width:54px;height:54px;border-radius:50%;background:#fe2c55;color:#fff;font-size:24px;line-height:54px;' +
+      '.dyh-fab{position:fixed;right:16px;bottom:calc(28px + env(safe-area-inset-bottom));z-index:2147483640;' +
+      'width:66px;height:66px;border-radius:50%;background:#fe2c55;color:#fff;font-size:32px;line-height:66px;' +
       'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.28);user-select:none}' +
-      '.dyh-panel{position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483645;background:rgba(0,0,0,.5);' +
-      'display:none;align-items:flex-end;justify-content:center}' +
-      '.dyh-box{background:#fff;width:100%;max-height:86%;overflow:auto;border-radius:16px 16px 0 0;' +
-      'padding:14px 14px calc(20px + env(safe-area-inset-bottom));font-size:14px;color:#1d2129}' +
-      '.dyh-box h3{margin:2px 0 12px;font-size:16px;display:flex;align-items:center}' +
-      '.dyh-box h3 span{margin-left:auto;font-size:24px;color:#c9cdd4;padding:0 6px}' +
-      '.dyh-btn{display:block;width:100%;margin:8px 0;padding:12px 14px;border:1px solid #e5e6eb;border-radius:10px;' +
-      'background:#fff;font-size:15px;color:#1d2129;text-align:left}' +
+      '.dyh-panel{position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483645;background:rgba(0,0,0,.55);' +
+      'display:none;align-items:center;justify-content:center}' +
+      '.dyh-box{background:#fff;width:66.6%;max-width:560px;height:66.6%;max-height:66.6%;overflow:hidden;' +
+      'border-radius:16px;padding:12px 14px calc(16px + env(safe-area-inset-bottom));font-size:15px;color:#1d2129;' +
+      'display:flex;flex-direction:column}' +
+      '.dyh-box h3{margin:0 0 10px;font-size:17px;display:flex;align-items:center;flex:0 0 auto}' +
+      '.dyh-box h3 span{margin-left:auto;font-size:26px;color:#c9cdd4;padding:0 6px}' +
+      '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
+      '.dyh-btn{display:block;width:100%;margin:8px 0;padding:14px 16px;border:1px solid #e5e6eb;border-radius:10px;' +
+      'background:#fff;font-size:16px;color:#1d2129;text-align:left}' +
       '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
       '.dyh-btn.gray{color:#86909c}' +
       '.dyh-card{background:#f7f8fa;border-radius:10px;padding:10px 12px;margin-bottom:10px}' +
-      '.dyh-row{display:flex;align-items:center;padding:7px 0;border-bottom:1px solid #f0f0f0;font-size:14px}' +
+      '.dyh-row{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid #f0f0f0;font-size:15px}' +
       '.dyh-row:last-child{border-bottom:0}' +
       '.dyh-row b{font-weight:500;color:#4e5969}' +
       '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
       '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
       '.dyh-item{padding:10px 0;border-bottom:1px solid #f2f3f5}' +
-      '.dyh-item-t{font-size:14px;line-height:1.5;color:#1d2129}' +
-      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:6px;font-size:12px;color:#86909c}' +
-      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:2px 8px}' +
-      '.dyh-tip{font-size:12px;color:#86909c;line-height:1.6;margin:8px 0}' +
+      '.dyh-item-t{font-size:15px;line-height:1.5;color:#1d2129}' +
+      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:6px;font-size:13px;color:#86909c}' +
+      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:4px 10px}' +
+      '.dyh-tip{font-size:13px;color:#86909c;line-height:1.6;margin:8px 0}' +
       '.dyh-back{font-size:14px;color:#fe2c55;margin-bottom:10px}' +
       '.dyh-input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e6eb;border-radius:8px;' +
       'font-size:15px;margin:4px 0 10px}' +
@@ -937,9 +970,11 @@ function copyRaw(){
     else if (view === 'search') bodyEl.innerHTML = renderSearch();
     else if (view === 'settings') bodyEl.innerHTML = renderSettings();
     else bodyEl.innerHTML = renderHome();
-    panel.querySelector('.dyh-box').scrollTop = 0;
+    resetScroll();
   }
-  function setBody(html) { bodyEl.innerHTML = html; panel.querySelector('.dyh-box').scrollTop = 0; }
+  function setBody(html) { bodyEl.innerHTML = html; resetScroll(); }
+  // 内容现在由 #dyh-body 自己滚动，每次换页都要把滚动条拉回顶部
+  function resetScroll() { if (bodyEl) bodyEl.scrollTop = 0; }
 
   function onAction(act, el) {
     var i;
@@ -1183,6 +1218,7 @@ function copyRaw(){
     <details>
       <summary style="cursor:pointer;color:#86909c;font-size:13px">点开看历次改动（最新在上）</summary>
       <ul style="list-style:none;padding:0;margin:10px 0 0">
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> <b>界面放大改版</b>：🎯 悬浮球 54px→<b>66px</b>；面板从「撑满整屏的下拉抽屉」改成<b>居中圆角卡片，占屏幕宽高 2/3</b>（code>66.6%</code>、最大 560px），内容区独立滚动（新增 <code>resetScroll()</code> 保证换页回到顶部）；字号整体提一档（按钮 16 / 标题 15 / 说明 13）。<b>新增「② 界面尺寸」与「③ 怎么重载脚本」两节</b>（删旧条目 → ＋下载脚本 → 粘地址 → 刷新）。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> <b>修正上一版误判：脚本「不需要电脑模式 / 桌面版」。🎯 是脚本自己用代码画的悬浮球（<code>position:fixed</code>），只要网址是 <code>www.douyin.com</code> 就出现，与手机版/电脑版无关。</b> 已把第 5 步改成「直接登录即可」，并在下面写明「电脑模式」的确切位置与用途（仅强制跳 App / 页面空白时才用）。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> 新增「⓪ 从头到尾装一遍」六步清单（含 Via「电脑模式」的确切位置：右下「三」→ 电脑模式），以及「① 以后怎么用」日常四步。<b>B-1 下载脚本这条路已实测走通。</b></li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> 安装地址换成 <b>GitHub Pages 直链</b>（jsDelivr 缓存 7 天，会给旧版脚本，旧版取关会被验证码页卡死）；新增三条 Via 安装路径 <b>B-1 下载脚本 / B-2 导入脚本 / B-3 添加脚本</b>，覆盖「加号只有三个选项」的各种 Via 版本；新增 <b>📦 复制脚本全文</b> 按钮，<b>添加脚本</b>这条路也能离线用。</li>
