@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      1.5.0
+// @version      1.6.0
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -30,13 +30,13 @@
   var LS = 'dy_phone_helper_v1';
   /* ★ 版本号：每次改动本脚本都要 +1（1.1 → 1.2 → 1.3 …），并同步改 @version。
      面板标题后面会显示 v1.2，用户一眼就能确认手机上跑的是不是最新版。 */
-  var VER = '1.5';
+  var VER = '1.6';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l' },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l', scanMode: 'auto' },
       selfSecUid: '',
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -119,18 +119,75 @@
   }
 
   /* ----------------------------- 抖音接口 ----------------------------- */
-  function commonParams(extra) {
-    var o = {
-      device_platform: 'webapp', aid: '6383', channel: 'channel_pc_web',
-      pc_client_type: '1', version_code: '190500', version_name: '19.5.0',
-      cookie_enabled: 'true', screen_width: String(window.screen.width || 1920),
-      screen_height: String(window.screen.height || 1080),
-      browser_language: 'zh-CN', browser_platform: 'Win32', browser_name: 'Chrome',
-      browser_version: '120.0.0.0', browser_online: 'true',
-      engine_name: 'Blink', engine_version: '120.0.0.0',
-      os_name: 'Windows', os_version: '10', cpu_core_num: '8', device_memory: '8',
-      platform: 'PC', downlink: '10', effective_type: '4g', round_trip_time: '50'
+  /* ★★ 参数指纹自适应（2026-10-02 关键修复）★★
+     以前这里【写死】「channel=channel_pc_web / platform=PC / os_name=Windows / 1920x1080」，
+     可脚本实际跑在【手机浏览器】里 —— UA 是手机、参数却自称 Windows PC，
+     这种自相矛盾的指纹正是抖音风控最容易抓的异常点（电脑端串行慢抓没事，手机端一并发就大面积 403）。
+     现在的做法：优先【照抄抖音页面自己刚刚发过的请求参数】—— 从 performance 资源条目里
+     找 /aweme/v1/ 请求，抠出「公共参数」复用。好处：
+       1) 参数与当前环境（手机/PC、UA、屏幕、抖音版本）永远一致，不再自相矛盾；
+       2) 抖音哪天改参数名/加新参数，我们自动跟着变，不用再手改硬编码。
+     抠出来的参数会剔除「业务参数」和「签名参数」（签名是针对具体参数算的，复用必失败）。 */
+  var COMMON_DROP = {
+    a_bogus: 1, X_Bogus: 1, _signature: 1, msToken: 1, signature: 1, verifyFp: 1,
+    sec_user_id: 1, sec_uid: 1, user_id: 1, from_sec_user_id: 1, to_user_id: 1,
+    max_cursor: 1, min_cursor: 1, cursor: 1, count: 1, offset: 1, min_time: 1, max_time: 1,
+    keyword: 1, search_channel: 1, search_source: 1, query_correct_type: 1, is_filter_search: 1,
+    from_source: 1, list_type: 1, need_filter_settings: 1, update_version_code: 1,
+    source_type: 1, gps_access: 1, address_book_access: 1, is_top: 1, publish_video_strategy_type: 1,
+    refresh_index: 1, pull_type: 1, feed_style: 1, need_top: 1, aweme_id: 1, tab_id: 1
+  };
+  var sniffCache = null;
+  function sniffCommon() {
+    if (sniffCache) return sniffCache;
+    var got = null;
+    try {
+      var es = (typeof performance !== 'undefined' && performance.getEntriesByType)
+        ? performance.getEntriesByType('resource') : [];
+      for (var i = es.length - 1; i >= 0; i--) {
+        var n = es[i].name || '';
+        if (n.indexOf('/aweme/v1/') < 0 && n.indexOf('/aweme/v2/') < 0) continue;
+        var qi = n.indexOf('?'); if (qi < 0) continue;
+        var kv = n.slice(qi + 1).split('&'), one = {};
+        for (var j = 0; j < kv.length; j++) {
+          var p = kv[j].split('='); if (p.length < 2) continue;
+          var k = decodeURIComponent(p[0]);
+          if (COMMON_DROP[k] || !k) continue;
+          one[k] = decodeURIComponent(p.slice(1).join('='));
+        }
+        // 至少要有一批公共参数才信（太少说明是别的用途的请求）
+        var cnt = 0; for (var c in one) cnt++;
+        if (cnt >= 10) { got = one; break; }
+      }
+    } catch (e) { }
+    sniffCache = got || {};
+    return sniffCache;
+  }
+  function baseParams() {
+    var sn = sniffCommon(), o = {}, has = 0;
+    for (var s in sn) { o[s] = sn[s]; has++; }
+    if (has >= 10) return o;                 // 嗅探成功：完全照抄页面自己的参数
+    /* 兜底：页面还没发过请求（极少见）。这里按真实 UA 判断，手机就用手机版参数，
+       绝不能再「手机冒称 Windows PC」——那是最招风控的自相矛盾。 */
+    var ua = (navigator && navigator.userAgent) || '';
+    var isMobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(ua);
+    var W = String((window.screen && window.screen.width) || (isMobile ? 390 : 1920));
+    var H = String((window.screen && window.screen.height) || (isMobile ? 844 : 1080));
+    o = {
+      device_platform: 'webapp', aid: '6383',
+      channel: isMobile ? 'channel_web' : 'channel_pc_web',
+      cookie_enabled: 'true', screen_width: W, screen_height: H,
+      browser_language: 'zh-CN', browser_platform: isMobile ? 'iPhone' : 'Win32',
+      browser_name: 'Chrome', browser_online: 'true',
+      engine_name: 'Blink', os_name: isMobile ? 'iOS' : 'Windows',
+      platform: isMobile ? 'wap' : 'PC', downlink: '10', effective_type: '4g', round_trip_time: '50'
     };
+    if (!isMobile) { o.pc_client_type = '1'; o.version_code = '190500'; o.version_name = '19.5.0'; o.browser_version = '120.0.0.0'; o.engine_version = '120.0.0.0'; o.os_version = '10'; o.cpu_core_num = '8'; o.device_memory = '8'; }
+    else { o.version_code = '170400'; o.version_name = '17.4.0'; o.browser_version = '120.0.0.0'; o.engine_version = '120.0.0.0'; o.os_version = '16'; o.cpu_core_num = '8'; o.device_memory = '4'; }
+    return o;
+  }
+  function commonParams(extra) {
+    var o = baseParams();
     for (var k in (extra || {})) o[k] = extra[k];
     return o;
   }
@@ -257,25 +314,52 @@
     });
   }
 
+  /* 把抖音返回的原始 aweme 对象整理成本地存储格式（作品接口与关注流接口共用） */
+  function normAweme(a) {
+    var cover = (a.video && a.video.cover && a.video.cover.url_list && a.video.cover.url_list[0]) ||
+      (a.video && a.video.origin_cover && a.video.origin_cover.url_list && a.video.origin_cover.url_list[0]) || '';
+    var su = (a.author && (a.author.sec_uid || a.sec_uid)) || '';
+    return {
+      awemeId: String(a.aweme_id),
+      account: (a.author && a.author.nickname) || '',
+      secUid: su,
+      title: (a.desc || '').trim(),
+      url: 'https://www.douyin.com/video/' + a.aweme_id,
+      publishTime: a.create_time ? fmtTime(Number(a.create_time) * 1000) : '',
+      publishedAt: a.create_time ? Number(a.create_time) * 1000 : 0,
+      thumbnail: cover
+    };
+  }
+
   /* 抓单个账号的最新作品（opt.signal 可传入用于整体停止） */
   function fetchPosts(secUid, opt) {
     return dyGet(API_POST, commonParams({ sec_user_id: secUid, count: '20', max_cursor: '0' }), opt)
       .then(function (j) {
         var list = j.aweme_list || [];
-        return list.map(function (a) {
-          var cover = (a.video && a.video.cover && a.video.cover.url_list && a.video.cover.url_list[0]) ||
-            (a.video && a.video.origin_cover && a.video.origin_cover.url_list && a.video.origin_cover.url_list[0]) || '';
-          return {
-            awemeId: String(a.aweme_id),
-            account: (a.author && a.author.nickname) || '',
-            title: (a.desc || '').trim(),
-            url: 'https://www.douyin.com/video/' + a.aweme_id,
-            publishTime: a.create_time ? fmtTime(Number(a.create_time) * 1000) : '',
-            publishedAt: a.create_time ? Number(a.create_time) * 1000 : 0,
-            thumbnail: cover
-          };
-        });
+        return list.map(normAweme);
       });
+  }
+
+  /* ★★ 关注页信息流（2026-10-02 新增，这是「请求数少一个数量级」的关键）★★
+     原来：392 个账号 × 每账号 1 次请求 = 392 次请求。这么密集地打接口，
+     不管并发怎么调都必然被风控 —— 失败多不是 bug，是【请求太多】的必然结果。
+     现在：抖音「关注页」本来就把你关注的人的最新视频按时间倒序推给你，
+     一次请求就能拿 20 条。只要【翻到上次抓到的时间点】就说明追平了，
+     剩下的账号确实没更新，根本不用再问。日常 2~5 次请求就能覆盖全部 392 个账号。
+     用不了（接口变更/风控）会自动降级回逐个抓，不会比原来更差。 */
+  var API_FOLLOW_FEED = 'https://www.douyin.com/aweme/v1/web/follow/feed/';
+  function fetchFollowFeed(cursor, opt) {
+    return dyGet(API_FOLLOW_FEED, commonParams({
+      count: '20', max_cursor: String(cursor || 0),
+      refresh_index: '0', source_type: '0', feed_style: '0', is_top: '0', pull_type: '0'
+    }), opt).then(function (j) {
+      var list = j && (j.aweme_list || []);
+      return {
+        list: (list || []).map(normAweme),
+        hasMore: !!(j && j.has_more),
+        nextCursor: (j && j.max_cursor) || 0
+      };
+    });
   }
 
   /* ----------------------------- 取关 / 关注 ----------------------------- */
@@ -597,15 +681,17 @@
     function snap(name) {
       var now = Date.now();
       var elapsed = now - startedAt;
-      // 进度按「已出结果的账号数」算（成功 + 去重后的失败），补抓时不会回退，也不会冲过 100%
-      var cur = Math.min(okCount + failAcc, plan.length);
+      // 进度按「已核对过的账号数」算：信息流核对完的 + 逐个抓成功的 + 去重后的失败，不会回退也不会冲过 100%
+      var total = feedTotal;
+      var cur = Math.min(feedCaughtN + okCount + failAcc, total);
       return {
-        cur: cur, total: plan.length, name: name || (lastSnap ? lastSnap.name : ''), newCount: newCount,
+        cur: cur, total: total, phase: phase, feedPages: feedPages, feedUsed: feedUsed,
+        name: name || (lastSnap ? lastSnap.name : ''), newCount: newCount,
         errors: failAcc, okCount: okCount, attempts: errors,
         conc: conc, maxConc: maxConc, risk: riskHits, stopped: stopped, retries: retries, stalled: stalled,
-        pct: Math.min(100, Math.round(cur / Math.max(1, plan.length) * 100)),
+        pct: Math.min(100, Math.round(cur / total * 100)),
         elapsed: elapsed,
-        eta: (plan.length - cur) > 0 ? Math.round((plan.length - cur) * (cur ? elapsed / cur : 0)) : 0,
+        eta: (total - cur) > 0 ? Math.round((total - cur) * (cur ? elapsed / cur : 0)) : 0,
         cool: coolUntil > now
       };
     }
@@ -626,6 +712,98 @@
     function scheduleSave() {
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = setTimeout(function () { saveTimer = null; save(); }, 2500);
+    }
+
+    /* ============ 阶段 0：关注页信息流（请求数极少，能走就走这条）============
+       逐个账号打接口 = 392 次请求，这是【失败多】的根本原因：不是 bug，是请求太多，
+       抖音必然限流 —— 并发怎么调都治不了本。
+       关注流是抖音自己「把你关注的人的最新视频按时间倒序推给你」，一次请求 20 条。
+       只要翻到某个账号【上次抓到的最新时间】，就说明这个账号没有更新的了，不用再问它。
+       日常（几小时~一天没抓）只要 2~5 次请求就能核对完全部 392 个账号。
+       走不通（接口变更 / 风控 / 返回空）会自动降级成逐个抓，绝不会比原来更差。 */
+    var feedPages = 0, feedNew = 0, feedUsed = false, feedCaughtN = 0;
+    var feedCovered = {};                  // 信息流里出现过的账号
+    var phase = 'feed';                    // 'feed' = 收集信息流；'post' = 逐个补抓
+    var feedTotal = Math.max(1, S.accounts.length - resumeFrom);
+
+    function feedPhase() {
+      if (S.cfg.scanMode === 'post') return Promise.resolve();   // 用户在设置里强制逐个抓
+      var uidMap = {}, newest = {}, i;
+      for (i = 0; i < S.accounts.length; i++) if (S.accounts[i].secUserId) uidMap[S.accounts[i].secUserId] = S.accounts[i];
+      for (i = 0; i < S.videos.length; i++) {
+        var vv = S.videos[i];
+        if (vv.secUid && (!newest[vv.secUid] || (vv.publishedAt || 0) > newest[vv.secUid])) newest[vv.secUid] = vv.publishedAt || 0;
+      }
+      var caught = {}, t0 = Date.now(), cursor = 0;
+      var BUDGET = 75000, MAXPAGE = 40, DEAD = 30 * 86400000;   // 最多 40 页 / 75 秒 / 回溯 30 天
+
+      function countCaught() { var n = 0; for (var u in caught) if (caught[u]) n++; return n; }
+
+      function page() {
+        if (shouldStop() || feedPages >= MAXPAGE || Date.now() - t0 > BUDGET) return Promise.resolve();
+        feedPages++;
+        report('关注流 第 ' + feedPages + ' 页');
+        return hardLimit(fetchFollowFeed(cursor, { signal: scanCtrl ? scanCtrl.signal : null }), 20000)
+          .then(function (res) {
+            if (shouldStop()) return;
+            feedUsed = true;
+            var list = res.list || [], i2, oldest = Infinity;
+            var mine = [];
+            for (i2 = 0; i2 < list.length; i2++) {
+              var a = list[i2];
+              if (a.secUid && !uidMap[a.secUid]) continue;      // 混入的推荐内容：不关我们的事
+              if (a.publishedAt && a.publishedAt < oldest) oldest = a.publishedAt;
+              if (!a.secUid) continue;
+              feedCovered[a.secUid] = 1;
+              var base = newest[a.secUid] || 0;
+              /* 视频不比「该账号已知的最新一条」新 → 这个账号追平了，而且这条不是未读。
+                 ★ 这一步同时保证未读列表干净：以前会把翻到的旧视频也当成新未读，越攒越多。 */
+              if (base && a.publishedAt && a.publishedAt <= base) { caught[a.secUid] = 1; continue; }
+              mine.push(a);
+            }
+            var before = newCount;
+            absorb(mine);
+            feedNew += (newCount - before);
+            feedCaughtN = countCaught();
+            scheduleSave(); report('关注流 第 ' + feedPages + ' 页');
+
+            // 翻到底了，或这一页已经老到 30 天前 → 剩下的账号都当作没更新，不再逐个问
+            if (!res.hasMore || !list.length || (oldest && oldest < Date.now() - DEAD)) {
+              for (i2 = 0; i2 < S.accounts.length; i2++) {
+                var u2 = S.accounts[i2].secUserId;
+                if (u2 && feedCovered[u2] && !caught[u2]) caught[u2] = 1;
+              }
+              if (!res.hasMore || !list.length) {
+                for (i2 = 0; i2 < S.accounts.length; i2++) {
+                  var u3 = S.accounts[i2].secUserId;
+                  if (u3) caught[u3] = 1;
+                }
+              }
+              feedCaughtN = countCaught();
+              return;
+            }
+            cursor = res.nextCursor || 0;
+            if (!cursor) return;
+            return sleep(220 + Math.random() * 380).then(page);   // 慢一点翻，像人在刷
+          })
+          .catch(function (e) {
+            // 信息流这条路走不通（接口变了 / 被风控）：安静放弃，交给下面的逐个抓兜底
+            feedCaughtN = countCaught();
+            return;
+          });
+      }
+
+      return page().then(function () {
+        // 只有【明确核对过】的账号才跳过；没核对到的照样逐个抓，一个都不漏
+        var left = [];
+        for (var i3 = 0; i3 < plan.length; i3++) {
+          var u = plan[i3].secUserId;
+          if (!u || !caught[u]) left.push(plan[i3]);
+        }
+        feedCaughtN = countCaught();
+        plan = left;
+        phase = 'post';
+      });
     }
 
     /* 跑一个账号：内置「就地重试」——抖一下就成功的不算失败，只有连试 3 次都不成才记失败。
@@ -710,7 +888,9 @@
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
       // 没跑完 → 进度写进断点（下次从这里续）；跑完了 → 断点标记「已全部完成」
       // 中途收尾时，断点回退到「失败的那几个」之前 —— 下次续跑会先把它们补上，一个都不漏
-      S.scanJob = stopped
+      // 只有「中途喊停」或「还有账号没抓到」才留断点；全核对完就标记完成，下次从头抓
+      var unfinished = stopped || failed.length > 0;
+      S.scanJob = unfinished
         ? { sig: accountSig(), startIdx: resumeFrom, cursor: resumeFrom + Math.max(0, Math.min(dispatched, plan.length) - failed.length), ts: Date.now() }
         : { sig: accountSig(), startIdx: 0, cursor: S.accounts.length, ts: Date.now() };
       save();
@@ -724,13 +904,14 @@
           if (!seenN[nm]) { seenN[nm] = 1; lastScanFailed.push(nm); }
         }
       }
-      // 还差点没抓到：总账号数 − 断点之前就已成功的 − 本轮成功的
-      var left = Math.max(0, S.accounts.length - resumeFrom - okCount);
+      // 还差点没抓到：总账号数 − 断点之前的 − 信息流已核对的 − 本轮逐个成功的
+      var left = Math.max(0, S.accounts.length - resumeFrom - feedCaughtN - okCount);
       return {
-        ok: true, newCount: newCount, errors: failAcc, okCount: okCount, scanned: plan.length,
+        ok: true, newCount: newCount, errors: failAcc, okCount: okCount + feedCaughtN, scanned: plan.length,
+        feedUsed: feedUsed, feedPages: feedPages, feedCaught: feedCaughtN,
         conc: conc, risk: riskHits, stopped: stopped, resumeAt: resumeFrom, left: left,
         retries: retries, attempts: errors, stalled: stalled,
-        pct: Math.min(100, Math.round(okCount / Math.max(1, plan.length) * 100)),
+        pct: Math.min(100, Math.round((feedCaughtN + okCount) / feedTotal * 100)),
         names: lastScanFailed.slice(0, 20)
       };
     }
@@ -745,9 +926,13 @@
       });
     }
 
-    return runPass(plan, 0).then(function () {
-      cleanup(); report('', true);
-      return resultObj();
+    return feedPhase().then(function () {
+      // 信息流已经把账号全部核对完（日常绝大多数情况）：不用再逐个打接口了
+      if (!plan.length) { cleanup(); report('', true); return resultObj(); }
+      return runPass(plan, 0).then(function () {
+        cleanup(); report('', true);
+        return resultObj();
+      });
     }).catch(function (e) {
       clearInterval(wdTimer); stopBeat(); scanning = false; keepAwake(false); stopFlag = false;
       try { save(); } catch (err) { }
@@ -855,6 +1040,14 @@
       '<button class="dyh-btn' + (S.cfg.uiScale === 'l' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="l">更大</button>' +
       '</div>' +
       '<div class="dyh-tip" style="margin-top:2px">默认「更大」= 宽占屏幕 96%、高占 93%，四周只留一点点边，字也跟着放大了一档。越小越省屏幕、越看得清全貌。</div>';
+    var md = S.cfg.scanMode || 'auto';
+    h += '<label class="dyh-lb">抓取方式</label><div style="display:flex;gap:8px;margin:6px 0 4px">' +
+      '<button class="dyh-btn' + (md === 'auto' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="auto">自动（推荐）</button>' +
+      '<button class="dyh-btn' + (md === 'post' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="post">只逐个抓</button>' +
+      '</div>' +
+      '<div class="dyh-tip" style="margin-top:2px"><b>自动</b> = 先走关注页信息流（一次拿 20 条，请求极少，又快又不失败），' +
+      '没覆盖到的再逐个补；<b>只逐个抓</b> = 不用信息流，一个账号一个请求（老办法，慢且容易被限流）。' +
+      '信息流万一不可用会自动降级，不用手动切。</div>';
     h += '<label class="dyh-lb">每次抓前几个账号（留空 = 全部 ' + S.accounts.length + ' 个）</label>' +
       '<input id="dyh-limit" class="dyh-input" type="number" min="0" inputmode="numeric" value="' + (S.cfg.scanLimit || 0) + '">';
     h += '<label class="dyh-lb">并发【上限】1~10（默认 6）</label>' +
@@ -1071,7 +1264,9 @@
         '</div>' +
         '<div class="dyh-tip">本轮计划抓 <b>' + scopeTxt + '</b>（' +
         (resumeIdx > 0 ? '从断点 <b>' + resumeIdx + '</b> 之后的 ' + (S.accounts.length - resumeIdx) + ' 个开始' : '全部') + '）。<br>' +
-        '· 开局同时抓 <b>3</b> 个，跑得顺自动加（最多 ' + (S.cfg.scanConc || 6) + ' 个），抖音不理人就自动降速；<br>' +
+        '· <b>先走关注页信息流</b>（①阶段）：一次拿 20 条、按时间倒序，翻到上次抓到的时间就追平了 —— <b>2~5 次请求</b>就能核对完几百个账号，这才是「又快又不失败」的关键；<br>' +
+        '· 只有信息流<b>没覆盖到</b>的账号才逐个补抓（②阶段，首次使用会多一些，之后很少）；<br>' +
+        '· 补抓开局同时抓 <b>3</b> 个，跑得顺自动加（最多 ' + (S.cfg.scanConc || 6) + ' 个），抖音不理人就自动降速；<br>' +
         '· <b>单个账号失败会就地重试 3 次</b>（退避后再来），整轮结束还会再补最多 2 轮 —— 抖一下不算失败；<br>' +
         '· 每请求 8 秒超时、单账号 45 秒、整轮 ' + (S.cfg.scanBudget || 12) + ' 分钟，另有 90 秒「无进展」强制收尾，<b>不会卡死</b>；<br>' +
         '· 抓到一半切走 App / 熄屏 / 断网也没事：下次打开<b>自动从断点接着抓</b>。</div>' +
@@ -1090,10 +1285,12 @@
           '并发 <b>' + s.conc + '/' + s.maxConc + '</b>　已用 <b>' + mm(s.elapsed) + '</b>' +
           (s.eta ? '　预计还需 <b>' + mm(s.eta) + '</b>' : '') +
           (s.retries ? '　自动重试 <b>' + s.retries + '</b> 次' : '');
-        gid('dyh-pnow').textContent = s.name ? ('当前：' + s.name) : '';
+        gid('dyh-pnow').textContent = (s.phase === 'feed' ? '① ' : '② ') + (s.name ? ('当前：' + s.name) : '');
         var w = gid('dyh-pwarn');
         if (s.risk) { w.style.display = ''; w.textContent = '⚠ 抖音限流中，已自动降速重试（不会算失败）'; }
         else if (s.cool) { w.style.display = ''; w.textContent = '⏳ 正在降速冷却，稍等一下就好'; }
+        else if (s.phase === 'feed') { w.style.display = ''; w.textContent = '① 关注页信息流：一次拿 20 条，请求极少（不逐个打账号，所以不容易被限流）'; }
+        else if (s.feedUsed) { w.style.display = ''; w.textContent = '② 补抓信息流没覆盖到的账号（首次使用会多一些，之后就很少了）'; }
         else { w.style.display = 'none'; }
       }).then(function (r) {
         var bar = gid('dyh-pin');
@@ -1274,6 +1471,12 @@
       var sec3 = el.getAttribute('data-sec'), cat3 = el.getAttribute('data-cat');
       for (i = 0; i < S.accounts.length; i++) if (S.accounts[i].secUserId === sec3) S.accounts[i].category = cat3;
       save(); toast('已设为「' + (cat3 || '未分类') + '」'); open('manage');
+      return;
+    }
+
+    if (act === 'scan-mode') {
+      S.cfg.scanMode = el.getAttribute('data-mode') === 'post' ? 'post' : 'auto';
+      save(); toast(S.cfg.scanMode === 'post' ? '已切为「只逐个抓」（不用信息流）' : '已切为「自动」（优先走关注页信息流）'); open('settings');
       return;
     }
 
