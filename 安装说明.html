@@ -65,9 +65,22 @@
     <textarea id="bm" readonly>javascript:(function(){if(!/douyin\.com/.test(location.href)){alert('请先在手机浏览器打开 www.douyin.com（桌面版）再点这个书签');return;}if(window.__DY_HELPER_LOADED__){alert('助手已经启动了，看右下角 🎯 按钮');return;}var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/gh/maidang0706/douyin@main/%E6%8A%96%E9%9F%B3%E6%89%8B%E6%9C%BA%E5%8A%A9%E6%89%8B.user.js?t='+Date.now();s.onload=function(){alert('抖音关注助手已启动，看右下角 🎯 按钮');};s.onerror=function(){alert('加载失败，请检查网络后重试');};document.body.appendChild(s);})();</textarea>
     <button class="btn" onclick="copyBm()">📋 复制书签代码</button>
     <div class="info">脚本本体托管在 jsDelivr CDN，<b>以后我更新了脚本，你这个书签不用改</b>，自动就是新版。</div>
-    <div class="warn">个别手机浏览器的书签不允许执行代码（点书签没反应）。遇到这种情况改用方式 B。</div>
+    <div class="warn"><b>华为 / 荣耀自带浏览器等会提示「无效网址」、存不了</b>（它们的书签只接受 <code>http/https</code> 开头的地址）。先试下面的曲线救国；还不行就直接用 <b>方式 B（Via 浏览器）</b>，完全不用书签。</div>
+    <div class="info"><b>曲线救国（不一定成功，30 秒试一下）</b>：先在华为浏览器里收藏<b>任意普通网页</b>（比如 <code>https://www.douyin.com</code>）→ 进「书签/收藏」<b>长按</b>它 → <b>编辑</b> → 把网址整段删掉、<b>粘贴上面的代码</b> → 保存。部分版本编辑时不校验协议就能存下来；如果还是提示无效，别折腾了，走方式 B。</div>
 
-    <p style="margin:16px 0 4px"><b>方式 B · 用户脚本管理器</b></p>
+    <p style="margin:16px 0 4px"><b>方式 B · Via 浏览器原生脚本</b><span class="tag g">华为/荣耀自带浏览器推荐 · 免书签</span></p>
+    <ol>
+      <li>应用市场搜「<b>Via 浏览器</b>」安装（体积约 1MB，国产浏览器存不了 javascript 书签时用它最省事）</li>
+      <li>打开 Via → 右下角「三」菜单 → <b>设置</b> → 往下找到 <b>脚本</b> → 右上角 <b>+</b> → 选 <b>从 URL 安装</b></li>
+      <li>粘贴下面的地址 → 安装 → 确认开关是「已启用」，匹配规则为 <code>https://www.douyin.com/*</code></li>
+      <li>在 Via 里打开 <code>www.douyin.com</code>（记得勾「桌面版网站」）→ 登录抖音 → 刷新，右下角出现 🎯</li>
+    </ol>
+    <code id="viaurl">https://cdn.jsdelivr.net/gh/maidang0706/douyin@main/抖音手机助手.user.js</code>
+    <button class="btn" onclick="copyVia()">📋 复制脚本安装地址</button>
+    <div class="info">Via <b>原生支持油猴脚本</b>，不用再装 Tampermonkey。装一次就常驻，以后打开抖音自动生效，我更新了脚本它也会自动拉新版。</div>
+    <div class="warn">如果「从 URL 安装」拉不动（网络问题）：把 <code>抖音手机助手.user.js</code> 这个文件传到手机上（微信/QQ 发给自己），Via → 设置 → 脚本 → + → <b>导入</b> → 选这个文件，效果一样。</div>
+
+    <p style="margin:16px 0 4px"><b>方式 C · 用户脚本管理器（Kiwi + 油猴）</b></p>
     <ol>
       <li>装一个支持扩展的浏览器：<b>Kiwi Browser</b> 或 <b>Firefox（安卓版）</b></li>
       <li>在里面装 <b>Tampermonkey</b>（Kiwi 可从 Chrome 应用商店装）或 <b>Violentmonkey</b>（Firefox 附加组件）</li>
@@ -94,6 +107,10 @@
 
   <div class="card">
     <h2>常见问题</h2>
+    <p style="margin:6px 0"><b>Q：保存书签时提示「无效网址」，存不了？</b><br>说明这个浏览器的书签<b>只接受 http/https 开头的地址</b>，<code>javascript:</code> 被当成非法网址拦掉了（华为/荣耀自带浏览器就是这样）。<br>
+    两条路：<br>
+    ① 先收藏一个普通网页，再进书签里<b>编辑</b>、把网址改成代码保存（部分版本可以）；<br>
+    ② 直接用 <b>方式 B（Via 浏览器）</b> —— 它原生支持脚本，<b>根本不需要书签</b>，装一次永久生效。</p>
     <p style="margin:6px 0"><b>Q：抓未读要多久？</b><br>约 400 个账号、每个间隔 1~2.5 秒，大约 <b>10~15 分钟</b>。期间把手机屏幕保持亮着、别切走这个标签页。</p>
     <p style="margin:6px 0"><b>Q：显示失败很多？</b><br>多半是抖音风控冷却中，过 20~30 分钟再抓一次。脚本本身遇错会自动退避等待，不会硬闯。</p>
     <p style="margin:6px 0"><b>Q：取关失败 / 提示验证码？</b><br>取关是用「隐藏 iframe 打开对方主页 → 点真实关注按钮」实现的。抖音对<i>新建的页面上下文</i>比较敏感，你当天抓取频繁时会弹「验证码中间页」导致失败。<br>
@@ -131,6 +148,11 @@ function copyBm(){
   try{ ok=document.execCommand('copy'); }catch(e){}
   if(!ok && navigator.clipboard){ navigator.clipboard.writeText(t.value).then(function(){alert('已复制');}); return; }
   alert(ok?'已复制，去新建书签粘贴即可':'复制失败，请手动长按选中上面的代码复制');
+}
+function copyVia(){
+  var u='https://cdn.jsdelivr.net/gh/maidang0706/douyin@main/%E6%8A%96%E9%9F%B3%E6%89%8B%E6%9C%BA%E5%8A%A9%E6%89%8B.user.js';
+  if(navigator.clipboard){ navigator.clipboard.writeText(u).then(function(){alert('已复制，去 Via 里「脚本 → + → 从 URL 安装」粘贴');}); }
+  else alert(u);
 }
 function copyRaw(){
   var u='https://raw.githubusercontent.com/maidang0706/douyin/main/抖音手机助手.user.js';
