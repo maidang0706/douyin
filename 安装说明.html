@@ -184,6 +184,62 @@
     <h2><span class="num">4</span> 手机-only 手册：电脑可以彻底不管了</h2>
     <p style="margin:6px 0">下面这套<b>不需要电脑</b>：不开服务、不填 IP、不连局域网，只有「装脚本的手机浏览器」和「原来的手机端 HTML」两个东西。</p>
 
+    <div class="card">
+      <h2>⓪ 从头到尾装一遍（就这一次，照着点）</h2>
+
+      <p style="margin:10px 0 2px"><b>第 1 步 · 装 Via 浏览器</b></p>
+      <ol>
+        <li>应用市场搜「<b>Via 浏览器</b>」安装（体积约 1MB）</li>
+        <li>Via → 右下角 <b>「三」</b> → <b>设置</b> → 往下找 <b>脚本</b> → 点进去（首次会提示初始化存储，点「确定」）</li>
+        <li>顺手确认「<b>启用脚本</b>」开关是开着的</li>
+      </ol>
+
+      <p style="margin:12px 0 2px"><b>第 2 步 · 删掉旧脚本</b> <span style="color:#86909c;font-size:13px">（只有重装时才需要做；第一次装跳过）</span></p>
+      <ol><li>设置 → 脚本 → 在列表里<b>长按</b>「抖音关注助手（手机免电脑版）」→ 删除</li></ol>
+
+      <p style="margin:12px 0 2px"><b>第 3 步 · 复制安装地址</b></p>
+      <ol>
+        <li>Via 地址栏打开 <code>https://maidang0706.github.io/douyin/安装说明.html</code></li>
+        <li>点页面上的「<b>📋 复制脚本安装地址</b>」</li>
+      </ol>
+
+      <p style="margin:12px 0 2px"><b>第 4 步 · 下载脚本</b> <span style="color:#86909c;font-size:13px">（这就是 B-1）</span></p>
+      <ol>
+        <li>右下 <b>「三」</b> → <b>设置</b> → <b>脚本</b> → 右上角 <b>＋</b> → 选 <b>下载脚本</b></li>
+        <li>弹窗里<b>粘贴</b>刚才复制的地址 → 确认</li>
+        <li>提示「保存 / 用其他应用打开」→ 选 <b>保存</b></li>
+        <li>回到脚本列表：开关是<b>已启用</b>，匹配规则是 <code>https://www.douyin.com/*</code></li>
+      </ol>
+
+      <p style="margin:12px 0 2px"><b>第 5 步 · 开「电脑模式」并登录抖音</b></p>
+      <ol>
+        <li>Via 地址栏输入 <code>www.douyin.com</code> 回车</li>
+        <li>右下 <b>「三」</b> → 找到 <b>「电脑模式」</b> 点一下（再点一下切回手机版）<br>
+          <b>这步必须做</b>：脚本只在<b>桌面版</b>的页面上挂那个 🎯 按钮，手机版拿不到</li>
+        <li>正常登录抖音（扫码 / 验证码都行）</li>
+      </ol>
+
+      <p style="margin:12px 0 2px"><b>第 6 步 · 验证装好了</b></p>
+      <ol>
+        <li>在抖音页面上<b>下拉刷新一次</b></li>
+        <li>屏幕<b>右下角出现 🎯 圆按钮</b> → 成了</li>
+        <li>点 🎯 → 面板里显示「已关注 xxx 个」→ 说明数据抓到了</li>
+      </ol>
+
+      <div class="ok">换手机 / 重装 Via 时，<b>把第 1~6 步重做一遍</b>就行。脚本链接一直有效，我以后改脚本，你 <b>删掉旧条目重新走第 3~4 步</b>即可。</div>
+    </div>
+
+    <div class="card">
+      <h2>① 以后怎么用（平时就这四步）</h2>
+      <ol>
+        <li>Via 打开 <code>www.douyin.com</code>（<b>记得还是「电脑模式」</b>，已经登录就直接进）</li>
+        <li>点右下角 <b>🎯</b> → <b>📥 刷新关注列表</b> → <b>🔍 抓最新未读</b>（约 10~15 分钟，<b>别息屏、别切走</b>）</li>
+        <li>点 <b>🎯</b> → <b>☁️ 推到 GitHub</b>（10 秒内搞定）</li>
+        <li>打开<b>抖音更新提醒-手机端.html</b> → <b>🔄 同步</b> → 看未读清单、点标题跳视频、标记已读</li>
+      </ol>
+      <div class="ok">走完这一趟，手机上就有一份完整的待看清单了。<b>电脑全程不用管。</b></div>
+    </div>
+
     <table>
       <tr><th>能力</th><th>纯手机能不能做</th></tr>
       <tr><td>抓关注列表 / 抓最新未读视频</td><td>✅ 脚本自己抓，不需要电脑</td></tr>
@@ -195,9 +251,10 @@
       <tr><td>语音转写 → 完整版 AI 总结</td><td>⚠️ 这一项要服务端做 ASR，纯手机没有</td></tr>
     </table>
 
-    <div class="ok"><b>推荐流程（每周点两回就行）</b>
+    <div class="ok"><b>注意</b>：上面「① 以后怎么用」就是完整的日常流程（每周点两回）。
+      下面这段和它是一回事，只是记个要点：
       <ol>
-        <li>打开装脚本的浏览器 → <code>www.douyin.com</code>（桌面版）→ 登录</li>
+        <li>打开装脚本的浏览器 → <code>www.douyin.com</code>（<b>电脑模式</b>）→ 登录</li>
         <li>🎯 → <b>📥 刷新关注列表</b> → <b>🔍 抓最新未读</b>（约 10~15 分钟，手机别息屏）</li>
         <li>🎯 → <b>☁️ 推到 GitHub</b>（10 秒内）</li>
         <li>打开<b>抖音更新提醒-手机端.html</b> → <b>🔄 同步</b> → 看未读列表、跳视频、标记已读</li>
@@ -1121,6 +1178,7 @@ function copyRaw(){
     <details>
       <summary style="cursor:pointer;color:#86909c;font-size:13px">点开看历次改动（最新在上）</summary>
       <ul style="list-style:none;padding:0;margin:10px 0 0">
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> 新增「⓪ 从头到尾装一遍」六步清单（含 Via「电脑模式」的确切位置：右下「三」→ 电脑模式），以及「① 以后怎么用」日常四步。<b>B-1 下载脚本这条路已实测走通。</b></li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> 安装地址换成 <b>GitHub Pages 直链</b>（jsDelivr 缓存 7 天，会给旧版脚本，旧版取关会被验证码页卡死）；新增三条 Via 安装路径 <b>B-1 下载脚本 / B-2 导入脚本 / B-3 添加脚本</b>，覆盖「加号只有三个选项」的各种 Via 版本；新增 <b>📦 复制脚本全文</b> 按钮，<b>添加脚本</b>这条路也能离线用。</li>
       </ul>
     </details>
