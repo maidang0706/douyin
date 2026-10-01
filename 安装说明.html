@@ -152,6 +152,37 @@
   </div>
 
   <div class="card">
+    <h2><span class="num">4</span> 手机-only 手册：电脑可以彻底不管了</h2>
+    <p style="margin:6px 0">下面这套<b>不需要电脑</b>：不开服务、不填 IP、不连局域网，只有「装脚本的手机浏览器」和「原来的手机端 HTML」两个东西。</p>
+
+    <table>
+      <tr><th>能力</th><th>纯手机能不能做</th></tr>
+      <tr><td>抓关注列表 / 抓最新未读视频</td><td>✅ 脚本自己抓，不需要电脑</td></tr>
+      <tr><td>看未读、点标题跳视频、标记已读</td><td>✅ 脚本面板 + 手机端 HTML 都行</td></tr>
+      <tr><td>复制到备忘录 / 分享</td><td>✅ 手机端 HTML 里点「复制链接」</td></tr>
+      <tr><td>分类、拖动排序、AI 摘要预览</td><td>✅ 手机端 HTML 里操作（排序/本地）</td></tr>
+      <tr><td>一键推 GitHub / 同步回来</td><td>✅ 脚本「☁️ 推 GitHub」+ 手机端 HTML「🔄 同步」</td></tr>
+      <tr><td>取关 / 关注新账号</td><td>✅ 面板点一下自动完成（弹新标签页点真实按钮）</td></tr>
+      <tr><td>语音转写 → 完整版 AI 总结</td><td>⚠️ 这一项要服务端做 ASR，纯手机没有</td></tr>
+    </table>
+
+    <div class="ok"><b>推荐流程（每周点两回就行）</b>
+      <ol>
+        <li>打开装脚本的浏览器 → <code>www.douyin.com</code>（桌面版）→ 登录</li>
+        <li>🎯 → <b>📥 刷新关注列表</b> → <b>🔍 抓最新未读</b>（约 10~15 分钟，手机别息屏）</li>
+        <li>🎯 → <b>☁️ 推到 GitHub</b>（10 秒内）</li>
+        <li>打开<b>抖音更新提醒-手机端.html</b> → <b>🔄 同步</b> → 看未读列表、跳视频、标记已读</li>
+      </ol>
+      这一趟走完，手机上就有一个完整的待看清单。</div>
+
+    <div class="warn"><b>关于「✦ AI总结」</b>：你的手机端 HTML 里这个按钮走的是 <code>/api/summary</code>（需要服务端做语音转写），所以它<b>在纯手机模式下会提示「请先连上电脑端服务」</b>。<br>
+    两个选择：① 接受降级 —— 只用它看文案标题、不点 AI总结；② 要语音版，我给脚本加一个「<b>用视频文案做归纳</b>」的降级版（不需要 ASR，靠抖音接口拿到的文案），那样纯手机也能用。<b>想加的话跟我说一声。</b></div>
+
+    <div class="info"><b>电脑那套怎么处理？</b>可以彻底放着不用。两边推的是<b>同一个 <code>unread.json</code></b>，脚本和电脑端各推各的，谁后推谁为准，不会互相覆盖坏。<br>
+    万一有天你想开回来：原来的 <code>一键启动.bat</code> / 手机端 HTML 里填电脑 IP 照旧能连，互不影响。</div>
+  </div>
+
+  <div class="card">
     <h2>和原来那套的关系</h2>
     <p style="margin:6px 0">电脑上那套服务<b>可以彻底不用了</b>。本脚本导出的数据格式和原来完全一致（<code>unread.json</code>），原来的手机端 HTML 照常能读。</p>
     <p style="margin:6px 0">如果你还想留着电脑端自动跑，也不冲突 —— 两边推的是同一份 <code>unread.json</code>。</p>

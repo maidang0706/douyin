@@ -197,49 +197,117 @@
   }
 
   /* ----------------------------- 取关 / 关注 ----------------------------- */
-  /* 用同源 iframe 打开对方主页 → 点页面上那颗真实的关注按钮。
-     抖音的风控只认「真人在真浏览器里点」，这是唯一稳定的做法。 */
+  /* ★ 2026-10-01 重构：不再用隐藏 iframe（真机实测会被抖音的「验证码中间页」拦），
+     改成「主页面点按钮 → window.open 开一个真实的新标签页 → 本脚本在新标签页里
+     自动点那颗真实的关注按钮 → 结果写回 localStorage → 新标签页自动关闭 → 主页面读结果」。
+
+     为什么这个能成：
+       - 新标签页是 douyin.com 的「真实浏览上下文」，不是被嵌进去的 → 抖音不认它是机器人；
+       - 脚本和抖音同源（@match https://www.douyin.com/*），新标签页里也会跑本脚本，
+         所以「自动点击」是在真页面里发生的；
+       - 主页面的点击是用户手势 → window.open 不会被弹窗拦截。 */
+  function findFollowBtn(root) {
+    var d = root || document;
+    return d.querySelector('button[data-e2e="user-info-follow-btn"]') ||
+      d.querySelector('[data-e2e="user-info"] button') ||
+      d.querySelector('button[data-e2e="follow-btn"]') ||
+      d.querySelector('button:not([disabled]) [data-e2e="follow-btn"]') ||
+      d.querySelector('button .follow-btn, button[class*="follow"]');
+  }
+
+  /* 新标签页侧：在 /user/xxx 页面里，如果检测到有效的待办任务，就自动点按钮 */
+  function autoFollowWorker() {
+    var m = location.pathname.match(/^\/user\/([^\/?#]+)/);
+    if (!m) return;
+    var cur = decodeURIComponent(m[1]).replace(/^@/, '');
+    var P = null;
+    try { P = JSON.parse(localStorage.getItem(LS) || '{}'); } catch (e) { return; }
+    var t = P && P.pending;
+    if (!t || t.status !== 'running' || Date.now() - t.ts > 180000) return;
+    var want = String(t.secUid || '').replace(/^@/, '');
+    if (want !== cur) return;                       // 不是这次要处理的账号，别乱点
+
+    var tries = 0;
+    var iv = setInterval(function () {
+      tries++;
+      var title = document.title || '';
+      // 抖音对新上下文弹「验证码 / 安全验证」中间页 —— 立刻停手，交给用户
+      if (/验证码|安全验证|滑动|seccheck|verify/i.test(title + location.href)) {
+        t.status = 'captcha'; t.err = '抖音弹出了验证页';
+        try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e) { }
+        clearInterval(iv); closeSelf(); return;
+      }
+      if (tries > 45) {
+        t.status = 'timeout'; t.err = '主页没加载出关注按钮';
+        try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e) { }
+        clearInterval(iv); closeSelf(); return;
+      }
+      var btn = findFollowBtn(document);
+      if (!btn) return;
+      var txt = (btn.innerText || btn.textContent || '').trim();
+      if (!txt) return;
+      var isFollowing = /已关注|互相关注/.test(txt);
+      if (isFollowing === !!t.want) {                // 已经是目标状态，不用点
+        t.status = 'noop'; t.state = txt;
+        try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e) { }
+        clearInterval(iv); closeSelf(); return;
+      }
+      try { btn.click(); } catch (e) {
+        t.status = 'fail'; t.err = '点击失败：' + e.message;
+        try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e2) { }
+        clearInterval(iv); closeSelf(); return;
+      }
+      setTimeout(function () {
+        var t2 = '';
+        try { t2 = (btn.innerText || btn.textContent || '').trim(); } catch (e) { }
+        t.status = 'done'; t.state = t2 || txt;
+        try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e2) { }
+        clearInterval(iv);
+        closeSelf();
+      }, 2600);
+    }, 800);
+  }
+  function closeSelf() { setTimeout(function () { try { window.close(); } catch (e) { } }, 500); }
+
+  /* 主页面侧：开新标签页 → 轮询等新标签页把结果写回来 */
   function setFollow(secUid, want, name) {
     return new Promise(function (resolve) {
-      var f = document.createElement('iframe');
-      f.style.cssText = 'position:fixed;left:-10000px;top:0;width:900px;height:700px;border:0';
-      f.src = 'https://www.douyin.com/user/' + encodeURIComponent(secUid);
-      document.body.appendChild(f);
-      var tries = 0, done = false;
-      function cleanup() { try { if (f.parentNode) f.parentNode.removeChild(f); } catch (e) { } }
-      function finish(r) { if (done) return; done = true; clearInterval(t); cleanup(); resolve(r); }
+      // 清掉上一次没完成的残留
+      try {
+        var prev = JSON.parse(localStorage.getItem(LS) || '{}');
+        prev.pending = { secUid: secUid, want: !!want, name: name, ts: Date.now(), status: 'running' };
+        localStorage.setItem(LS, JSON.stringify(prev));
+      } catch (e) { }
 
-      var t = setInterval(function () {
-        tries++;
-        if (tries > 30) { finish({ ok: false, error: '加载超时，未找到关注按钮（可能未登录）' }); return; }
-        var d = null;
-        try { d = f.contentDocument; } catch (e) { }
-        if (!d) return;
-        var title = '';
-        try { title = d.title || ''; } catch (e) { }
-        // 抖音会对「新上下文」弹验证码中间页。尽早识别，别让用户白等 30 次。
-        if (/验证码|安全验证|滑动/.test(title)) {
-          finish({ ok: false, captcha: true, error: '抖音弹出验证码中间页（当前风控敏感）。请过 20~30 分钟再试，或用「🌐 打开主页」手动点一下。' });
-          return;
-        }
-        var btn = null;
+      var w;
+      try { w = window.open('https://www.douyin.com/user/' + encodeURIComponent(secUid), '_blank'); } catch (e) { }
+      if (!w) {
         try {
-          btn = d.querySelector('button[data-e2e="user-info-follow-btn"]') ||
-            d.querySelector('[data-e2e="user-info"] button') ||
-            d.querySelector('button[data-e2e="follow-btn"]');
-        } catch (e) { return; }
-        if (!btn) return;
-        var txt = (btn.innerText || btn.textContent || '').trim();
-        if (!txt) return;
-        var isFollowing = /已关注|互相关注/.test(txt);
-        if (isFollowing === want) { finish({ ok: true, noop: true, state: txt }); return; }
-        try { btn.click(); } catch (e) { finish({ ok: false, error: '点击失败：' + e.message }); return; }
-        setTimeout(function () {
-          var t2 = '';
-          try { t2 = (btn.innerText || btn.textContent || '').trim(); } catch (e) { }
-          finish({ ok: (/已关注|互相关注/.test(t2) === want), state: t2 || txt });
-        }, 2800);
-      }, 900);
+          var p2 = JSON.parse(localStorage.getItem(LS) || '{}'); p2.pending = null;
+          localStorage.setItem(LS, JSON.stringify(p2));
+        } catch (e) { }
+        resolve({ ok: false, error: '浏览器拦住了新标签页。请在浏览器设置里允许抖音「弹出窗口」，或者干脆用面板里的「🌐 打开主页」自己点一下（一样是一次点击就完事）。' });
+        return;
+      }
+
+      var iv = setInterval(function () {
+        var P = null;
+        try { P = JSON.parse(localStorage.getItem(LS) || '{}'); } catch (e) { }
+        var t = P && P.pending;
+        if (!t) { clearInterval(iv); resolve({ ok: false, error: '任务状态丢失，请重试' }); return; }
+        if (t.status === 'running') {
+          if (Date.now() - t.ts > 180000) { t.status = 'timeout'; t.err = '等待新标签页超时'; try { localStorage.setItem(LS, JSON.stringify(P)); } catch (e) { } }
+          else return;
+        }
+        clearInterval(iv);
+        if (t.status === 'done') resolve({ ok: true, state: t.state || '' });
+        else if (t.status === 'noop') resolve({ ok: true, noop: true, state: t.state || '' });
+        else if (t.status === 'captcha') resolve({
+          ok: false, captcha: true,
+          error: '抖音在新标签页弹了验证页（风控冷却中）。等 20~30 分钟后重试，或点「🌐 打开主页」在新标签页里自己点一下。'
+        });
+        else resolve({ ok: false, error: t.err || '取关/关注失败' });
+      }, 700);
     });
   }
 
@@ -759,6 +827,8 @@
   /* ----------------------------- 启动 ----------------------------- */
   function boot() {
     if (!/www\.douyin\.com/.test(location.host)) return;
+    /* 如果这是一个被脚本打开的「取关/关注」用标签页，先让它自动点完按钮再挂面板 */
+    try { autoFollowWorker(); } catch (e) { console.warn('[抖音关注助手] 自动点击异常：', e); }
     ensureUI();
     console.log('[抖音关注助手] 已加载。右下角 🎯 按钮打开面板。');
   }
