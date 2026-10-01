@@ -246,9 +246,10 @@
     </div>
 
     <div class="card">
-      <h2>② 界面尺寸（v1.1 又放大：现在只比手机屏小一圈）</h2>
-      <div class="warn" style="margin-bottom:10px"><b>先确认你手机上跑的是不是 v1.1</b>：打开助手面板，标题「抖音关注助手」后面有个小灰字 <b>v1.1</b>。
-        看不到 v1.1（或根本没有这个小字）= 手机上还是<b>旧脚本</b>，请按下面「③」<b>删掉旧条目重新下载一次</b>（只刷新抖音页面没用，Via 里的脚本不会自动更新）。</div>
+      <h2>② 界面尺寸（v1.2 又放大字：面板只比手机屏小一圈）</h2>
+      <div class="warn" style="margin-bottom:10px"><b>先确认你手机上跑的是不是 v1.2</b>：打开助手面板，标题「抖音关注助手」后面有个小灰字 <b>v1.2</b>。
+        看不到 v1.2（或根本没有这个小字）= 手机上还是<b>旧脚本</b>，请按下面「③」<b>删掉旧条目重新下载一次</b>（只刷新抖音页面没用，Via 里的脚本不会自动更新）。
+        <b>以后每次改动都会升版本号</b>，看到数字变了就是拿到新版了。</div>
       <ul>
         <li><b>右上角 ⤢ 一键换大小</b>：不用进设置，点一下在 小 → 中 → 更大 之间循环，<b>立刻生效</b>，还会弹出当前实际像素（比如 374×785）</li>
         <li><b>尺寸是双重保险</b>：CSS 百分比上加了 <code>!important</code>（抖音自己后插入的样式压不掉），同时用 JS 按屏幕算出 <b>px 直接写死</b>，谁也顶不回去；转屏、地址栏收放都会自动重算</li>
@@ -257,8 +258,9 @@
           基本就是<b>铺满整屏</b>，但还能看出是浮层，想关随时关</li>
         <li><b>能自己在三档之间切</b>：⚙️ <b>设置</b> 页最上面就是「助手界面大小」→
           <b>小</b>(74%×70%) / <b>中</b>(88%×85%) / <b>更大</b>(96%×93%，默认)。<b>点了立刻生效，不用重开、也不用改别的设置</b></li>
-        <li><b>字号跟着放大一档</b>：标题 17→<b>19px</b>、按钮 16→<b>17px</b>、列表行 15→<b>16px</b>、
-          说明文字 13→<b>14px</b>，内容区点开后自己滚动，不会被裁掉</li>
+        <li><b>字号（v1.2 又放大一档）</b>：标题 <b>22px</b>、正文与按钮 <b>18px</b>、列表行与视频标题 <b>18px</b>、
+          说明文字 <b>16px</b>、输入框 <b>17px</b>、小标签 <b>15px</b>、视频时间等次要信息 <b>16px</b>、关闭 × <b>34px</b>、
+          提示气泡 <b>16px</b>；行高也放宽到 1.55~1.65，内容区自己滚动，不会被裁掉</li>
         <li>想关掉：点面板<b>外面空白处</b>或右上角 <b>×</b> 就行</li>
       </ul>
       <div class="warn">如果改完<b>还是旧样子</b>，说明浏览器跑的还是缓存里的老脚本 —— 按下面的「③」重载一次就好了。
@@ -432,7 +434,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      1.1.0
+// @version      1.2.0
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -459,7 +461,9 @@ function copyRaw(){
   var API_POST = 'https://www.douyin.com/aweme/v1/web/aweme/post/';
   var API_FOLLOWING = 'https://www.douyin.com/aweme/v1/web/user/following/list/';
   var LS = 'dy_phone_helper_v1';
-  var VER = '1.1';   // 面板右上角显示 v1.1 —— 一眼确认手机上跑的是不是最新版
+  /* ★ 版本号：每次改动本脚本都要 +1（1.1 → 1.2 → 1.3 …），并同步改 @version。
+     面板标题后面会显示 v1.2，用户一眼就能确认手机上跑的是不是最新版。 */
+  var VER = '1.2';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -538,7 +542,7 @@ function copyRaw(){
     if (!toastEl) {
       toastEl = document.createElement('div');
       toastEl.style.cssText = 'position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:rgba(0,0,0,.84);color:#fff;' +
-        'padding:10px 16px;border-radius:20px;font-size:14px;z-index:2147483647;max-width:86vw;line-height:1.5;pointer-events:none;transition:opacity .25s';
+        'padding:12px 18px;border-radius:20px;font-size:16px;z-index:2147483647;max-width:86vw;line-height:1.55;pointer-events:none;transition:opacity .25s';
       document.body.appendChild(toastEl);
     }
     toastEl.innerHTML = msg;
@@ -1272,37 +1276,37 @@ function copyRaw(){
       /* 默认「更大」：宽 96% / 高 93%，四周只留一点点边，几乎就是铺满手机屏（10-02 按用户要求放大）
          ★ 关键尺寸一律 !important：抖音自己后插入的样式表压不掉我们（否则面板会缩回老样子） */
       '.dyh-box{background:#fff!important;width:96%!important;max-width:980px;height:93%!important;max-height:920px;overflow:hidden;' +
-      'border-radius:14px;padding:14px 16px calc(18px + env(safe-area-inset-bottom));font-size:17px!important;color:#1d2129;' +
-      'display:flex!important;flex-direction:column;box-sizing:border-box}' +
-      '.dyh-box.sz-s{width:74%!important;max-width:540px;height:70%!important;max-height:560px;font-size:15px!important}' +
-      '.dyh-box.sz-m{width:88%!important;max-width:720px;height:85%!important;max-height:720px;font-size:16px!important}' +
-      '.dyh-box.sz-l{width:96%!important;max-width:980px;height:93%!important;max-height:920px;font-size:17px!important}' +
-      '.dyh-box h3{margin:0 0 12px!important;font-size:19px!important;display:flex!important;align-items:center;flex:0 0 auto}' +
-      '.dyh-box h3 span{margin-left:auto;font-size:32px!important;color:#c9cdd4;padding:0 8px}' +
-      '.dyh-ver{font-size:12px!important;color:#c9cdd4;font-weight:400;margin-left:6px!important}' +
-      '.dyh-zbtn{font-size:22px!important;color:#4e5969;background:#f2f3f5;border-radius:8px;' +
-      'padding:2px 9px;margin-left:auto!important}' +
+      'border-radius:14px;padding:16px 18px calc(20px + env(safe-area-inset-bottom));font-size:18px!important;color:#1d2129;' +
+      'display:flex!important;flex-direction:column;box-sizing:border-box;line-height:1.55}' +
+      '.dyh-box.sz-s{width:74%!important;max-width:540px;height:70%!important;max-height:560px;font-size:16px!important}' +
+      '.dyh-box.sz-m{width:88%!important;max-width:720px;height:85%!important;max-height:720px;font-size:17px!important}' +
+      '.dyh-box.sz-l{width:96%!important;max-width:980px;height:93%!important;max-height:920px;font-size:18px!important}' +
+      '.dyh-box h3{margin:0 0 14px!important;font-size:22px!important;display:flex!important;align-items:center;flex:0 0 auto}' +
+      '.dyh-box h3 span{margin-left:auto;font-size:34px!important;color:#c9cdd4;padding:0 8px}' +
+      '.dyh-ver{font-size:13px!important;color:#c9cdd4;font-weight:400;margin-left:7px!important}' +
+      '.dyh-zbtn{font-size:24px!important;color:#4e5969;background:#f2f3f5;border-radius:8px;' +
+      'padding:3px 11px;margin-left:auto!important}' +
       '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
-      '.dyh-btn{display:block;width:100%;margin:8px 0;padding:15px 16px;border:1px solid #e5e6eb;border-radius:10px;' +
-      'background:#fff;font-size:17px!important;color:#1d2129;text-align:left}' +
+      '.dyh-btn{display:block;width:100%;margin:9px 0;padding:16px 18px;border:1px solid #e5e6eb;border-radius:10px;' +
+      'background:#fff;font-size:18px!important;color:#1d2129;text-align:left}' +
       '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
       '.dyh-btn.gray{color:#86909c}' +
-      '.dyh-card{background:#f7f8fa;border-radius:10px;padding:11px 13px;margin-bottom:10px}' +
-      '.dyh-row{display:flex;align-items:center;padding:11px 0;border-bottom:1px solid #f0f0f0;font-size:16px!important}' +
+      '.dyh-card{background:#f7f8fa;border-radius:10px;padding:12px 14px;margin-bottom:10px}' +
+      '.dyh-row{display:flex;align-items:center;padding:13px 0;border-bottom:1px solid #f0f0f0;font-size:18px!important}' +
       '.dyh-row:last-child{border-bottom:0}' +
       '.dyh-row b{font-weight:500;color:#4e5969}' +
       '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
       '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
-      '.dyh-item{padding:11px 0;border-bottom:1px solid #f2f3f5}' +
-      '.dyh-item-t{font-size:16px!important;line-height:1.5;color:#1d2129}' +
-      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:6px;font-size:14px;color:#86909c}' +
-      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:6px 12px}' +
-      '.dyh-tip{font-size:14px!important;color:#86909c;line-height:1.6;margin:8px 0}' +
-      '.dyh-back{font-size:15px;color:#fe2c55;margin-bottom:10px}' +
-      '.dyh-input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #e5e6eb;border-radius:8px;' +
-      'font-size:16px;margin:4px 0 10px}' +
-      '.dyh-lb{font-size:13px;color:#86909c;display:block;margin-top:8px}' +
-      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:11px 13px;margin:10px 0;font-size:14px;line-height:1.6}';
+      '.dyh-item{padding:13px 0;border-bottom:1px solid #f2f3f5}' +
+      '.dyh-item-t{font-size:18px!important;line-height:1.5;color:#1d2129}' +
+      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:7px;font-size:16px;color:#86909c}' +
+      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:7px 14px}' +
+      '.dyh-tip{font-size:16px!important;color:#86909c;line-height:1.65;margin:9px 0}' +
+      '.dyh-back{font-size:17px;color:#fe2c55;margin-bottom:11px}' +
+      '.dyh-input{width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #e5e6eb;border-radius:8px;' +
+      'font-size:17px;margin:4px 0 11px}' +
+      '.dyh-lb{font-size:15px;color:#86909c;display:block;margin-top:9px}' +
+      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:13px 15px;margin:10px 0;font-size:16px;line-height:1.65}';
     document.head.appendChild(st);
 
     fab = document.createElement('div');
@@ -1687,7 +1691,8 @@ function copyRaw(){
     <details>
       <summary style="cursor:pointer;color:#86909c;font-size:13px">点开看历次改动（最新在上）</summary>
       <ul style="list-style:none;padding:0;margin:10px 0 0">
-        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02（今·v1.1）</b> <b>修「改完还是一样大」：尺寸改成双重保险 + 加了能自检的版本号</b>。① 面板宽高/字号全部加 <code>!important</code>，抖音后插入的样式表压不掉；② <code>applyBoxSize()</code> 不再只靠 CSS 百分比，改成<b>按 <code>innerWidth/innerHeight</code> 算出 px 写进 inline style</b>（inline 优先级最高，390×844 的屏算出来就是 <b>374×785</b>），转屏/地址栏收放监听 <code>resize</code> + <code>orientationchange</code> 自动重算；③ 标题栏加 <b><code>v1.1</code> 版本徽标</b>——<b>看不到 v1.1 说明手机跑的还是旧脚本</b>（Via 不会自动更新，必须删条目重下）；④ 标题栏加 <b>⤢ 按钮</b>，点一下在 小/中/更大 之间循环并弹出实际像素，用来立刻确认到底生效没有；⑤ 首屏提示里写了这两件事。</li>
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02（今·v1.2）</b> <b>字体整体再放大一档</b>：标题 19→<b>22px</b>、正文/按钮 17→<b>18px</b>、列表行与视频标题 16→<b>18px</b>、说明文字 14→<b>16px</b>、次要信息 14→<b>16px</b>、输入框 16→<b>17px</b>、小标签 13→<b>15px</b>、进度框 14→<b>16px</b>、关闭 × 32→<b>34px</b>、⤢ 22→<b>24px</b>、提示气泡 14→<b>16px</b>；行高 1.55~1.65、按钮/行的内边距同步加宽，避免字挤在一起。三档尺寸的字号也同步升到 16/17/18px。<b>版本号升到 v1.2</b>（脚本里 <code>var VER</code> + <code>@version</code> 已加注释：<b>以后每次改动都要 +1</b>）。抓取逻辑没动，回归仿真全过。</li>
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02（v1.1）</b> <b>修「改完还是一样大」：尺寸改成双重保险 + 加了能自检的版本号</b>。① 面板宽高/字号全部加 <code>!important</code>，抖音后插入的样式表压不掉；② <code>applyBoxSize()</code> 不再只靠 CSS 百分比，改成<b>按 <code>innerWidth/innerHeight</code> 算出 px 写进 inline style</b>（inline 优先级最高，390×844 的屏算出来就是 <b>374×785</b>），转屏/地址栏收放监听 <code>resize</code> + <code>orientationchange</code> 自动重算；③ 标题栏加 <b><code>v1.1</code> 版本徽标</b>——<b>看不到 v1.1 说明手机跑的还是旧脚本</b>（Via 不会自动更新，必须删条目重下）；④ 标题栏加 <b>⤢ 按钮</b>，点一下在 小/中/更大 之间循环并弹出实际像素，用来立刻确认到底生效没有；⑤ 首屏提示里写了这两件事。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02</b> <b>界面再放大：面板从占屏 2/3 改成「只比手机屏小一圈」</b>。① 面板窗口 <b>66.6%×66.6%（最大 560px）→ 96%×93%（最大 980×920）</b>，四周只留细细一圈边，几乎铺满整屏；② <b>设置页新增「助手界面大小」三档</b>：小 74%×70% / 中 88%×85% / 更大 96%×93%（默认），<b>点一下立刻生效</b>，新增 <code>applyBoxSize()</code> 在面板创建时按 <code>S.cfg.uiScale</code> 应用；③ 字号再升一档：标题 17→<b>19px</b>、按钮 16→<b>17px</b>、列表行 15→<b>16px</b>、正文 15→<b>17px</b>、说明 13→<b>14px</b>、输入框 15→<b>16px</b>、关闭按钮 26→<b>32px</b>；④ 老用户升级<b>自动用「更大」</b>（<code>if(!o.cfg.uiScale) o.cfg.uiScale='l'</code>，不用手动改）。只动 UI，抓取逻辑一行没改（回归仿真全过）。说明页「② 界面尺寸」整节重写。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> <b>抓未读时能不能切 App（附加强化）</b>：先说死答案 —— <b>网页不能后台自动跑</b>，切 App = 暂停、切回来 = 续跑，锁屏 = 冻结重来。脚本新增 <b>Screen Wake Lock（抓的时候屏幕常亮）</b> + <code>visibilitychange</code> 回前台自动续申请；新增 <b>「每次抓前 N 个账号」</b>（<code>S.cfg.scanLimit</code>，设置页输入框，填 80 ≈ 4 分钟一轮）把 15 分钟的长任务拆短；扫描进度提示改成讲清「暂停/续跑/重来」三种情况。说明页新增「④ 抓未读的时候，能切到别的 App 吗」一节。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02（今）</b> <b>重写抓取引擎：「失败太多」和「抓一半卡死」一起修掉，顺手还更快了</b>。① <b>请求硬超时</b>（原 fetch 没超时，抖音一挂起就永久 pending，并发槽位要不回来 = 卡死真凶）：每请求 8 秒 + 单账号 45 秒兜底 + 整轮 12 分钟看门狗 + 「🛑 停止」随时收工；② <b>自适应并发</b>：开局只 3 个，连成 5 个才 +1（上限默认 6），连挂 2 个砍半冷却 2~3 秒，识别风控降到 1 个冷却 4~6 秒、连中 3 次直接收工不硬磨；③ <b>断点续抓</b>：进度落盘，切 App / 熄屏 / 被杀 / 断网都能接着抓，断点自动回退到失败那几个之前，<b>一个不漏</b>；④ 风控页不再被当成普通抖动，直接识别并降速；⑤ 进度条显示 <b>当前并发 / 已用时间 / 预计剩余</b>、冷却时明确提示、结束列出没抓成的账号；⑥ 设置项改成「并发上限 1~10」+「整轮最长几分钟」+「🧹 清掉抓取断点」。修掉一个大坑：rawFetch 用 <code>.then(cleanup, cleanup)</code> 收尾，cleanup 无返回值会把整个 Promise 解析成 <code>undefined</code>（会让每个请求都「不是 JSON」）。模拟验证：120 账号 0.87 秒 0 失败、25% 请求永久挂起也能在 45 秒内跑完不卡死、全量风控 0.04 秒优雅收尾、断点续跑正确跳过已抓账号。说明页新增「⑤-3 这一版」。</li>
