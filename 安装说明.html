@@ -259,6 +259,29 @@
     </div>
 
     <div class="card">
+      <h2>④ 抓未读的时候，能切到别的 App 吗？（10-01 已加强）</h2>
+      <p style="margin:6px 0"><b>直接说结论：不能后台自动跑，但「切走 = 暂停，切回来 = 继续」。</b></p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin:8px 0">
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>切到其他 App</b></td><td style="padding:6px 0;border-bottom:1px solid #f2f3f5">抓取<b>暂停</b>（浏览器不给后台页面跑 JS），切回 Via 会<b>自动接着抓</b>，不用重来。</td></tr>
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>锁屏 / 息屏</b></td><td style="padding:6px 0;border-bottom:1px solid #f2f3f5">更狠，系统会把页面整个冻住，回来可能要重来一轮。<b>所以脚本现在会自动申请「屏幕常亮」</b>，抓的时候不熄屏。</td></tr>
+        <tr><td style="padding:6px 0"><b>Via 被系统杀后台</b></td><td style="padding:6px 0"><b>这轮会重头抓</b>，但已抓到的视频存本地了，不会丢。</td></tr>
+      </table>
+      <p style="margin:10px 0 4px"><b>为什么不能真后台？（这是浏览器的硬规矩，不是脚本的锅）</b></p>
+      <div class="warn">网页是「前台优先」的：页面看不见时浏览器就冻结它的 JS。
+        唯一的例外是 Service Worker 后台同步，但那需要脚本能往 <code>douyin.com</code> 这个域下上传文件、由你注册 PWA ——
+        那是抖音的域名，我们改不了。所以「挂在后台慢慢抓」这条路，在网页方案里不存在。
+        <b>（当初做整套方案时的前提就是「全在真浏览器里跑」，代价就是得让页面在前台。）</b></div>
+      <p style="margin:12px 0 4px"><b>那怎么抓得省事一点？（三档，按你耐心的程度选）</b></p>
+      <ol>
+        <li><b>最省事</b>：亮屏、停在抖音页、别切 App，让它跑完（全部 392 个约 10~15 分钟）。现在脚本会自动申请屏幕常亮。</li>
+        <li><b>想中途去干别的</b>：⚙️ <b>设置</b> → 填「<b>每次抓前几个账号</b>」= <b>80</b> → 保存 → 每轮约 4 分钟。
+          分 5 轮跑完，中间随手切 App 也不心疼（切走等于暂停）。<b>推荐这个。</b></li>
+        <li><b>折中</b>：抓到一半切走 → 回来 Via 会自动续上，只是进度走得慢一点。</li>
+      </ol>
+      <div class="ok">抓的那几分钟<b>别锁屏</b>就好，别的都不用管。</div>
+    </div>
+
+    <div class="card">
       <h2>③ 怎么把新脚本装回去（我改了脚本之后这么重载）</h2>
       <p style="margin:6px 0">步骤和当初装的时候<b>一模一样</b>，不用重新走六步：</p>
       <ol>
@@ -388,7 +411,7 @@ function copyRaw(){
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '' },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0 },
       selfSecUid: '',
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -408,6 +431,33 @@ function copyRaw(){
   function save() {
     try { localStorage.setItem(LS, JSON.stringify(S)); } catch (e) { toast('本地存储写入失败：' + e.message); }
   }
+
+  /* ------------------------- 屏幕常亮（抓未读时防息屏） -------------------------
+     网页不能在后台跑，所以唯一能做的就是不让你手机熄屏 —— 屏幕亮着 =
+     页面前台活跃 = 抓取不被系统冻结。切 App / 锁屏时系统会自动收回，
+     所以监听 visibilitychange 再申请回来。 */
+  var wakeLock = null, wakeWanted = false;
+  function keepAwake(on) {
+    wakeWanted = !!on;
+    if (!wakeWanted) { releaseAwake(); return; }
+    if (wakeLock &amp;&amp; wakeLock.active) return;
+    if (!navigator.wakeLock || !navigator.wakeLock.request) return;   // 浏览器不支持就静默跳过
+    navigator.wakeLock.request('screen').then(function (l) {
+      wakeLock = l;
+      try {
+        l.addEventListener('release', function () { wakeLock = null; if (wakeWanted) tryAwake(); });
+      } catch (e) { }
+    }).catch(function () { });   // 省电模式/权限被拒：忽略，抓取照常，只是会熄屏
+  }
+  function tryAwake() { keepAwake(true); }
+  function releaseAwake() {
+    if (wakeLock) { try { wakeLock.release(); } catch (e) { } }
+    wakeLock = null;
+  }
+  // 从后台切回前台时，系统把 wake lock 收回了，这里补上
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden &amp;&amp; wakeWanted) tryAwake();
+  });
 
   /* ----------------------------- 小工具 ----------------------------- */
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
@@ -767,24 +817,31 @@ function copyRaw(){
 
   /* ----------------------------- 全量抓未读 ----------------------------- */
   var scanning = false;
-  function scanUnread(statusCb) {
+  function scanUnread(statusCb, limitOverride) {
     if (scanning) return Promise.resolve({ ok: false, error: '已有抓取在进行中' });
     if (!S.accounts.length) return Promise.resolve({ ok: false, error: '先点「📥 刷新我的关注列表」' });
     scanning = true;
+    // 分批：设置里填了「每次抓前 N 个」就只跑这么多，把一轮从 15 分钟压到几分钟
+    var lim = parseInt(limitOverride != null ? limitOverride : S.cfg.scanLimit, 10);
+    if (!lim || lim &lt;= 0) lim = S.accounts.length;
+    var plan = S.accounts.slice(0, lim);
     var newCount = 0, errors = 0, okCount = 0, consecFail = 0;
     var known = {};
     for (var i = 0; i &lt; S.videos.length; i++) known[S.videos[i].awemeId] = 1;
     var readMap = {};
     for (var r = 0; r &lt; S.readIds.length; r++) readMap[S.readIds[r]] = 1;
 
+    keepAwake(true);   // 抓的过程中别让手机熄屏（熄屏 = 页面被冻结 = 抓取停住）
+
     function step(idx) {
-      if (idx &gt;= S.accounts.length) {
+      if (idx &gt;= plan.length) {
         scanning = false;
+        keepAwake(false);
         S.lastScanAt = Date.now(); save();
-        return Promise.resolve({ ok: true, newCount: newCount, errors: errors, okCount: okCount });
+        return Promise.resolve({ ok: true, newCount: newCount, errors: errors, okCount: okCount, scanned: plan.length });
       }
-      var acc = S.accounts[idx];
-      if (statusCb) statusCb({ cur: idx + 1, total: S.accounts.length, name: acc.name, newCount: newCount, errors: errors });
+      var acc = plan[idx];
+      if (statusCb) statusCb({ cur: idx + 1, total: plan.length, name: acc.name, newCount: newCount, errors: errors });
       return fetchPosts(acc.secUserId).then(function (list) {
         consecFail = 0; okCount++;
         for (var k = 0; k &lt; list.length; k++) {
@@ -799,7 +856,7 @@ function copyRaw(){
         errors++; consecFail++;
         acc.lastError = e.message;
         var wait = consecFail &gt;= 8 ? 30000 : 3000;
-        if (statusCb) statusCb({ cur: idx + 1, total: S.accounts.length, name: acc.name + '（失败，等待 ' + (wait / 1000) + 's）', newCount: newCount, errors: errors });
+        if (statusCb) statusCb({ cur: idx + 1, total: plan.length, name: acc.name + '（失败，等待 ' + (wait / 1000) + 's）', newCount: newCount, errors: errors });
         return sleep(wait).then(function () { return step(idx + 1); });
       });
     }
@@ -891,6 +948,10 @@ function copyRaw(){
     h += '&lt;label class="dyh-lb"&gt;仓库名&lt;/label&gt;&lt;input id="dyh-repo" class="dyh-input" value="' + esc(S.cfg.repo) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;分支&lt;/label&gt;&lt;input id="dyh-branch" class="dyh-input" value="' + esc(S.cfg.branch) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;Token&lt;/label&gt;&lt;input id="dyh-token" class="dyh-input" type="password" value="' + esc(S.cfg.token) + '" placeholder="ghp_xxx"&gt;';
+    h += '&lt;label class="dyh-lb"&gt;每次抓前几个账号（0 = 全部 ' + S.accounts.length + ' 个）&lt;/label&gt;' +
+      '&lt;input id="dyh-limit" class="dyh-input" type="number" min="0" inputmode="numeric" value="' + (S.cfg.scanLimit || 0) + '"&gt;';
+    h += '&lt;div class="dyh-tip"&gt;全部 ' + S.accounts.length + ' 个账号一轮约 10~15 分钟，抓的时候&lt;b&gt;必须亮屏停在抖音页&lt;/b&gt;。' +
+      '填 &lt;b&gt;80&lt;/b&gt; 大约 4 分钟一轮，可以分几轮抓完，中间随手切 App 也不心疼。&lt;/div&gt;';
     h += '&lt;button class="dyh-btn primary" data-act="save-settings"&gt;💾 保存&lt;/button&gt;';
     h += '&lt;button class="dyh-btn" data-act="export"&gt;📤 导出数据到手机本地（下载 json）&lt;/button&gt;';
     h += '&lt;button class="dyh-btn gray" data-act="clear"&gt;🗑 清空本地数据&lt;/button&gt;';
@@ -1011,7 +1072,9 @@ function copyRaw(){
 
     if (act === 'scan') {
       setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;&lt;div class="dyh-prog" id="dyh-prog"&gt;准备抓取…&lt;/div&gt;' +
-        '&lt;div class="dyh-tip"&gt;抓取期间请不要关掉这个页面。每个账号之间会自动间隔 1~2.5 秒，避免被抖音风控。&lt;/div&gt;');
+        '&lt;div class="dyh-tip"&gt;本轮计划抓 &lt;b&gt;' + (S.cfg.scanLimit &gt; 0 ? '前 ' + S.cfg.scanLimit + ' 个' : '全部 ' + S.accounts.length + ' 个') +
+        '&lt;/b&gt;。抓的时候&lt;b&gt;屏幕会一直亮着、别切走 App&lt;/b&gt;：切到别的 App 抓取会&lt;b&gt;暂停&lt;/b&gt;（不是后台继续），' +
+        '切回来会自动接着跑；如果Via被系统杀后台，这轮会重来（已抓到的视频不会丢）。&lt;br&gt;每个账号之间自动间隔 1~2.5 秒防风控。&lt;/div&gt;');
       scanUnread(function (s) {
         var p = document.getElementById('dyh-prog');
         if (p) p.innerHTML = '已抓 &lt;b&gt;' + s.cur + '/' + s.total + '&lt;/b&gt;　新增 &lt;b&gt;' + s.newCount + '&lt;/b&gt;' +
@@ -1162,7 +1225,9 @@ function copyRaw(){
       S.cfg.repo = (document.getElementById('dyh-repo') || {}).value || S.cfg.repo;
       S.cfg.branch = (document.getElementById('dyh-branch') || {}).value || S.cfg.branch;
       S.cfg.token = (document.getElementById('dyh-token') || {}).value || '';
-      save(); toast('已保存'); open('home');
+      var lim = parseInt((document.getElementById('dyh-limit') || {}).value, 10);
+      S.cfg.scanLimit = (lim &gt; 0) ? lim : 0;
+      save(); toast('已保存' + (S.cfg.scanLimit ? '（每轮抓前 ' + S.cfg.scanLimit + ' 个）' : '')); open('home');
       return;
     }
 
@@ -1218,6 +1283,7 @@ function copyRaw(){
     <details>
       <summary style="cursor:pointer;color:#86909c;font-size:13px">点开看历次改动（最新在上）</summary>
       <ul style="list-style:none;padding:0;margin:10px 0 0">
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> <b>抓未读时能不能切 App（附加强化）</b>：先说死答案 —— <b>网页不能后台自动跑</b>，切 App = 暂停、切回来 = 续跑，锁屏 = 冻结重来。脚本新增 <b>Screen Wake Lock（抓的时候屏幕常亮）</b> + <code>visibilitychange</code> 回前台自动续申请；新增 <b>「每次抓前 N 个账号」</b>（<code>S.cfg.scanLimit</code>，设置页输入框，填 80 ≈ 4 分钟一轮）把 15 分钟的长任务拆短；扫描进度提示改成讲清「暂停/续跑/重来」三种情况。说明页新增「④ 抓未读的时候，能切到别的 App 吗」一节。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> <b>界面放大改版</b>：🎯 悬浮球 54px→<b>66px</b>；面板从「撑满整屏的下拉抽屉」改成<b>居中圆角卡片，占屏幕宽高 2/3</b>（code>66.6%</code>、最大 560px），内容区独立滚动（新增 <code>resetScroll()</code> 保证换页回到顶部）；字号整体提一档（按钮 16 / 标题 15 / 说明 13）。<b>新增「② 界面尺寸」与「③ 怎么重载脚本」两节</b>（删旧条目 → ＋下载脚本 → 粘地址 → 刷新）。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> <b>修正上一版误判：脚本「不需要电脑模式 / 桌面版」。🎯 是脚本自己用代码画的悬浮球（<code>position:fixed</code>），只要网址是 <code>www.douyin.com</code> 就出现，与手机版/电脑版无关。</b> 已把第 5 步改成「直接登录即可」，并在下面写明「电脑模式」的确切位置与用途（仅强制跳 App / 页面空白时才用）。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> 新增「⓪ 从头到尾装一遍」六步清单（含 Via「电脑模式」的确切位置：右下「三」→ 电脑模式），以及「① 以后怎么用」日常四步。<b>B-1 下载脚本这条路已实测走通。</b></li>

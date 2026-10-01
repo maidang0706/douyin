@@ -33,7 +33,7 @@
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '' },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0 },
       selfSecUid: '',
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -53,6 +53,33 @@
   function save() {
     try { localStorage.setItem(LS, JSON.stringify(S)); } catch (e) { toast('本地存储写入失败：' + e.message); }
   }
+
+  /* ------------------------- 屏幕常亮（抓未读时防息屏） -------------------------
+     网页不能在后台跑，所以唯一能做的就是不让你手机熄屏 —— 屏幕亮着 =
+     页面前台活跃 = 抓取不被系统冻结。切 App / 锁屏时系统会自动收回，
+     所以监听 visibilitychange 再申请回来。 */
+  var wakeLock = null, wakeWanted = false;
+  function keepAwake(on) {
+    wakeWanted = !!on;
+    if (!wakeWanted) { releaseAwake(); return; }
+    if (wakeLock && wakeLock.active) return;
+    if (!navigator.wakeLock || !navigator.wakeLock.request) return;   // 浏览器不支持就静默跳过
+    navigator.wakeLock.request('screen').then(function (l) {
+      wakeLock = l;
+      try {
+        l.addEventListener('release', function () { wakeLock = null; if (wakeWanted) tryAwake(); });
+      } catch (e) { }
+    }).catch(function () { });   // 省电模式/权限被拒：忽略，抓取照常，只是会熄屏
+  }
+  function tryAwake() { keepAwake(true); }
+  function releaseAwake() {
+    if (wakeLock) { try { wakeLock.release(); } catch (e) { } }
+    wakeLock = null;
+  }
+  // 从后台切回前台时，系统把 wake lock 收回了，这里补上
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && wakeWanted) tryAwake();
+  });
 
   /* ----------------------------- 小工具 ----------------------------- */
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
@@ -412,24 +439,31 @@
 
   /* ----------------------------- 全量抓未读 ----------------------------- */
   var scanning = false;
-  function scanUnread(statusCb) {
+  function scanUnread(statusCb, limitOverride) {
     if (scanning) return Promise.resolve({ ok: false, error: '已有抓取在进行中' });
     if (!S.accounts.length) return Promise.resolve({ ok: false, error: '先点「📥 刷新我的关注列表」' });
     scanning = true;
+    // 分批：设置里填了「每次抓前 N 个」就只跑这么多，把一轮从 15 分钟压到几分钟
+    var lim = parseInt(limitOverride != null ? limitOverride : S.cfg.scanLimit, 10);
+    if (!lim || lim <= 0) lim = S.accounts.length;
+    var plan = S.accounts.slice(0, lim);
     var newCount = 0, errors = 0, okCount = 0, consecFail = 0;
     var known = {};
     for (var i = 0; i < S.videos.length; i++) known[S.videos[i].awemeId] = 1;
     var readMap = {};
     for (var r = 0; r < S.readIds.length; r++) readMap[S.readIds[r]] = 1;
 
+    keepAwake(true);   // 抓的过程中别让手机熄屏（熄屏 = 页面被冻结 = 抓取停住）
+
     function step(idx) {
-      if (idx >= S.accounts.length) {
+      if (idx >= plan.length) {
         scanning = false;
+        keepAwake(false);
         S.lastScanAt = Date.now(); save();
-        return Promise.resolve({ ok: true, newCount: newCount, errors: errors, okCount: okCount });
+        return Promise.resolve({ ok: true, newCount: newCount, errors: errors, okCount: okCount, scanned: plan.length });
       }
-      var acc = S.accounts[idx];
-      if (statusCb) statusCb({ cur: idx + 1, total: S.accounts.length, name: acc.name, newCount: newCount, errors: errors });
+      var acc = plan[idx];
+      if (statusCb) statusCb({ cur: idx + 1, total: plan.length, name: acc.name, newCount: newCount, errors: errors });
       return fetchPosts(acc.secUserId).then(function (list) {
         consecFail = 0; okCount++;
         for (var k = 0; k < list.length; k++) {
@@ -444,7 +478,7 @@
         errors++; consecFail++;
         acc.lastError = e.message;
         var wait = consecFail >= 8 ? 30000 : 3000;
-        if (statusCb) statusCb({ cur: idx + 1, total: S.accounts.length, name: acc.name + '（失败，等待 ' + (wait / 1000) + 's）', newCount: newCount, errors: errors });
+        if (statusCb) statusCb({ cur: idx + 1, total: plan.length, name: acc.name + '（失败，等待 ' + (wait / 1000) + 's）', newCount: newCount, errors: errors });
         return sleep(wait).then(function () { return step(idx + 1); });
       });
     }
@@ -536,6 +570,10 @@
     h += '<label class="dyh-lb">仓库名</label><input id="dyh-repo" class="dyh-input" value="' + esc(S.cfg.repo) + '">';
     h += '<label class="dyh-lb">分支</label><input id="dyh-branch" class="dyh-input" value="' + esc(S.cfg.branch) + '">';
     h += '<label class="dyh-lb">Token</label><input id="dyh-token" class="dyh-input" type="password" value="' + esc(S.cfg.token) + '" placeholder="ghp_xxx">';
+    h += '<label class="dyh-lb">每次抓前几个账号（0 = 全部 ' + S.accounts.length + ' 个）</label>' +
+      '<input id="dyh-limit" class="dyh-input" type="number" min="0" inputmode="numeric" value="' + (S.cfg.scanLimit || 0) + '">';
+    h += '<div class="dyh-tip">全部 ' + S.accounts.length + ' 个账号一轮约 10~15 分钟，抓的时候<b>必须亮屏停在抖音页</b>。' +
+      '填 <b>80</b> 大约 4 分钟一轮，可以分几轮抓完，中间随手切 App 也不心疼。</div>';
     h += '<button class="dyh-btn primary" data-act="save-settings">💾 保存</button>';
     h += '<button class="dyh-btn" data-act="export">📤 导出数据到手机本地（下载 json）</button>';
     h += '<button class="dyh-btn gray" data-act="clear">🗑 清空本地数据</button>';
@@ -656,7 +694,9 @@
 
     if (act === 'scan') {
       setBody('<div class="dyh-back" data-act="home">← 返回</div><div class="dyh-prog" id="dyh-prog">准备抓取…</div>' +
-        '<div class="dyh-tip">抓取期间请不要关掉这个页面。每个账号之间会自动间隔 1~2.5 秒，避免被抖音风控。</div>');
+        '<div class="dyh-tip">本轮计划抓 <b>' + (S.cfg.scanLimit > 0 ? '前 ' + S.cfg.scanLimit + ' 个' : '全部 ' + S.accounts.length + ' 个') +
+        '</b>。抓的时候<b>屏幕会一直亮着、别切走 App</b>：切到别的 App 抓取会<b>暂停</b>（不是后台继续），' +
+        '切回来会自动接着跑；如果Via被系统杀后台，这轮会重来（已抓到的视频不会丢）。<br>每个账号之间自动间隔 1~2.5 秒防风控。</div>');
       scanUnread(function (s) {
         var p = document.getElementById('dyh-prog');
         if (p) p.innerHTML = '已抓 <b>' + s.cur + '/' + s.total + '</b>　新增 <b>' + s.newCount + '</b>' +
@@ -807,7 +847,9 @@
       S.cfg.repo = (document.getElementById('dyh-repo') || {}).value || S.cfg.repo;
       S.cfg.branch = (document.getElementById('dyh-branch') || {}).value || S.cfg.branch;
       S.cfg.token = (document.getElementById('dyh-token') || {}).value || '';
-      save(); toast('已保存'); open('home');
+      var lim = parseInt((document.getElementById('dyh-limit') || {}).value, 10);
+      S.cfg.scanLimit = (lim > 0) ? lim : 0;
+      save(); toast('已保存' + (S.cfg.scanLimit ? '（每轮抓前 ' + S.cfg.scanLimit + ' 个）' : '')); open('home');
       return;
     }
 
