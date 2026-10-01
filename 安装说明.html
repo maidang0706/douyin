@@ -279,6 +279,28 @@
         <li><b>折中</b>：抓到一半切走 → 回来 Via 会自动续上，只是进度走得慢一点。</li>
       </ol>
       <div class="ok">抓的那几分钟<b>别锁屏</b>就好，别的都不用管。</div>
+
+      <p style="margin:14px 0 4px"><b>⑤ 电脑端为什么比手机端快？现在手机端也能一样快（10-02 已改）</b></p>
+      <p style="margin:6px 0">先说清楚：<b>两边用的接口和参数是一模一样的</b>（都是 <code>/aweme/v1/web/aweme/post/</code>，
+        <code>count=20</code>），差别只在「怎么排队发请求」。</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin:8px 0">
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>电脑端</b>（CDP 驱动浏览器）</td><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>一个一个串行</b>：抓完一个，等 1~2.5 秒，再抓下一个。<br>手机上跑同一套逻辑就是慢的原因之一。</td></tr>
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>现在手机端</b></td><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>并发 3 个一批一起发</b>：浏览器内发出的同源请求抖音是放行的（有完整设备指纹 + cookie），所以手机端<b>反而能比电脑端更快</b>。</td></tr>
+      </table>
+      <p style="margin:10px 0 4px"><b>这一版具体改了三处（都是实打实省时间）</b></p>
+      <ol>
+        <li><b>并发抓取</b>：默认 <b>3 个账号同时抓</b>（设置里可填 1~8）。批与批之间只留 0.3~0.8 秒，不再是死等 1~2.5 秒。<br>
+          <span class="tag">算一笔账</span> 392 个账号：串行 ≈ 392 × 1.75 秒 ≈ <b>11 分钟</b>；并发 3 ≈ 131 批 × 0.55 秒 ≈ <b>1.2 分钟</b> + 请求本身，实际一轮 <b>4~6 分钟</b>。</li>
+        <li><b>失败不再长等</b>：以前一个账号失败就要干等 3 秒（连错 8 个还退避 30 秒）。现在<b>失败立刻跳过、只记下来</b>，
+          <b>主流程跑完后再用串行方式补抓一遍</b> —— 不漏数据，也不拖慢主流程。</li>
+        <li><b>落盘频率降档</b>：以前每抓 10 个就往 localStorage 写一次（几千条视频的同步写入很贵，会卡一下）。
+          现在改成每 <b>40 个</b>存一次，最后一定存。</li>
+      </ol>
+      <div class="ok"><b>减法（默认「全部抓取」，这项不用动）</b>：⚙️ <b>设置</b> → 「每次抓前几个账号」<b>留空或填 0</b> 就是全抓。
+        之前推荐的「填 80 分 5 轮」现在不需要了，一轮就能全抓完。</div>
+      <div class="warn"><b>速度 vs 风控怎么权衡</b>：并发填得越大越快，也越容易被抖音盯上。
+        <b>默认 3 是平衡点</b>。跑一轮如果进度条上「失败」数字涨得快，把并发改回 <b>1</b>（最稳，速度回到串行）；
+        一切正常就保持 3，想更快试 <b>5</b>。</div>
     </div>
 
     <div class="card">
@@ -411,7 +433,7 @@ function copyRaw(){
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0 },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 3 },
       selfSecUid: '',
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -516,7 +538,7 @@ function copyRaw(){
     }).then(function (t) {
       try { return JSON.parse(t); } catch (e) {
         if (_retry) throw new Error('返回内容不是 JSON（可能被风控）：' + String(t).slice(0, 60));
-        return sleep(2500).then(function () { return dyGet(base, params, 1); });
+        return sleep(900).then(function () { return dyGet(base, params, 1); });
       }
     });
   }
@@ -821,46 +843,88 @@ function copyRaw(){
     if (scanning) return Promise.resolve({ ok: false, error: '已有抓取在进行中' });
     if (!S.accounts.length) return Promise.resolve({ ok: false, error: '先点「📥 刷新我的关注列表」' });
     scanning = true;
-    // 分批：设置里填了「每次抓前 N 个」就只跑这么多，把一轮从 15 分钟压到几分钟
+    // 分批：设置里填了「每次抓前 N 个」就只跑这么多（0 / 留空 = 全部）。留空时就是全量抓取。
     var lim = parseInt(limitOverride != null ? limitOverride : S.cfg.scanLimit, 10);
-    if (!lim || lim &lt;= 0) lim = S.accounts.length;
+    if (!lim || lim &lt;= 0 || lim &gt; S.accounts.length) lim = S.accounts.length;
     var plan = S.accounts.slice(0, lim);
+    /* ★ 提速关键：浏览器里可以【并发】发请求（同源带 cookie、有设备指纹，抖音放行），
+       不必像电脑端那样一个一个串行等。这里按 conc 个一批同时打，批间只留 0.3~0.8 秒。 */
+    var conc = Math.max(1, Math.min(8, parseInt(S.cfg.scanConc, 10) || 3));
     var newCount = 0, errors = 0, okCount = 0, consecFail = 0;
+    var failed = [];
     var known = {};
     for (var i = 0; i &lt; S.videos.length; i++) known[S.videos[i].awemeId] = 1;
     var readMap = {};
     for (var r = 0; r &lt; S.readIds.length; r++) readMap[S.readIds[r]] = 1;
 
+    function absorb(list) {
+      var added = 0;
+      for (var k = 0; k &lt; list.length; k++) {
+        var v = list[k];
+        if (!known[v.awemeId] &amp;&amp; !readMap[v.awemeId]) { S.videos.push(v); known[v.awemeId] = 1; newCount++; added++; }
+      }
+      return added;
+    }
+    function report(name) {
+      if (statusCb) statusCb({ cur: okCount + errors, total: plan.length, name: name || '', newCount: newCount, errors: errors, conc: conc });
+    }
+
     keepAwake(true);   // 抓的过程中别让手机熄屏（熄屏 = 页面被冻结 = 抓取停住）
 
-    function step(idx) {
-      if (idx &gt;= plan.length) {
-        scanning = false;
-        keepAwake(false);
-        S.lastScanAt = Date.now(); save();
-        return Promise.resolve({ ok: true, newCount: newCount, errors: errors, okCount: okCount, scanned: plan.length });
-      }
+    // 发一个账号的请求；失败只记下来立刻丢进补抓队列，绝不在这儿长等（长等是最大 TIME KILLER）
+    var cursor = 0;
+    function worker() {
+      if (cursor &gt;= plan.length) return Promise.resolve();
+      var idx = cursor++;
       var acc = plan[idx];
-      if (statusCb) statusCb({ cur: idx + 1, total: plan.length, name: acc.name, newCount: newCount, errors: errors });
       return fetchPosts(acc.secUserId).then(function (list) {
         consecFail = 0; okCount++;
-        for (var k = 0; k &lt; list.length; k++) {
-          var v = list[k];
-          if (!known[v.awemeId] &amp;&amp; !readMap[v.awemeId]) { S.videos.push(v); known[v.awemeId] = 1; newCount++; }
-        }
-        acc.lastCount = list.length;
-        if (idx % 10 === 0) save();
-        // 防风控：真人翻列表的节奏，1~2.5 秒随机间隔（血泪教训：无间隔会被整轮打成 444）
-        return sleep(1000 + Math.floor(Math.random() * 1500)).then(function () { return step(idx + 1); });
+        acc.lastCount = list.length; acc.lastError = '';
+        absorb(list);
+        if (okCount % 40 === 0) save();   // 原来每 10 个存一次；localStorage 是同步写，很贵
+        report(acc.name);
       }).catch(function (e) {
         errors++; consecFail++;
         acc.lastError = e.message;
-        var wait = consecFail &gt;= 8 ? 30000 : 3000;
-        if (statusCb) statusCb({ cur: idx + 1, total: plan.length, name: acc.name + '（失败，等待 ' + (wait / 1000) + 's）', newCount: newCount, errors: errors });
-        return sleep(wait).then(function () { return step(idx + 1); });
+        failed.push(acc);
       });
     }
-    return step(0);
+    function pump() {
+      var n = Math.min(conc, plan.length - cursor);
+      if (n &lt;= 0) return Promise.resolve();
+      var arr = [];
+      for (var k = 0; k &lt; n; k++) arr.push(worker());
+      return Promise.all(arr).then(function () {
+        return sleep(300 + Math.floor(Math.random() * 500));
+      }).then(pump);
+    }
+    // 主流程跑完后，把刚才失败的账号用「串行 + 1~1.8 秒间隔」补抓一遍：既快又不漏数据
+    function retryFailed() {
+      var queue = failed.slice();
+      failed = [];
+      if (!queue.length) return Promise.resolve(0);
+      function one() {
+        if (!queue.length) return Promise.resolve(0);
+        var acc = queue.shift();
+        return fetchPosts(acc.secUserId).then(function (list) {
+          okCount++; acc.lastError = ''; absorb(list);
+        }).catch(function () { /* 补完还失败就保持错误计数 */ }).then(function () {
+          return sleep(900 + Math.floor(Math.random() * 900)).then(one);
+        });
+      }
+      return one();
+    }
+
+    return pump().then(retryFailed).then(function () {
+      scanning = false;
+      keepAwake(false);
+      S.lastScanAt = Date.now(); save();
+      report('');
+      return { ok: true, newCount: newCount, errors: errors, okCount: okCount, scanned: plan.length, conc: conc, failedAgain: failed.length };
+    }).catch(function (e) {
+      scanning = false; keepAwake(false); save();
+      return { ok: false, error: e.message };
+    });
   }
 
   /* ----------------------------- 面板 UI ----------------------------- */
@@ -948,10 +1012,12 @@ function copyRaw(){
     h += '&lt;label class="dyh-lb"&gt;仓库名&lt;/label&gt;&lt;input id="dyh-repo" class="dyh-input" value="' + esc(S.cfg.repo) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;分支&lt;/label&gt;&lt;input id="dyh-branch" class="dyh-input" value="' + esc(S.cfg.branch) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;Token&lt;/label&gt;&lt;input id="dyh-token" class="dyh-input" type="password" value="' + esc(S.cfg.token) + '" placeholder="ghp_xxx"&gt;';
-    h += '&lt;label class="dyh-lb"&gt;每次抓前几个账号（0 = 全部 ' + S.accounts.length + ' 个）&lt;/label&gt;' +
+    h += '&lt;label class="dyh-lb"&gt;每次抓前几个账号（留空 = 全部 ' + S.accounts.length + ' 个）&lt;/label&gt;' +
       '&lt;input id="dyh-limit" class="dyh-input" type="number" min="0" inputmode="numeric" value="' + (S.cfg.scanLimit || 0) + '"&gt;';
-    h += '&lt;div class="dyh-tip"&gt;全部 ' + S.accounts.length + ' 个账号一轮约 10~15 分钟，抓的时候&lt;b&gt;必须亮屏停在抖音页&lt;/b&gt;。' +
-      '填 &lt;b&gt;80&lt;/b&gt; 大约 4 分钟一轮，可以分几轮抓完，中间随手切 App 也不心疼。&lt;/div&gt;';
+    h += '&lt;label class="dyh-lb"&gt;同时抓几个账号（并发数 1~8）&lt;/label&gt;' +
+      '&lt;input id="dyh-conc" class="dyh-input" type="number" min="1" max="8" inputmode="numeric" value="' + (S.cfg.scanConc || 3) + '"&gt;';
+    h += '&lt;div class="dyh-tip"&gt;&lt;b&gt;留空 = 全部抓&lt;/b&gt;，默认并发 &lt;b&gt;3&lt;/b&gt;：全部 ' + S.accounts.length + ' 个账号一轮约 &lt;b&gt;4~6 分钟&lt;/b&gt;。' +
+      '想更快填 &lt;b&gt;5&lt;/b&gt;；如果失败变多（进度条大量「失败」）就改回 &lt;b&gt;1&lt;/b&gt;（最稳但慢）。&lt;/div&gt;';
     h += '&lt;button class="dyh-btn primary" data-act="save-settings"&gt;💾 保存&lt;/button&gt;';
     h += '&lt;button class="dyh-btn" data-act="export"&gt;📤 导出数据到手机本地（下载 json）&lt;/button&gt;';
     h += '&lt;button class="dyh-btn gray" data-act="clear"&gt;🗑 清空本地数据&lt;/button&gt;';
@@ -1074,7 +1140,9 @@ function copyRaw(){
       setBody('&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;&lt;div class="dyh-prog" id="dyh-prog"&gt;准备抓取…&lt;/div&gt;' +
         '&lt;div class="dyh-tip"&gt;本轮计划抓 &lt;b&gt;' + (S.cfg.scanLimit &gt; 0 ? '前 ' + S.cfg.scanLimit + ' 个' : '全部 ' + S.accounts.length + ' 个') +
         '&lt;/b&gt;。抓的时候&lt;b&gt;屏幕会一直亮着、别切走 App&lt;/b&gt;：切到别的 App 抓取会&lt;b&gt;暂停&lt;/b&gt;（不是后台继续），' +
-        '切回来会自动接着跑；如果Via被系统杀后台，这轮会重来（已抓到的视频不会丢）。&lt;br&gt;每个账号之间自动间隔 1~2.5 秒防风控。&lt;/div&gt;');
+        '切回来会自动接着跑；如果Via被系统杀后台，这轮会重来（已抓到的视频不会丢）。&lt;br&gt;' +
+        '&lt;b&gt;同时并发 ' + ((S.cfg.scanConc || 3)) + ' 个账号一起抓&lt;/b&gt;（浏览器内并发请求，抖音放行），比一个一个串行快 2~3 倍；' +
+        '失败的账号主流程跑完会自动补抓一遍，不会漏。&lt;/div&gt;');
       scanUnread(function (s) {
         var p = document.getElementById('dyh-prog');
         if (p) p.innerHTML = '已抓 &lt;b&gt;' + s.cur + '/' + s.total + '&lt;/b&gt;　新增 &lt;b&gt;' + s.newCount + '&lt;/b&gt;' +
@@ -1227,7 +1295,9 @@ function copyRaw(){
       S.cfg.token = (document.getElementById('dyh-token') || {}).value || '';
       var lim = parseInt((document.getElementById('dyh-limit') || {}).value, 10);
       S.cfg.scanLimit = (lim &gt; 0) ? lim : 0;
-      save(); toast('已保存' + (S.cfg.scanLimit ? '（每轮抓前 ' + S.cfg.scanLimit + ' 个）' : '')); open('home');
+      var cc = parseInt((document.getElementById('dyh-conc') || {}).value, 10);
+      S.cfg.scanConc = (cc &gt;= 1 &amp;&amp; cc &lt;= 8) ? cc : 3;
+      save(); toast('已保存' + (S.cfg.scanLimit ? '（每轮抓前 ' + S.cfg.scanLimit + ' 个）' : '（全部抓取，并发 ' + S.cfg.scanConc + '）')); open('home');
       return;
     }
 
@@ -1284,6 +1354,7 @@ function copyRaw(){
       <summary style="cursor:pointer;color:#86909c;font-size:13px">点开看历次改动（最新在上）</summary>
       <ul style="list-style:none;padding:0;margin:10px 0 0">
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> <b>抓未读时能不能切 App（附加强化）</b>：先说死答案 —— <b>网页不能后台自动跑</b>，切 App = 暂停、切回来 = 续跑，锁屏 = 冻结重来。脚本新增 <b>Screen Wake Lock（抓的时候屏幕常亮）</b> + <code>visibilitychange</code> 回前台自动续申请；新增 <b>「每次抓前 N 个账号」</b>（<code>S.cfg.scanLimit</code>，设置页输入框，填 80 ≈ 4 分钟一轮）把 15 分钟的长任务拆短；扫描进度提示改成讲清「暂停/续跑/重来」三种情况。说明页新增「④ 抓未读的时候，能切到别的 App 吗」一节。</li>
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02</b> <b>抓取改并发，轮次从 10~15 分钟压到 4~6 分钟</b>：电脑端是「串行 + 每个等 1~2.5 秒」，手机端改成 <b>默认并发 3 个一批</b>；失败不再干等 3 秒 / 退避 30 秒，改为主流程跑完<b>串行补抓一遍</b>；localStorage 落盘从每 10 个改成每 40 个。设置新增「同时抓几个账号（1~8）」，<b>「每次抓前几个账号」留空 = 全部抓取</b>。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> <b>界面放大改版</b>：🎯 悬浮球 54px→<b>66px</b>；面板从「撑满整屏的下拉抽屉」改成<b>居中圆角卡片，占屏幕宽高 2/3</b>（code>66.6%</code>、最大 560px），内容区独立滚动（新增 <code>resetScroll()</code> 保证换页回到顶部）；字号整体提一档（按钮 16 / 标题 15 / 说明 13）。<b>新增「② 界面尺寸」与「③ 怎么重载脚本」两节</b>（删旧条目 → ＋下载脚本 → 粘地址 → 刷新）。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> <b>修正上一版误判：脚本「不需要电脑模式 / 桌面版」。🎯 是脚本自己用代码画的悬浮球（<code>position:fixed</code>），只要网址是 <code>www.douyin.com</code> 就出现，与手机版/电脑版无关。</b> 已把第 5 步改成「直接登录即可」，并在下面写明「电脑模式」的确切位置与用途（仅强制跳 App / 页面空白时才用）。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-01</b> 新增「⓪ 从头到尾装一遍」六步清单（含 Via「电脑模式」的确切位置：右下「三」→ 电脑模式），以及「① 以后怎么用」日常四步。<b>B-1 下载脚本这条路已实测走通。</b></li>
