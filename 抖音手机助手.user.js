@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-02 22:40 · 删掉「看未读列表」；管理分类重写（分类可新建/改名/删除、按分类查看、每号显示未读条数、单号/整类取关）；面板默认改满屏
+// @version      2026-10-02 23:08 · 管理分类页新增「从 GitHub 拉分类」：一键把电脑端整理好的分类灌进手机（按 secUid 对号，对方改名也认得）；顺带修分类名乱码、setBody 面板未开时会崩
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -32,8 +32,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-02 22:40 · ① 去掉「📺 看未读列表」这个页面（首页和结果页的入口都删了，未读数量照常统计，改在管理分类里按账号看）；② 管理分类重写：分类不再写死在脚本里 —— 能自己新建 / 改名 / 删除（删分类时里面的账号落到「未分类」，不会跟着消失），按分类查看关注的人，每个号后面直接标出还有几条没看（未读多的排前面），搜昵称能立刻过滤，单号取关、整类批量取关（逐个来、每个隔 2.2 秒、随时可停、失败的列清单）；③ 面板默认改成「满屏」（100%×100% 铺满整块手机屏，圆角去掉），⤢ 在小/中/更大/满屏四档之间轮着换，老用户一次性升级到满屏';
-  var VER_SHORT = '10-02 22:40';
+  var VER = '2026-10-02 23:08 · ① 管理分类页新增「☁️ 从 GitHub 拉分类」：电脑端整理好的分类清单（categories.json，只有 40KB，不是 3.9MB 的 unread.json）一键灌进手机，按 secUid 对号 —— 对方改名也认得出来；两个模式：「拉取并覆盖分类」以电脑端为准，「只补空缺」只填空白的、本机已有分类不动；清单里没有的账号保持原样，绝不动；② 电脑端 data.json 里 5 个被 U+FFFD 咬坏的分类名（实时新闻被吃成「实时��闻」之类）已自动归并修复，手机端也会拒收带乱码的分类名；③ 顺带修一个真 bug：面板没打开时调 setBody 会抛异常';
+  var VER_SHORT = '10-02 23:08';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -46,6 +46,7 @@
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
       readIds: [],       // 已读视频 awemeId
       lastExport: 0,
+      lastCatSync: 0,
       lastScanAt: 0,
       scanJob: null      // 断点：{sig, startIdx, cursor, ts}，中断/被杀后下次从这里续
     };
@@ -1300,6 +1301,87 @@
     return out;
   }
 
+  /* ===================== 从 GitHub 拉分类 =====================
+     为什么单独用 categories.json：unread.json 有 3.9MB，手机上根本拉不动（实测 3 分钟拉不完）。
+     categories.json 只有 ~40KB，只装「分类名 + 账号昵称 + secUid + 归属分类」。
+     匹配顺序：secUid 精确 → 昵称精确 → 昵称去空格。对方改名了也能靠 secUid 认出来。 */
+  function applyCatFile(doc, mode) {
+    if (!doc || doc.type !== 'douyin-categories' || !doc.accounts) {
+      throw new Error('这不是分类清单文件（type=' + (doc && doc.type) + '）');
+    }
+    var bySec = {}, byName = {}, i, c;
+    for (i = 0; i < doc.accounts.length; i++) {
+      var r = doc.accounts[i];
+      if (r.s) bySec[r.s] = (r.c || '');
+      if (r.n) byName[String(r.n).replace(/\s+/g, '')] = (r.c || '');
+    }
+    var hit = 0, changed = 0, filled = 0, missed = 0;
+    for (i = 0; i < S.accounts.length; i++) {
+      var a = S.accounts[i];
+      var k = '';
+      if (a.secUserId && Object.prototype.hasOwnProperty.call(bySec, a.secUserId)) k = 'sec';
+      else if (Object.prototype.hasOwnProperty.call(byName, String(a.name || '').replace(/\s+/g, ''))) k = 'name';
+      if (!k) { missed++; continue; }                 // 清单里根本没这个号 → 一个字都不动
+      var nc = (k === 'sec') ? bySec[a.secUserId] : byName[String(a.name || '').replace(/\s+/g, '')];
+      hit++;
+      if (mode === 'merge') {                          // 只补空缺：已有分类一律不动
+        if (!a.category && nc) { a.category = nc; filled++; }
+      } else {                                        // 覆盖：清单里为空 = 认定它「未分类」，也覆盖掉
+        if ((a.category || '') !== nc) { a.category = nc; changed++; }
+      }
+    }
+    /* 分类名清单：先并进本机已有的（不动顺序、不删用户自建的），清单里缺的补上。
+       带 U+FFFD 乱码的直接跳过 —— 电脑端万漏修，手机上也不该凭空多出一个乱码分类。 */
+    var names = catNames();
+    for (i = 0; i < (doc.categories || []).length; i++) {
+      c = doc.categories[i];
+      if (!c || /\uFFFD/.test(c)) continue;
+      if (names.indexOf(c) < 0) names.push(c);
+    }
+    S.categories = names;
+    S.lastCatSync = Date.now();
+    save();
+    return { hit: hit, changed: changed, filled: filled, missed: missed, cats: names.length, at: doc.generatedAt || '' };
+  }
+
+  function pullCats(mode) {
+    var O = S.cfg.owner, R = S.cfg.repo, B = S.cfg.branch;
+    var url = 'https://raw.githubusercontent.com/' + encodeURIComponent(O) + '/' + encodeURIComponent(R) + '/' + encodeURIComponent(B) + '/categories.json';
+    var old = setBody('<div class="dyh-back" data-act="manage">← 返回</div>' +
+      '<div class="dyh-prog" id="dyh-prog">☁️ 正在拉取分类清单…<br><span style="font-size:19px">' + esc(url) + '</span></div>');
+    return fetch(url + '?t=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status + '（检查设置里的用户名/仓库/分支）');
+        return r.text();
+      })
+      .then(function (txt) {
+        var doc;
+        try { doc = JSON.parse(txt); } catch (e) { throw new Error('拉回来的不是合法 JSON（前 80 字：' + txt.slice(0, 80) + '…）'); }
+        var r2 = applyCatFile(doc, mode);
+        var body = '<div class="dyh-back" data-act="manage">← 返回</div><div class="dyh-card">' +
+          '<div class="dyh-row"><b>' + (mode === 'merge' ? '只补空缺' : '覆盖分类') + '完成</b><span class="dyh-hl">' + r2.hit + ' 个</span></div>' +
+          '<div class="dyh-row"><b>本次改动</b><span>' + (mode === 'merge' ? ('补上 ' + r2.filled + ' 个') : (r2.changed + ' 个')) + '</span></div>' +
+          '<div class="dyh-row"><b>清单里没有</b><span>' + r2.missed + ' 个（保持原样）</span></div>' +
+          '<div class="dyh-row"><b>现有分类</b><span>' + r2.cats + ' 个</span></div>' +
+          (r2.at ? '<div class="dyh-row"><b>清单生成于</b><span>' + esc(r2.at) + '</span></div>' : '') +
+          '</div>' +
+          '<div class="dyh-tip">' + (r2.changed || r2.filled
+            ? '✅ 已经灌进本机了，下面按分类查看就能看到。'
+            : '这次没有变化（可能本机已经是这份清单了）。') + '</div>' +
+          '<button class="dyh-btn primary" data-act="manage">去分类里看看</button>';
+        setBody(body);
+      })
+      .catch(function (e) {
+        setBody('<div class="dyh-back" data-act="manage">← 返回</div>' +
+          '<div class="dyh-tip" style="color:#f53f3f">☁️ 拉取失败：' + esc(e.message) + '</div>' +
+          '<div class="dyh-tip">这个功能不需要填 Token（raw 地址公开可读）。请检查：<br>' +
+          '① ⚙️ 设置里的 GitHub 用户名 / 仓库 / 分支对不对（现在是 ' + esc(S.cfg.owner) + ' / ' + esc(S.cfg.repo) + ' / ' + esc(S.cfg.branch) + '）；<br>' +
+          '② 手机能不能上 raw.githubusercontent.com；<br>' +
+          '③ 电脑上有没有跑过 <b>生成分类清单.js</b>（第一次要先在电脑上生成并推送一次）。</div>' +
+          '<button class="dyh-btn" data-act="manage">← 返回管理页</button>');
+      });
+  }
+
   function renderManage() {
     var um = unreadByAccount();
     var cats = catNames();
@@ -1312,6 +1394,16 @@
     var cat = MGR.cat;
     var h = '<div class="dyh-back" data-act="home">← 返回</div>';
     h += '<div class="dyh-tip">按分类查看你的关注、给账号归类、看每个号还有几条没看，还能直接取关</div>';
+
+    /* ---- 从 GitHub 拉分类（电脑端整理好的分类一键灌进来）---- */
+    h += '<div class="dyh-card" style="padding:10px 12px;margin-bottom:10px">' +
+      '<div class="dyh-row"><b>☁️ 从 GitHub 拉分类</b><span></span></div>' +
+      '<div class="dyh-tip" style="margin:2px 0 8px">电脑端整理好的分类清单存在 GitHub 的 <b>categories.json</b>（只有几十 KB，' +
+      '不像 unread.json 有 3.9MB 手机拉不动）。拉下来会按账号对上号并覆盖本机分类。</div>' +
+      (S.lastCatSync ? '<div class="dyh-tip" style="margin:0 0 8px">上次同步：' + esc(fmtTime(S.lastCatSync)) + '</div>' : '') +
+      '<button class="dyh-btn primary" data-act="cat-pull">☁️ 拉取并覆盖分类</button> ' +
+      '<button class="dyh-btn" data-act="cat-merge">🔀 只补空缺（不覆盖已有）</button>' +
+      '</div>';
 
     /* ---- 搜索 ---- */
     h += '<input id="dyh-mgr-kw" class="dyh-input" placeholder="搜昵称（留空看全部）" value="' + esc(MGR.kw || '') + '">';
@@ -1587,7 +1679,7 @@
     else bodyEl.innerHTML = renderHome();
     resetScroll();
   }
-  function setBody(html) { bodyEl.innerHTML = html; resetScroll(); }
+  function setBody(html) { if (!bodyEl) return; bodyEl.innerHTML = html; resetScroll(); }
   // 内容现在由 #dyh-body 自己滚动，每次换页都要把滚动条拉回顶部
   function resetScroll() { if (bodyEl) bodyEl.scrollTop = 0; }
 
@@ -1875,6 +1967,9 @@
     if (act === 'uf-stop') { UF_CANCEL = true; toast('已停手，剩下几个保持原样'); return; }
 
     /* ---------- 管理分类 ---------- */
+    if (act === 'cat-pull') { pullCats('cover'); return; }
+    if (act === 'cat-merge') { pullCats('merge'); return; }
+
     if (act === 'mgr-pick') {
       MGR.cat = el.getAttribute('data-cat'); MGR.adding = false; MGR.editing = '';
       open('manage'); return;
@@ -2025,6 +2120,8 @@
     mgrListHtml: mgrListHtml,
     catNames: catNames,
     unreadByAccount: unreadByAccount,
+    applyCatFile: applyCatFile,
+    pullCats: pullCats,
     applyBoxSize: applyBoxSize,
     save: save,
     getSelfSecUid: getSelfSecUid,
