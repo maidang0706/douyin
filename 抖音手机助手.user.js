@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      1.6.0
+// @version      2026-10-02 12:50 · 未读改成「跟抖音 App 一样」：按抖音服务器记录的已看记录过滤
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -28,9 +28,12 @@
   var API_POST = 'https://www.douyin.com/aweme/v1/web/aweme/post/';
   var API_FOLLOWING = 'https://www.douyin.com/aweme/v1/web/user/following/list/';
   var LS = 'dy_phone_helper_v1';
-  /* ★ 版本号：每次改动本脚本都要 +1（1.1 → 1.2 → 1.3 …），并同步改 @version。
-     面板标题后面会显示 v1.2，用户一眼就能确认手机上跑的是不是最新版。 */
-  var VER = '1.6';
+  /* ★★ 版本号规则（2026-10-02 起，用户指定）★★
+     不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
+     改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
+     面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
+  var VER = '2026-10-02 12:50 · 未读按抖音服务器「已看记录」过滤（App 里看过也算）';
+  var VER_SHORT = '10-02 12:50';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -362,6 +365,65 @@
     });
   }
 
+  /* ★★★ 真实「已看」记录（2026-10-02 新增，这是本次修复的核心）★★★
+     以前：未读 = 抓到的视频 − 本机点过「已读」的。
+     坑在哪：你在抖音 App 里看过多少视频，我们这边根本不知道。于是
+       ① 早就看过的旧视频一直挂在未读里，越攒越多；
+       ② 真正的新未读被这一大堆「其实早看过」的淹没，数字看着一动不动 —— 也就是你说的「没变化」。
+     现在：抖音服务器自己记着「你看过哪些视频」（观看历史，App 和网页端都写进去，跨设备同步），
+       接口就是 /aweme/v1/web/history/read/。每次抓取先把它读一遍：
+         未读 = 抓到的新视频 − 抖音记录里看过的 − 本机标记已读的
+     这样未读判定就和抖音 App 一致了：你在 App 里看完，下一轮抓取它就自动从列表消失。 */
+  var HIST_PATHS = ['https://www.douyin.com/aweme/v1/web/history/read/',
+                    'https://www.douyin.com/aweme/v1/web/history/list/'];
+  var HIST_MAX_PAGE = 6, HIST_DAYS = 120, HIST_BUDGET = 15000;
+  function histIdOf(it) {
+    if (!it) return '';
+    if (it.aweme_id != null) return String(it.aweme_id);
+    if (it.awemeId != null) return String(it.awemeId);
+    if (it.group_id != null) return String(it.group_id);
+    if (it.aweme && it.aweme.aweme_id != null) return String(it.aweme.aweme_id);
+    return '';
+  }
+  function fetchWatchHistory(opt) {
+    var ids = {}, n = 0, err = '', t0 = Date.now();
+    var cutoff = (Date.now() - HIST_DAYS * 86400000) / 1000;   // 只看近 120 天，够用了还省请求
+    function onePath(base) {
+      var cursor = '0', page = 0;
+      function nextPage() {
+        if (page >= HIST_MAX_PAGE || Date.now() - t0 > HIST_BUDGET) return Promise.resolve(false);
+        page++;
+        return hardLimit(dyGet(base, commonParams({ count: '20', cursor: cursor }), opt), 12000)
+          .then(function (j) {
+            var list = (j && (j.aweme_list || j.history_list || j.list)) || [];
+            var oldest = Infinity;
+            for (var i = 0; i < list.length; i++) {
+              var id = histIdOf(list[i]);
+              if (!id) continue;
+              var ts = Number(list[i].last_watch_time || list[i].watch_time || list[i].time ||
+                              list[i].create_time || list[i].play_time || 0);
+              if (ts && ts < oldest) oldest = ts;
+              if (!ids[id]) { ids[id] = 1; n++; }
+            }
+            if (!list.length) return false;
+            var nc = (j && (j.cursor != null ? j.cursor : (j.max_cursor != null ? j.max_cursor : null)));
+            if (!nc && !j.has_more) return false;
+            if (oldest !== Infinity && oldest < cutoff) return false;   // 已翻到 120 天前，够了
+            cursor = (nc != null ? String(nc) : cursor);
+            return sleep(140 + Math.random() * 200).then(function () { return nextPage(); });
+          })
+          .catch(function (e) { if (!err) err = (e && e.message) || '读取失败'; return false; });
+      }
+      return nextPage();
+    }
+    // 主接口不通就换备用路径；只要拿到过东西（n>0）就收手，不浪费请求
+    return HIST_PATHS.reduce(function (chain, base) {
+      return chain.then(function (used) { return used || n ? true : onePath(base); });
+    }, Promise.resolve(false)).then(function () {
+      return { ids: ids, n: n, error: err };
+    });
+  }
+
   /* ----------------------------- 取关 / 关注 ----------------------------- */
   /* ★ 2026-10-01 重构：不再用隐藏 iframe（真机实测会被抖音的「验证码中间页」拦），
      改成「主页面点按钮 → window.open 开一个真实的新标签页 → 本脚本在新标签页里
@@ -629,6 +691,7 @@
     /* errors  = 失败「尝试」次数（给 AIMD 调速用，同一账号重试/补抓会累加）
        failAcc = 最终没抓到的「账号」数（去重，同一账号只算一次）—— 界面上显示的失败就是这个 */
     var newCount = 0, errors = 0, okCount = 0, failAcc = 0;
+    var histMap = {}, histN = 0, histSkip = 0, histErr = '';   // 抖音服务器端的「你看过」记录
     var consecOk = 0, consecFail = 0, coolUntil = 0, riskHits = 0, riskStreak = 0, bailout = false, dispatched = 0;
     var retries = 0, stalled = false;
     // 上限取设置里的值（默认 6），但【开局只用 3 个】——先探路，顺了再往上加
@@ -638,10 +701,27 @@
     for (var i = 0; i < S.videos.length; i++) known[S.videos[i].awemeId] = 1;
     for (var r = 0; r < S.readIds.length; r++) readMap[S.readIds[r]] = 1;
 
+    /* 把「抖音记录里看过」的视频剔掉：既处理本轮新抓到的，也顺手清理以前攒下的老账
+       （以前攒的旧视频只要你看过，这次一并从未读里划掉 —— 否则未读数字永远虚高、看着不动） */
+    function killHist() {
+      for (var i = 0; i < S.videos.length; i++) {
+        var id = S.videos[i].awemeId;
+        if (histMap[id]) {
+          histSkip++;
+          if (!readMap[id]) { readMap[id] = 1; S.readIds.push(id); }
+        }
+      }
+    }
     function absorb(list) {
       for (var k = 0; k < list.length; k++) {
         var v = list[k];
-        if (!known[v.awemeId] && !readMap[v.awemeId]) { S.videos.push(v); known[v.awemeId] = 1; newCount++; }
+        if (known[v.awemeId] || readMap[v.awemeId]) continue;
+        if (histMap[v.awemeId]) {                 // 抖音那边已经看过了 → 不算未读
+          histSkip++;
+          if (!readMap[v.awemeId]) { readMap[v.awemeId] = 1; S.readIds.push(v.awemeId); }
+          continue;
+        }
+        S.videos.push(v); known[v.awemeId] = 1; newCount++;
       }
     }
     // AIMD：顺了才加速，卡了立刻减速（降到 1 之后恢复得更快：连成 4 个就 +1）
@@ -689,6 +769,7 @@
         name: name || (lastSnap ? lastSnap.name : ''), newCount: newCount,
         errors: failAcc, okCount: okCount, attempts: errors,
         conc: conc, maxConc: maxConc, risk: riskHits, stopped: stopped, retries: retries, stalled: stalled,
+        hist: histN, histSkip: histSkip, histErr: histErr,
         pct: Math.min(100, Math.round(cur / total * 100)),
         elapsed: elapsed,
         eta: (total - cur) > 0 ? Math.round((total - cur) * (cur ? elapsed / cur : 0)) : 0,
@@ -909,6 +990,7 @@
       return {
         ok: true, newCount: newCount, errors: failAcc, okCount: okCount + feedCaughtN, scanned: plan.length,
         feedUsed: feedUsed, feedPages: feedPages, feedCaught: feedCaughtN,
+        hist: histSkip, histN: histN, histErr: histErr,
         conc: conc, risk: riskHits, stopped: stopped, resumeAt: resumeFrom, left: left,
         retries: retries, attempts: errors, stalled: stalled,
         pct: Math.min(100, Math.round((feedCaughtN + okCount) / feedTotal * 100)),
@@ -926,14 +1008,27 @@
       });
     }
 
-    return feedPhase().then(function () {
-      // 信息流已经把账号全部核对完（日常绝大多数情况）：不用再逐个打接口了
-      if (!plan.length) { cleanup(); report('', true); return resultObj(); }
-      return runPass(plan, 0).then(function () {
-        cleanup(); report('', true);
-        return resultObj();
-      });
-    }).catch(function (e) {
+    /* 阶段 -1：先把抖音服务器上「你已看过的视频」读一遍（1~2 次请求），再开始抓。
+       这一步决定未读是不是准 —— 不读它，未读里就全是早看过的旧视频。 */
+    var sig0 = (scanCtrl && scanCtrl.signal) || null;
+    return Promise.resolve()
+      .then(function () { return fetchWatchHistory({ signal: sig0 }); })
+      .then(function (hres) {
+        histMap = (hres && hres.ids) || {}; histN = (hres && hres.n) || 0; histErr = (hres && hres.error) || '';
+        killHist();                       // 把以前攒下的「已看过的旧视频」也从未读里清掉
+        scheduleSave();
+        report('读取抖音已看记录 ' + histN + ' 条', true);
+        return feedPhase();
+      })
+      .then(function () {
+        // 信息流已经把账号全部核对完（日常绝大多数情况）：不用再逐个打接口了
+        if (!plan.length) { cleanup(); report('', true); return resultObj(); }
+        return runPass(plan, 0).then(function () {
+          cleanup(); report('', true);
+          return resultObj();
+        });
+      })
+      .catch(function (e) {
       clearInterval(wdTimer); stopBeat(); scanning = false; keepAwake(false); stopFlag = false;
       try { save(); } catch (err) { }
       return { ok: false, error: (e && e.message) || '未知错误' };
@@ -959,7 +1054,10 @@
     h += '<div class="dyh-row"><b>关注公众号</b><span>' + S.accounts.length + ' 个</span></div>';
     h += '<div class="dyh-row"><b>未读视频</b><span class="dyh-hl">' + unread.length + ' 条</span></div>';
     h += '<div class="dyh-row"><b>上次抓取</b><span>' + (S.lastScanAt ? fmtTime(S.lastScanAt) : '从未') + '</span></div>';
+    h += '<div class="dyh-row"><b>已看记录</b><span>' + S.readIds.length + ' 条（含抖音里看过的）</span></div>';
     h += '</div>';
+    h += '<div class="dyh-tip">未读 = 抓到的新视频 − <b>抖音那边看过的</b>（App / 网页看过都算，每次抓取自动同步）− 本机点过的「已读」。<br>' +
+      '所以在抖音里看完，下一轮抓取它就自动从列表消失；在本面板里点标题打开看完，会立刻标记为已看。</div>';
     h += '<button class="dyh-btn primary" data-act="scan">🔍 抓最新未读视频</button>';
     h += '<button class="dyh-btn" data-act="refresh">📥 刷新我的关注列表</button>';
     h += '<button class="dyh-btn" data-act="list">📺 看未读列表（' + unread.length + '）</button>';
@@ -967,7 +1065,8 @@
     h += '<button class="dyh-btn" data-act="search">🔎 搜索并关注新账号</button>';
     h += '<button class="dyh-btn" data-act="push">☁️ 推到 GitHub（手机端 HTML 可看）</button>';
     h += '<button class="dyh-btn gray" data-act="settings">⚙️ 设置（GitHub / 数据）</button>';
-    h += '<div class="dyh-tip">面板右上角的 <b>⤢</b> 可以切换界面大小（小 / 中 / 更大），点一下立刻变；标题后面那个 <b>v' + VER + '</b> 是版本号，用来确认手机上跑的是不是最新版。</div>';
+    h += '<div class="dyh-tip">面板右上角的 <b>⤢</b> 可以切换界面大小（小 / 中 / 更大），点一下立刻变；标题后面那个 <b>' + VER_SHORT +
+      '</b> 是版本号（生成时间 + 本次改动，完整说明在设置页最下面），用来确认手机上跑的是不是最新版。</div>';
     return h;
   }
 
@@ -981,7 +1080,7 @@
   function renderList() {
     var v = unreadVideos();
     var h = '<div class="dyh-back" data-act="home">← 返回</div>';
-    h += '<div class="dyh-tip">共 ' + v.length + ' 条未读，点「已读」标记，点标题用抖音打开</div>';
+    h += '<div class="dyh-tip">共 <b>' + v.length + '</b> 条未读（已扣掉抖音里看过的 + 本机标记的）。点标题用抖音打开，看完自动标已看；点「已读」手动标记。当前只显示最新 300 条。</div>';
     var n = Math.min(v.length, 300);
     for (var i = 0; i < n; i++) {
       var it = v[i];
@@ -1063,6 +1162,8 @@
     h += '<button class="dyh-btn" data-act="export">📤 导出数据到手机本地（下载 json）</button>';
     h += '<button class="dyh-btn gray" data-act="clear">🗑 清空本地数据</button>';
     h += '<div class="dyh-tip">已读记录 ' + S.readIds.length + ' 条 · 视频库 ' + S.videos.length + ' 条</div>';
+    h += '<div class="dyh-tip">本脚本版本（生成时间 + 本次改动）：<b>' + esc(VER) + '</b><br>' +
+      '每次改动版本号都会变，Via 里的脚本不会自动更新 —— 看到这里和最新不一样，就在 Via 里删掉旧脚本重装一次。</div>';
     return h;
   }
 
@@ -1088,7 +1189,8 @@
       '.dyh-box.sz-l{width:96%!important;max-width:980px;height:93%!important;max-height:920px;font-size:24px!important}' +
       '.dyh-box h3{margin:0 0 17px!important;font-size:28px!important;display:flex!important;align-items:center;flex:0 0 auto}' +
       '.dyh-box h3 span{margin-left:auto;font-size:40px!important;color:#c9cdd4;padding:0 8px}' +
-      '.dyh-ver{font-size:16px!important;color:#c9cdd4;font-weight:400;margin-left:9px!important}' +
+      '.dyh-ver{font-size:16px!important;color:#c9cdd4;font-weight:400;margin-left:9px!important;flex:0 1 auto;' +
+      'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52%}' +
       '.dyh-zbtn{font-size:30px!important;color:#4e5969;background:#f2f3f5;border-radius:8px;' +
       'padding:4px 14px;margin-left:auto!important}' +
       '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
@@ -1142,7 +1244,7 @@
     panel = document.createElement('div');
     panel.className = 'dyh-panel';
     // 结构：h3 只放标题/版本号/⤢缩放/关闭，正文单独 #dyh-body（h3 不能包裹 body，否则内容区会缩成一行）
-    panel.innerHTML = '<div class="dyh-box"><h3>抖音关注助手<span class="dyh-ver">v' + VER + '</span>' +
+    panel.innerHTML = '<div class="dyh-box"><h3>抖音关注助手<span class="dyh-ver" title="' + esc(VER) + '">' + VER_SHORT + '</span>' +
       '<span class="dyh-zbtn" data-act="cycle-size" title="点一下换界面大小">⤢</span>' +
       '<span data-act="close">×</span></h3><div id="dyh-body"></div></div>';
     panel.addEventListener('click', function (e) {
@@ -1287,7 +1389,8 @@
           (s.retries ? '　自动重试 <b>' + s.retries + '</b> 次' : '');
         gid('dyh-pnow').textContent = (s.phase === 'feed' ? '① ' : '② ') + (s.name ? ('当前：' + s.name) : '');
         var w = gid('dyh-pwarn');
-        if (s.risk) { w.style.display = ''; w.textContent = '⚠ 抖音限流中，已自动降速重试（不会算失败）'; }
+        if (s.histErr && !s.hist) { w.style.display = ''; w.textContent = '⚠ 没读到抖音的已看记录（' + s.histErr + '），这一轮只扣掉了本机标记过的；下次抓取会自动重试'; }
+        else if (s.risk) { w.style.display = ''; w.textContent = '⚠ 抖音限流中，已自动降速重试（不会算失败）'; }
         else if (s.cool) { w.style.display = ''; w.textContent = '⏳ 正在降速冷却，稍等一下就好'; }
         else if (s.phase === 'feed') { w.style.display = ''; w.textContent = '① 关注页信息流：一次拿 20 条，请求极少（不逐个打账号，所以不容易被限流）'; }
         else if (s.feedUsed) { w.style.display = ''; w.textContent = '② 补抓信息流没覆盖到的账号（首次使用会多一些，之后就很少了）'; }
@@ -1303,6 +1406,10 @@
           '<div class="dyh-card">' +
           '<div class="dyh-row"><b>完成率</b><span class="dyh-hl">' + (r.pct == null ? 100 : r.pct) + '%</span></div>' +
           '<div class="dyh-row"><b>新增未读</b><span class="dyh-hl">' + r.newCount + ' 条</span></div>' +
+          '<div class="dyh-row"><b>抖音里看过的</b><span>' + r.hist + ' 条（已从未读里剔除）</span></div>' +
+          '<div class="dyh-row"><b>当前未读合计</b><span class="dyh-hl">' + unreadVideos().length + ' 条</span></div>' +
+          (r.histN ? '<div class="dyh-tip">本次从抖音服务器读到你的已看记录 ' + r.histN + ' 条' +
+            (r.histErr ? '（读取有告警：' + esc(r.histErr) + '）' : '') + '。</div>' : '') +
           '<div class="dyh-row"><b>处理账号</b><span>' + r.scanned + (r.resumeAt ? '（断点续 ' + r.resumeAt + '）' : '') + '</span></div>' +
           '<div class="dyh-row"><b>成功 / 失败</b><span>' + r.okCount + ' / ' + r.errors + '</span></div>' +
           (r.retries ? '<div class="dyh-row"><b>自动重试</b><span>' + r.retries + ' 次（已全部救回）</span></div>' : '') +
@@ -1512,9 +1619,26 @@
     }
   }
 
+  /* ★ 你在本浏览器里打开某个视频（点未读列表里的标题就会跳这里）→ 自动记成「已看」，
+     和抖音 App 的行为一致：看了就从「未读」里掉下去，不用再去点那颗「已读」。
+     注意：在 App 里看的话，这个自动记不下来，要靠上面那套「抖音已看记录」在下次抓取时同步。 */
+  function autoMarkCurrentRead() {
+    try {
+      var href = (location && (location.href || location.pathname)) || '';
+      var m = /\/video\/(\d+)/.exec(href);
+      if (!m) return false;
+      var id = String(m[1]);
+      for (var i = 0; i < S.readIds.length; i++) if (S.readIds[i] === id) return false;
+      S.readIds.push(id); save();
+      toast('已标记为已看，未读里会少这一条');
+      return true;
+    } catch (e) { return false; }
+  }
+
   /* ----------------------------- 启动 ----------------------------- */
   function boot() {
     if (!/www\.douyin\.com/.test(location.host)) return;
+    autoMarkCurrentRead();
     /* 如果这是一个被脚本打开的「取关/关注」用标签页，先让它自动点完按钮再挂面板 */
     try { autoFollowWorker(); } catch (e) { console.warn('[抖音关注助手] 自动点击异常：', e); }
     ensureUI();
@@ -1525,8 +1649,9 @@
 
   /* 暴露内部能力，方便在控制台排查（无害，也可当作高级用法入口） */
   window.DYHelper = {
-    version: '1.0.0',
+    version: VER,
     state: function () { return S; },
+    unread: unreadVideos,
     save: save,
     getSelfSecUid: getSelfSecUid,
     fetchFollowing: fetchFollowing,
