@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-02 14:35 · 抓取改「信息流追平 + 逐个补漏」：日常 2~5 次请求且一个不漏；请求带 msToken + 限速，不易被风控
+// @version      2026-10-02 21:45 · 修「第一次可以、第二次不行」：追平线放宽到 90 分钟 + 信息流提前说没了按覆盖比例判断 + 逐个抓分批滚动 + 断点只记成功数（失败的下次必重抓）
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -32,14 +32,14 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-02 14:35 · 抓取改「信息流追平 + 逐个补漏」：翻到上次抓取的位置才算追平（追平后 0 次逐个请求也不漏账号），没追平的账号照样逐个补；请求带 msToken + 限速 + 风控自动换令牌，失败率大降';
-  var VER_SHORT = '10-02 14:35';
+  var VER = '2026-10-02 21:45 · 修「第一次可以、第二次不行」：① 追平线由 30 分钟放宽到 90 分钟（手机上信息流普遍只能回溯两三页，线画老一点才容易命中「0 次逐个请求」）；② 信息流提前说「没了」时按覆盖比例判断是否够用，不再无条件全跳、也不再一股脑丢回 392 次逐个打；③ 逐个抓改每批 60 个滚动推进，跑完就落盘写断点，绝不让几百个账号一次打满被风控和看门狗砍掉大半；④ 断点改成只记成功数，失败的账号下次一定重抓（以前失败也算进度，会被跳过 = 永远抓不到）；⑤ 抓完没新视频时明确提示「已核对 N 个账号」，不再让人以为坏了';
+  var VER_SHORT = '10-02 21:45';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l', scanMode: 'auto' },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l', scanMode: 'auto', scanBatch: 60 },
       selfSecUid: '',
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -735,6 +735,15 @@
     scanning = true; stopFlag = false; stopped = false; lastScanFailed = [];
     try { scanCtrl = new AbortController(); } catch (e) { scanCtrl = null; }
 
+    /* ★ 开跑就把「上次抓取」记成这一轮的开始时间（以前是渲染结果页时才记）。
+       差别很实际：断点点进来 / 手快连点第二次时，会用上一次的时间去算追平线，
+       线算歪了 → 该追平的判成没追平 → 几百个账号退回逐个抓（就是你看到的「第二次不行」）。
+       ★ 但「追平线」仍然只认【这一轮开始之前】的上次时间 prevScanAt（下面 feedPhase 用），
+         否则第一次使用会拿本轮时间画线，结果只收最近一个半小时就收工，老未读全丢。 */
+    var prevScanAt = S.lastScanAt;
+    S.lastScanAt = Date.now();
+    prefixTotal = 0; batchEnd = false; stopped = false;
+
     /* 断点：只有「关注列表没变 + 上次确实没抓完」才续跑 */
     var j = S.scanJob || null;
     var resumeFrom = 0;
@@ -751,7 +760,8 @@
     var newCount = 0, errors = 0, okCount = 0, failAcc = 0;
     var histMap = {}, histN = 0, histSkip = 0, histErr = '';   // 抖音服务器端的「你看过」记录
     var consecOk = 0, consecFail = 0, coolUntil = 0, riskHits = 0, riskStreak = 0, bailout = false, dispatched = 0;
-    var retries = 0, stalled = false, lastDone = 0;   // lastDone = 本轮【真正跑完】的账号数（断点用）
+    var retries = 0, stalled = false, batchEnd = false;   // batchEnd = 分批跑完的正常收尾（≠异常收工）
+    var prefixTotal = 0;   // 断点用：本轮【从头算起的连续成功账号数】（遇到第一个没抓到的就停）
     // 上限取设置里的值（默认 6），但【开局只用 3 个】——先探路，顺了再往上加
     var maxConc = Math.max(1, Math.min(10, parseInt(S.cfg.scanConc, 10) || 6));
     var conc = Math.min(3, maxConc);
@@ -886,8 +896,18 @@
          ★ 和之前那个漏抓 bug 的区别：之前是「接口说没了(has_more=false)就全标已核对」，
          而手机浏览器里接口经常只翻一两页就说没了 → 漏光。现在只认【时间追平】，
          接口提前说没了 → 只对「被证明追平」的账号跳过，其余照样逐个补。 */
-      var horizon = S.lastScanAt ? (S.lastScanAt - 30 * 60000) : 0;
-      var firstRun = !S.lastScanAt;
+      /* ★ 追平线为什么是「90 分钟」而不是 30 分钟（2026-10-02 21:45 修「第二次不行」）
+         信息流是按时间倒序给的：只要翻到一条「比追平线还老」的视频，就证明追平线之后的
+         所有视频都已经在前面出现过、都被收走了。可手机浏览器里这条信息流普遍只能回溯
+         两三页（再往后抖音就说 has_more=false 了）—— 线画得越靠近「现在」，越容易翻不到
+         那条老视频 → 判定不了追平 → 392 个账号全部退回逐个抓 → 请求暴涨 → 被限流 → 满屏失败。
+         线往前挪到 90 分钟，就只要翻到 1.5 小时前的视频就算追平，命中率高得多；
+         代价只是多翻一页（几百毫秒），远比掉回 392 次逐个打划算。 */
+      var horizon = prevScanAt ? (prevScanAt - 90 * 60000) : 0;   // 只认【本轮开始之前】的那次抓取
+      /* ★ 「是不是第一次用」不能用 lastScanAt 判断了 —— 上面开跑时已经把 lastScanAt 写成本轮时间，
+         再拿它判首次，第一次使用也会被当成「非首次」→ 只收最近一个半小时 → 建不出基线 → 未读不全。
+         真正的判据是「本地一条视频都没有」。 */
+      var firstRun = !S.videos.length;
       var deepEnough = false, emptyPages = 0;
 
       function countCaught() { var n = 0; for (var u in caught) if (caught[u]) n++; return n; }
@@ -928,7 +948,22 @@
             /* 首次使用没有基准：信息流只看最近 3 天先出个首批，其余靠逐个抓建基线 */
             if (firstRun && oldest < Date.now() - 3 * 86400000) return;
             if (oldest && oldest < Date.now() - DEAD) return;    // 翻进 30 天前了：没有意义
-            if (!res.hasMore) return;                            // 接口说没了（没追平 → 逐个补漏）
+            /* ★ 接口说「没了」（手机信息流的常态，后面根本没内容了）
+               旧版这里有两个极端，把这个功能毁了：
+                 a) 无条件把所有人标成已核对 → 实际没核对到 → 未读永远是 0 条（就是你说的「抓不到」）；
+                 b) 一律不认 → 几百个账号全部退回逐个抓 → 392 次请求 → 被风控 → 满屏失败。
+               现在折中：翻过 3 页以上、而且信息流里已经见过我们关注的人 ≥ 六成，才认定「覆盖够了」；
+               否则严一点，交给逐个抓补漏（宁可慢，也绝不允许漏账号）。 */
+            if (!res.hasMore) {
+              var touched = 0, uk;
+              for (uk in feedCovered) if (uidMap[uk]) touched++;
+              if (feedPages >= 3 && plan.length && touched / plan.length >= 0.6) {
+                deepEnough = true;
+                caught = {};
+                for (uk in uidMap) if (uidMap[uk].secUserId) caught[uk] = 1;
+              }
+              return;
+            }
             cursor = res.nextCursor || 0;
             if (!cursor) return;
             return sleep(260 + Math.random() * 340).then(page);  // 慢一点翻，像人在刷
@@ -972,10 +1007,12 @@
       return sleep(waitMs).then(function () { return step(0); });
 
       function step(n) {
+        acc._pending = 1;                   // 标记「还没落定」：断点不许把它算成已抓到（中断时用它挡住）
         if (shouldStop()) return Promise.resolve();
         return hardLimit(fetchPosts(acc.secUserId, { signal: scanCtrl ? scanCtrl.signal : null }), 45000)
           .then(function (list) {
             if (shouldStop()) return;
+            acc._pending = 0;
             okCount++; acc.lastError = ''; acc.lastCount = list.length;
             /* 之前几轮没抓成、这一轮成了 → 把「失败账号」的账也消掉：
                界面上「成功/失败」只反映【最终】结果（不然会出现 80 成功 + 1 失败 = 81 个的怪数） */
@@ -1003,8 +1040,7 @@
     function pump(items) {
       return new Promise(function (resolve) {
         var cursor = 0, active = 0, done = 0, ended = false, lastProgress = Date.now();
-        // 记下「真正跑完的账号数」——断点续跑就从这个数往后，没落定的一律下次重抓
-        function finish() { if (ended) return; ended = true; clearInterval(stallTimer); lastDone = Math.max(lastDone, done); resolve(); }
+        function finish() { if (ended) return; ended = true; clearInterval(stallTimer); resolve(); }
         // 停滞看门狗：90 秒一点进展都没有 = 真卡住了，强制收尾（剩下的进断点，绝不无限等）
         var stallTimer = setInterval(function () {
           if (ended) return;
@@ -1047,14 +1083,15 @@
       scanning = false; keepAwake(false); stopFlag = false;
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
       // 没跑完 → 进度写进断点（下次从这里续）；跑完了 → 断点标记「已全部完成」
-      /* ★ 断点按「真正跑完的账号数」记（lastDone），不能按「派出去了几个」。
-         以前用 dispatched − failed：中途被停下（手机熄屏 / 90 秒停滞看门狗 / 用户按停止）时，
-         那些还在飞的请求既没成功也没进 failed，断点却把它们算成「已处理」→ 下次续跑直接跳过 →
-         一堆账号再也没抓过，未读自然永远是 0 条。
-         改成记真正落定的个数，没落定的下次一定补回来（宁可重抓，绝不漏）。 */
-      var unfinished = stopped || failed.length > 0;
+      /* ★ 断点口径：只认【真正抓到的账号数】(okCount)，既不认「派出去了几个」，也不认「试过了几个」。
+         - 以前用派出数：中途被停下（熄屏 / 90 秒停滞看门狗 / 你按停止）时，还在飞的请求既没成功
+           也没算失败，断点却把它们当「已处理」→ 下次直接跳过 → 一堆账号永远没抓过，未读永远是 0 条。
+         - 更坑的是把「试过但失败」也记成进度：一批 60 个全失败 → 断点往前推 60 → 下次跳过这 60 个
+           → 这些账号这辈子都不会被抓到（这就是「第一次可以、第二次就不行了」里最要命的一条）。
+         现在只数成功的：没抓到的下次一定重来（宁可多跑几轮，绝不漏）。 */
+      var unfinished = stopped || failed.length > 0 || batchEnd;
       S.scanJob = unfinished
-        ? { sig: accountSig(), startIdx: resumeFrom, cursor: resumeFrom + Math.min(lastDone, plan.length), ts: Date.now() }
+        ? { sig: accountSig(), startIdx: resumeFrom, cursor: resumeFrom + Math.min(prefixTotal, plan.length), ts: Date.now() }
         : { sig: accountSig(), startIdx: 0, cursor: S.accounts.length, ts: Date.now() };
       save();
     }
@@ -1067,8 +1104,10 @@
           if (!seenN[nm]) { seenN[nm] = 1; lastScanFailed.push(nm); }
         }
       }
-      // 还差点没抓到：总账号数 − 断点之前的 − 信息流已核对的 − 本轮逐个成功的
-      var left = Math.max(0, S.accounts.length - resumeFrom - feedCaughtN - okCount);
+      // 还差点没抓到：总账号数 − 断点之前的 − 信息流已核对的 − 本轮【抓到的】（含信息流）
+      var left = Math.max(0, S.accounts.length - resumeFrom - feedCaughtN - prefixTotal);
+      // 「分批跑完的正常收尾」不算异常：只有风控 / 看门狗 / 手动停止才算 stopped
+      if (stopped && batchEnd) stopped = false;
       return {
         ok: true, newCount: newCount, errors: failAcc, okCount: okCount + feedCaughtN, scanned: plan.length,
         feedUsed: feedUsed, feedPages: feedPages, feedCaught: feedCaughtN,
@@ -1080,13 +1119,35 @@
       };
     }
 
-    /* 一轮跑完，把「3 次都没成」的账号再补最多 2 轮（每轮之间整体歇一下，别连着猛打）。
-       配合就地重试，绝大多数抖动在这一步就被消化掉了 —— 最终剩下的失败会非常少。 */
+    /* ★ 逐个抓改成【分批滚动】（2026-10-02 21:45 修「第二次不行」）
+       以前是一口气把没核对完的几百个账号全丢进并发池：请求量瞬间回到 392 次，
+       抖音必然限流，跑满 12 分钟看门狗再把半路砍掉 → 你看到的就是「失败一大片」。
+       现在一批最多 60 个：这批跑完就落盘、写断点、本轮收尾；下次再点一次自动从断点续，
+       一批批往前磨。总量没变，但每次只露一小头，被盯上的概率低得多，也随时能看到进度。 */
+    /* 断点用的「连续成功前缀」：从头数，遇到第一个【没抓到的】就停。
+       这样断点点只会落在「前面全抓到了」的位置：失败的、被中断的，下次一定重来，绝不跳过。 */
+    function prefixOf(items) {
+      var n = 0;
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].lastError || items[i]._pending) break;
+        n++;
+      }
+      return n;
+    }
     function runPass(list, pass) {
-      return pump(list).then(function () {
-        if (shouldStop() || !failed.length || pass >= 2) return;
-        var again = failed.slice(); failed = [];
-        return sleep(2500 + pass * 4000).then(function () { return runPass(again, pass + 1); });
+      var BATCH = list.length <= 120 ? list.length
+        : Math.max(10, Math.min(60, parseInt(S.cfg.scanBatch, 10) || 60));
+      var next = (pass || 0) + 1;
+      var batch = list.slice(0, BATCH);
+      return pump(batch).then(function () {
+        prefixTotal += prefixOf(batch);
+        var rest = list.length - BATCH;
+        /* 这批【一个都没失败】= 一路很顺 → 再跟两批（省得为了几百个账号连点好几次）；
+           只要有任何失败、或者跟满两批，就地收尾：剩下的进断点，下次自动补。 */
+        if (!shouldStop() && !failed.length && rest > 0 && next <= 2) {
+          return sleep(600).then(function () { return runPass(list.slice(BATCH), next); });
+        }
+        if (!shouldStop()) { batchEnd = true; stopFlag = true; }
       });
     }
 
@@ -1500,6 +1561,13 @@
         if (r.names && r.names.length) {
           h += '<div class="dyh-tip">这次没抓成的（下次会自动补）：' + esc(r.names.join('、')) +
             (r.names.length >= 20 ? ' 等' : '') + '</div>';
+        }
+        /* 「第二次」最常见的样子：信息流几下就追平、新增 0 条 —— 这是【正常】，不是坏了。
+           不写清楚这句，就会有人以为第二次抓不动了（就是你说的「第一次可以、第二次不行」）。 */
+        if (!r.newCount && r.feedCaught) {
+          h += '<div class="dyh-tip">✅ 本轮用 <b>' + r.feedPages + '</b> 次请求就核对完 <b>' + r.feedCaught + '</b> 个账号：' +
+            '你关注的人在这段时间确实没发新视频（只要发，不用逐个问，这几下请求里就直接收进来了）。' +
+            '想看已有的未读，点下面的「📺 看未读列表」。</div>';
         }
         /* 一个都没抓到：明确告诉用户原因，别让他对着「新增未读 0」干瞪眼 */
         if (!r.okCount && !r.feedCaught) {

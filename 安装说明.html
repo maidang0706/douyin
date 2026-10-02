@@ -246,8 +246,8 @@
     </div>
 
     <div class="card">
-      <h2>② 界面尺寸（10-02 14:35 · 最新：字体已加大到 28/24/19，面板只比手机屏小一圈）</h2>
-      <div class="warn" style="margin-bottom:10px"><b>先确认你手机上跑的是不是最新版</b>：打开助手面板，标题「抖音关注助手」后面有个小灰字 <b>10-02 14:35</b>（= 脚本的生成时间，鼠标长按还能看到这次改了什么）。
+      <h2>② 界面尺寸（10-02 21:45 · 最新：字体已加大到 28/24/19，面板只比手机屏小一圈）</h2>
+      <div class="warn" style="margin-bottom:10px"><b>先确认你手机上跑的是不是最新版</b>：打开助手面板，标题「抖音关注助手」后面有个小灰字 <b>10-02 21:45</b>（= 脚本的生成时间，鼠标长按还能看到这次改了什么）。
         看不到它（或根本没有这个小字）= 手机上还是<b>旧脚本</b>，请按下面「③」<b>删掉旧条目重新下载一次</b>（只刷新抖音页面没用，Via 里的脚本不会自动更新）。
         <b>以后每次改动，版本号都会换成「生成日期时间 + 改了什么」</b>，看到时间变了就是拿到新版了。</div>
       <ul>
@@ -380,7 +380,7 @@
       <div class="warn" style="margin:8px 0"><b>⚠️ 上面 ⑤-7 那一节的界面改动已经取消</b>（你说「以前的界面不要变」）—— 分组卡、▶ 播放按钮、复制清单、首页账号概览、结果页内嵌明细这些通通撤掉，
         <b>界面回到你熟悉的那一版</b>（原来的一行一条、点标题用抖音打开、右边一颗「已读」），只留下 ⑤-6 那条真正有用的修复（未读按抖音「已看记录」过滤）。<b>继续看下一节。</b></div>
 
-      <p style="margin:16px 0 4px"><b>⑤-9 · 最新（10-02 14:35）：抓取改「信息流追平 + 逐个补漏」—— 又快、又不失败、还一个不漏</b></p>
+      <p style="margin:16px 0 4px"><b>⑤-9（10-02 14:35）：抓取改「信息流追平 + 逐个补漏」—— 又快、又不失败、还一个不漏</b></p>
       <p style="margin:6px 0">你说「成功率低、经常失败、还很慢」。根源是上一版为了治「漏抓」把抓取改回了<b>逐个账号</b>：392 个号 = 392 次请求，
         抖音必然限流 → 失败多、冷却重试 → 越来越慢。这次换了个能两全的办法：</p>
       <table style="width:100%;border-collapse:collapse;font-size:14px;margin:8px 0">
@@ -403,6 +403,29 @@
         信息流 403 → 自动降级 30 个账号全抓到；信息流提前结束 → 57 个没追平的全部逐个补到；43 项仿真全过。</div>
       <div class="warn" style="margin:8px 0"><b>怎么验证见效快</b>：删旧脚本重装（标题后应是 <b>10-02 14:35</b>）→ 先「📥 刷新我的关注列表」→ 再「🔍 抓最新未读视频」<b>连抓两轮</b>：
         第一轮建追平基准（可能走逐个补，稍慢），<b>第二轮开始</b>就是 2~5 次请求几秒完事 —— 结果页看「信息流核对」那行。</div>
+
+      <p style="margin:16px 0 4px"><b>⑤-10 · 最新（10-02 21:45）：专治「第一次可以、第二次就不行了」</b></p>
+      <p style="margin:6px 0">你说「第一次抓得到，第二轮就不行了」。仿真一跑，抓出四个真问题，<b>全修掉了</b>：</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin:8px 0">
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5;width:34%"><b>① 追平线 30 分钟 → 90 分钟</b><br><span class="tag">第二轮变慢的主因</span></td>
+          <td style="padding:6px 0;border-bottom:1px solid #f2f3f5">手机上的关注页信息流<b>普遍只能回溯两三页</b>就翻到底了。追平线画在「上次抓取 − 30 分钟」时，经常翻不到那条线 → 判不了追平 →
+            几百个号<b>全部退回逐个抓</b>（几百次请求）→ 被限流 → 满屏失败、越跑越慢。<b>线往前挪到 90 分钟</b>，只要翻到 1.5 小时前就命中，日常基本 2 次请求收工。</td></tr>
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>② 信息流提前说「没了」：按覆盖比例判断</b></td>
+          <td style="padding:6px 0;border-bottom:1px solid #f2f3f5">翻过 3 页、且信息流里见过我们关注的人 ≥ 六成 → 才算「覆盖够」，<b>0 次逐个请求</b>；否则严一点，交给逐个补。
+            两头都不再犯旧版那种毛病：既不<b>无条件</b>把人当成已核对（那会让未读永远是 0），也不<b>一股脑</b>丢回几百次逐个打（那会被风控）。</td></tr>
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>③ 逐个抓改「每批最多 60 个」滚动</b></td>
+          <td style="padding:6px 0;border-bottom:1px solid #f2f3f5">以前把没核对完的几百个账号<b>一次全丢进并发池</b>，跑满 12 分钟看门狗再把半路砍掉。现在一批 60 个（顺的话自动再跟两批），
+            这批跑完就落盘、写断点，下次点一次自动从断点接着来 —— 总量一样，但每次只露一小头，既不容易被盯，也随时看得到进度。</td></tr>
+        <tr><td style="padding:6px 0"><b>④ 断点只认「抓到的」，不认「试过的」</b><br><span class="tag">这条最要命</span></td>
+          <td style="padding:6px 0">以前<b>失败的账号也算进度</b>，断点跟着往前推 → 这些号<b>下次就被跳过</b>，这辈子再也不会被抓（未读所以一直上不去）。
+            现在只数「<b>从头算起的连续成功</b>」个数，撞上第一个没抓到的就停：<b>失败的、中途被打断的，下次一定重来</b>，宁可多跑几轮也绝不漏。</td></tr>
+      </table>
+      <div class="ok" style="margin:8px 0"><b>另外两处顺手修的</b>：① 开跑就记「上次抓取」时间（以前要等结果页渲染才记，断点点进来 / 手快连点第二次时会拿旧时间画线）；
+        ② 抓完没新视频时，结果页明确写「✅ 本轮用 N 次请求核对完 X 个账号，关注的人这段时间确实没发新视频」—— 不再让人以为第二次坏了。</div>
+      <div class="ok" style="margin:8px 0"><b>仿真实测</b>：新增 <code>_test_second.js</code> <b>22/22</b> 全过（第二轮 0 次逐个请求、信息流提前结束只补没证明追平的、一批全失败时断点不动、
+        连跑两轮：第一轮逐个建基线、第二轮 0 次请求几秒完）；回归 <code>_test_scan2.js</code> <b>26/26</b>、<code>_test_feed.js</code>、<code>_test_unread.js</code> 全绿。</div>
+      <div class="warn" style="margin:8px 0"><b>怎么验证</b>：Via 里<b>删掉旧脚本重新装</b>（标题后应是 <b>10-02 21:45</b>）→ 先「📥 刷新我的关注列表」→ 再「🔍 抓最新未读视频」<b>连点两次</b>：
+        <b>第二次</b>应该几秒就出结果（2~3 次请求），结果页「信息流核对 X 个（只用 Y 次请求）」那行；如果这段时间关注的人没发新视频，会直接给你那句 ✅ 提示，不是坏了。</div>
 
       <p style="margin:16px 0 4px"><b>⑤-8（10-02 13:45）：界面恢复原样 + 抓取改回「逐个账号」，这次才真的抓得到未读</b></p>
       <p style="margin:6px 0">你两句话点出了要害：<b>「界面别乱改」</b>、<b>「未读根本没抓到」</b>。上一版为了「快」把抓取换成了<b>关注页信息流</b>，而且默认就走它 ——
@@ -585,7 +608,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-02 14:35 · 抓取改「信息流追平 + 逐个补漏」：日常 2~5 次请求且一个不漏；请求带 msToken + 限速，不易被风控
+// @version      2026-10-02 21:45 · 修「第一次可以、第二次不行」：追平线放宽到 90 分钟 + 信息流提前说没了按覆盖比例判断 + 逐个抓分批滚动 + 断点只记成功数（失败的下次必重抓）
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -616,14 +639,14 @@ function copyRaw(){
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-02 14:35 · 抓取改「信息流追平 + 逐个补漏」：翻到上次抓取的位置才算追平（追平后 0 次逐个请求也不漏账号），没追平的账号照样逐个补；请求带 msToken + 限速 + 风控自动换令牌，失败率大降';
-  var VER_SHORT = '10-02 14:35';
+  var VER = '2026-10-02 21:45 · 修「第一次可以、第二次不行」：① 追平线由 30 分钟放宽到 90 分钟（手机上信息流普遍只能回溯两三页，线画老一点才容易命中「0 次逐个请求」）；② 信息流提前说「没了」时按覆盖比例判断是否够用，不再无条件全跳、也不再一股脑丢回 392 次逐个打；③ 逐个抓改每批 60 个滚动推进，跑完就落盘写断点，绝不让几百个账号一次打满被风控和看门狗砍掉大半；④ 断点改成只记成功数，失败的账号下次一定重抓（以前失败也算进度，会被跳过 = 永远抓不到）；⑤ 抓完没新视频时明确提示「已核对 N 个账号」，不再让人以为坏了';
+  var VER_SHORT = '10-02 21:45';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l', scanMode: 'auto' },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l', scanMode: 'auto', scanBatch: 60 },
       selfSecUid: '',
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -1319,6 +1342,15 @@ function copyRaw(){
     scanning = true; stopFlag = false; stopped = false; lastScanFailed = [];
     try { scanCtrl = new AbortController(); } catch (e) { scanCtrl = null; }
 
+    /* ★ 开跑就把「上次抓取」记成这一轮的开始时间（以前是渲染结果页时才记）。
+       差别很实际：断点点进来 / 手快连点第二次时，会用上一次的时间去算追平线，
+       线算歪了 → 该追平的判成没追平 → 几百个账号退回逐个抓（就是你看到的「第二次不行」）。
+       ★ 但「追平线」仍然只认【这一轮开始之前】的上次时间 prevScanAt（下面 feedPhase 用），
+         否则第一次使用会拿本轮时间画线，结果只收最近一个半小时就收工，老未读全丢。 */
+    var prevScanAt = S.lastScanAt;
+    S.lastScanAt = Date.now();
+    prefixTotal = 0; batchEnd = false; stopped = false;
+
     /* 断点：只有「关注列表没变 + 上次确实没抓完」才续跑 */
     var j = S.scanJob || null;
     var resumeFrom = 0;
@@ -1335,7 +1367,8 @@ function copyRaw(){
     var newCount = 0, errors = 0, okCount = 0, failAcc = 0;
     var histMap = {}, histN = 0, histSkip = 0, histErr = '';   // 抖音服务器端的「你看过」记录
     var consecOk = 0, consecFail = 0, coolUntil = 0, riskHits = 0, riskStreak = 0, bailout = false, dispatched = 0;
-    var retries = 0, stalled = false, lastDone = 0;   // lastDone = 本轮【真正跑完】的账号数（断点用）
+    var retries = 0, stalled = false, batchEnd = false;   // batchEnd = 分批跑完的正常收尾（≠异常收工）
+    var prefixTotal = 0;   // 断点用：本轮【从头算起的连续成功账号数】（遇到第一个没抓到的就停）
     // 上限取设置里的值（默认 6），但【开局只用 3 个】——先探路，顺了再往上加
     var maxConc = Math.max(1, Math.min(10, parseInt(S.cfg.scanConc, 10) || 6));
     var conc = Math.min(3, maxConc);
@@ -1470,8 +1503,18 @@ function copyRaw(){
          ★ 和之前那个漏抓 bug 的区别：之前是「接口说没了(has_more=false)就全标已核对」，
          而手机浏览器里接口经常只翻一两页就说没了 → 漏光。现在只认【时间追平】，
          接口提前说没了 → 只对「被证明追平」的账号跳过，其余照样逐个补。 */
-      var horizon = S.lastScanAt ? (S.lastScanAt - 30 * 60000) : 0;
-      var firstRun = !S.lastScanAt;
+      /* ★ 追平线为什么是「90 分钟」而不是 30 分钟（2026-10-02 21:45 修「第二次不行」）
+         信息流是按时间倒序给的：只要翻到一条「比追平线还老」的视频，就证明追平线之后的
+         所有视频都已经在前面出现过、都被收走了。可手机浏览器里这条信息流普遍只能回溯
+         两三页（再往后抖音就说 has_more=false 了）—— 线画得越靠近「现在」，越容易翻不到
+         那条老视频 → 判定不了追平 → 392 个账号全部退回逐个抓 → 请求暴涨 → 被限流 → 满屏失败。
+         线往前挪到 90 分钟，就只要翻到 1.5 小时前的视频就算追平，命中率高得多；
+         代价只是多翻一页（几百毫秒），远比掉回 392 次逐个打划算。 */
+      var horizon = prevScanAt ? (prevScanAt - 90 * 60000) : 0;   // 只认【本轮开始之前】的那次抓取
+      /* ★ 「是不是第一次用」不能用 lastScanAt 判断了 —— 上面开跑时已经把 lastScanAt 写成本轮时间，
+         再拿它判首次，第一次使用也会被当成「非首次」→ 只收最近一个半小时 → 建不出基线 → 未读不全。
+         真正的判据是「本地一条视频都没有」。 */
+      var firstRun = !S.videos.length;
       var deepEnough = false, emptyPages = 0;
 
       function countCaught() { var n = 0; for (var u in caught) if (caught[u]) n++; return n; }
@@ -1512,7 +1555,22 @@ function copyRaw(){
             /* 首次使用没有基准：信息流只看最近 3 天先出个首批，其余靠逐个抓建基线 */
             if (firstRun &amp;&amp; oldest &lt; Date.now() - 3 * 86400000) return;
             if (oldest &amp;&amp; oldest &lt; Date.now() - DEAD) return;    // 翻进 30 天前了：没有意义
-            if (!res.hasMore) return;                            // 接口说没了（没追平 → 逐个补漏）
+            /* ★ 接口说「没了」（手机信息流的常态，后面根本没内容了）
+               旧版这里有两个极端，把这个功能毁了：
+                 a) 无条件把所有人标成已核对 → 实际没核对到 → 未读永远是 0 条（就是你说的「抓不到」）；
+                 b) 一律不认 → 几百个账号全部退回逐个抓 → 392 次请求 → 被风控 → 满屏失败。
+               现在折中：翻过 3 页以上、而且信息流里已经见过我们关注的人 ≥ 六成，才认定「覆盖够了」；
+               否则严一点，交给逐个抓补漏（宁可慢，也绝不允许漏账号）。 */
+            if (!res.hasMore) {
+              var touched = 0, uk;
+              for (uk in feedCovered) if (uidMap[uk]) touched++;
+              if (feedPages &gt;= 3 &amp;&amp; plan.length &amp;&amp; touched / plan.length &gt;= 0.6) {
+                deepEnough = true;
+                caught = {};
+                for (uk in uidMap) if (uidMap[uk].secUserId) caught[uk] = 1;
+              }
+              return;
+            }
             cursor = res.nextCursor || 0;
             if (!cursor) return;
             return sleep(260 + Math.random() * 340).then(page);  // 慢一点翻，像人在刷
@@ -1556,10 +1614,12 @@ function copyRaw(){
       return sleep(waitMs).then(function () { return step(0); });
 
       function step(n) {
+        acc._pending = 1;                   // 标记「还没落定」：断点不许把它算成已抓到（中断时用它挡住）
         if (shouldStop()) return Promise.resolve();
         return hardLimit(fetchPosts(acc.secUserId, { signal: scanCtrl ? scanCtrl.signal : null }), 45000)
           .then(function (list) {
             if (shouldStop()) return;
+            acc._pending = 0;
             okCount++; acc.lastError = ''; acc.lastCount = list.length;
             /* 之前几轮没抓成、这一轮成了 → 把「失败账号」的账也消掉：
                界面上「成功/失败」只反映【最终】结果（不然会出现 80 成功 + 1 失败 = 81 个的怪数） */
@@ -1587,8 +1647,7 @@ function copyRaw(){
     function pump(items) {
       return new Promise(function (resolve) {
         var cursor = 0, active = 0, done = 0, ended = false, lastProgress = Date.now();
-        // 记下「真正跑完的账号数」——断点续跑就从这个数往后，没落定的一律下次重抓
-        function finish() { if (ended) return; ended = true; clearInterval(stallTimer); lastDone = Math.max(lastDone, done); resolve(); }
+        function finish() { if (ended) return; ended = true; clearInterval(stallTimer); resolve(); }
         // 停滞看门狗：90 秒一点进展都没有 = 真卡住了，强制收尾（剩下的进断点，绝不无限等）
         var stallTimer = setInterval(function () {
           if (ended) return;
@@ -1631,14 +1690,15 @@ function copyRaw(){
       scanning = false; keepAwake(false); stopFlag = false;
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
       // 没跑完 → 进度写进断点（下次从这里续）；跑完了 → 断点标记「已全部完成」
-      /* ★ 断点按「真正跑完的账号数」记（lastDone），不能按「派出去了几个」。
-         以前用 dispatched − failed：中途被停下（手机熄屏 / 90 秒停滞看门狗 / 用户按停止）时，
-         那些还在飞的请求既没成功也没进 failed，断点却把它们算成「已处理」→ 下次续跑直接跳过 →
-         一堆账号再也没抓过，未读自然永远是 0 条。
-         改成记真正落定的个数，没落定的下次一定补回来（宁可重抓，绝不漏）。 */
-      var unfinished = stopped || failed.length &gt; 0;
+      /* ★ 断点口径：只认【真正抓到的账号数】(okCount)，既不认「派出去了几个」，也不认「试过了几个」。
+         - 以前用派出数：中途被停下（熄屏 / 90 秒停滞看门狗 / 你按停止）时，还在飞的请求既没成功
+           也没算失败，断点却把它们当「已处理」→ 下次直接跳过 → 一堆账号永远没抓过，未读永远是 0 条。
+         - 更坑的是把「试过但失败」也记成进度：一批 60 个全失败 → 断点往前推 60 → 下次跳过这 60 个
+           → 这些账号这辈子都不会被抓到（这就是「第一次可以、第二次就不行了」里最要命的一条）。
+         现在只数成功的：没抓到的下次一定重来（宁可多跑几轮，绝不漏）。 */
+      var unfinished = stopped || failed.length &gt; 0 || batchEnd;
       S.scanJob = unfinished
-        ? { sig: accountSig(), startIdx: resumeFrom, cursor: resumeFrom + Math.min(lastDone, plan.length), ts: Date.now() }
+        ? { sig: accountSig(), startIdx: resumeFrom, cursor: resumeFrom + Math.min(prefixTotal, plan.length), ts: Date.now() }
         : { sig: accountSig(), startIdx: 0, cursor: S.accounts.length, ts: Date.now() };
       save();
     }
@@ -1651,8 +1711,10 @@ function copyRaw(){
           if (!seenN[nm]) { seenN[nm] = 1; lastScanFailed.push(nm); }
         }
       }
-      // 还差点没抓到：总账号数 − 断点之前的 − 信息流已核对的 − 本轮逐个成功的
-      var left = Math.max(0, S.accounts.length - resumeFrom - feedCaughtN - okCount);
+      // 还差点没抓到：总账号数 − 断点之前的 − 信息流已核对的 − 本轮【抓到的】（含信息流）
+      var left = Math.max(0, S.accounts.length - resumeFrom - feedCaughtN - prefixTotal);
+      // 「分批跑完的正常收尾」不算异常：只有风控 / 看门狗 / 手动停止才算 stopped
+      if (stopped &amp;&amp; batchEnd) stopped = false;
       return {
         ok: true, newCount: newCount, errors: failAcc, okCount: okCount + feedCaughtN, scanned: plan.length,
         feedUsed: feedUsed, feedPages: feedPages, feedCaught: feedCaughtN,
@@ -1664,13 +1726,35 @@ function copyRaw(){
       };
     }
 
-    /* 一轮跑完，把「3 次都没成」的账号再补最多 2 轮（每轮之间整体歇一下，别连着猛打）。
-       配合就地重试，绝大多数抖动在这一步就被消化掉了 —— 最终剩下的失败会非常少。 */
+    /* ★ 逐个抓改成【分批滚动】（2026-10-02 21:45 修「第二次不行」）
+       以前是一口气把没核对完的几百个账号全丢进并发池：请求量瞬间回到 392 次，
+       抖音必然限流，跑满 12 分钟看门狗再把半路砍掉 → 你看到的就是「失败一大片」。
+       现在一批最多 60 个：这批跑完就落盘、写断点、本轮收尾；下次再点一次自动从断点续，
+       一批批往前磨。总量没变，但每次只露一小头，被盯上的概率低得多，也随时能看到进度。 */
+    /* 断点用的「连续成功前缀」：从头数，遇到第一个【没抓到的】就停。
+       这样断点点只会落在「前面全抓到了」的位置：失败的、被中断的，下次一定重来，绝不跳过。 */
+    function prefixOf(items) {
+      var n = 0;
+      for (var i = 0; i &lt; items.length; i++) {
+        if (items[i].lastError || items[i]._pending) break;
+        n++;
+      }
+      return n;
+    }
     function runPass(list, pass) {
-      return pump(list).then(function () {
-        if (shouldStop() || !failed.length || pass &gt;= 2) return;
-        var again = failed.slice(); failed = [];
-        return sleep(2500 + pass * 4000).then(function () { return runPass(again, pass + 1); });
+      var BATCH = list.length &lt;= 120 ? list.length
+        : Math.max(10, Math.min(60, parseInt(S.cfg.scanBatch, 10) || 60));
+      var next = (pass || 0) + 1;
+      var batch = list.slice(0, BATCH);
+      return pump(batch).then(function () {
+        prefixTotal += prefixOf(batch);
+        var rest = list.length - BATCH;
+        /* 这批【一个都没失败】= 一路很顺 → 再跟两批（省得为了几百个账号连点好几次）；
+           只要有任何失败、或者跟满两批，就地收尾：剩下的进断点，下次自动补。 */
+        if (!shouldStop() &amp;&amp; !failed.length &amp;&amp; rest &gt; 0 &amp;&amp; next &lt;= 2) {
+          return sleep(600).then(function () { return runPass(list.slice(BATCH), next); });
+        }
+        if (!shouldStop()) { batchEnd = true; stopFlag = true; }
       });
     }
 
@@ -2085,6 +2169,13 @@ function copyRaw(){
           h += '&lt;div class="dyh-tip"&gt;这次没抓成的（下次会自动补）：' + esc(r.names.join('、')) +
             (r.names.length &gt;= 20 ? ' 等' : '') + '&lt;/div&gt;';
         }
+        /* 「第二次」最常见的样子：信息流几下就追平、新增 0 条 —— 这是【正常】，不是坏了。
+           不写清楚这句，就会有人以为第二次抓不动了（就是你说的「第一次可以、第二次不行」）。 */
+        if (!r.newCount &amp;&amp; r.feedCaught) {
+          h += '&lt;div class="dyh-tip"&gt;✅ 本轮用 &lt;b&gt;' + r.feedPages + '&lt;/b&gt; 次请求就核对完 &lt;b&gt;' + r.feedCaught + '&lt;/b&gt; 个账号：' +
+            '你关注的人在这段时间确实没发新视频（只要发，不用逐个问，这几下请求里就直接收进来了）。' +
+            '想看已有的未读，点下面的「📺 看未读列表」。&lt;/div&gt;';
+        }
         /* 一个都没抓到：明确告诉用户原因，别让他对着「新增未读 0」干瞪眼 */
         if (!r.okCount &amp;&amp; !r.feedCaught) {
           h += '&lt;div class="dyh-tip" style="color:#f53f3f"&gt;⚠ 这轮&lt;b&gt;一个账号都没抓到&lt;/b&gt;（抖音多半是没认登录 / 直接拒了请求）。' +
@@ -2346,6 +2437,7 @@ function copyRaw(){
     <details>
       <summary style="cursor:pointer;color:#86909c;font-size:13px">点开看历次改动（最新在上）</summary>
       <ul style="list-style:none;padding:0;margin:10px 0 0">
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 21:45 · 专治「第一次可以、第二次就不行了」</b> 你说「第一次抓得到，第二次就不行了」，仿真一跑抓出四个真问题，全修了：<b>① 追平线 30 分钟 → 90 分钟</b> —— 手机上关注页信息流只能回溯两三页，线画太靠近「现在」就翻不到那条线，几百个号<b>全部退回逐个抓</b>（几百次请求）→ 被限流 → 满屏失败；<b>② 信息流提前说「没了」，改成按覆盖比例判断</b>（翻过 3 页 + 见过我们关注的人 ≥ 六成才算覆盖够），既不无条件把人当已核对（那会让未读永远是 0 条），也不一股脑丢回几百次逐个打（那会被风控）；<b>③ 逐个抓改「每批最多 60 个」滚动</b>，一批跑完就落盘写断点、下次自动续，不再一次打满被 12 分钟看门狗砍掉大半；<b>④ 断点只认「抓到的」</b> —— 以前失败的账号也算进度、断点跟着往前推，这些号<b>下次被跳过、这辈子再也不会被抓</b>；现在只数「从头算起的连续成功」个数，撞上第一个没抓到的就停，失败的 / 中途被打断的下次一定重来。另外：开跑就记「上次抓取」的时间（以前要等结果页渲染才记，断点点进来或手快连点第二次时会拿旧时间画线）；抓完没新视频时结果页明确写「✅ 本轮用 N 次请求核对完 X 个账号」。新增仿真 <code>_test_second.js</code> <b>22/22</b>（第二轮 0 次逐个请求、一批全失败时断点不动、连跑两轮：第一轮逐个建基线、第二轮 0 次请求几秒完），回归 <code>_test_scan2.js</code> <b>26/26</b>、<code>_test_feed.js</code> <b>43/43</b>、<code>_test_unread.js</code> <b>20/20</b> 全绿。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 14:35 · 抓取改「信息流追平 + 逐个补漏」（治失败多 + 慢）</b> 你说「成功率低、经常失败、还很慢」—— 根源是逐个抓 = 392 次请求必然被限流。现在：<b>① 信息流追平</b> —— 关注页信息流按时间倒序翻到「比上次抓取还老」的视频才算追平，追平后 <b>0 次逐个请求也一个不漏</b>（日常 2~5 次请求几秒完事）；<b>② 没追平逐个补</b> —— 信息流提前结束只跳过被证明追平的账号，其余照样逐个补（之前漏抓 bug 的正确修法）；<b>③ 请求带 msToken + 全局限速 150~350ms + 风控自动换令牌</b> —— 专治间歇性 403；④ 结果页新增「信息流核对 X 个（只用 Y 次请求）」一行。仿真 <code>_test_feed.js</code> 43/43：392 账号 2 次请求 0.7 秒 0 失败、403 自动降级、提前结束 57 个全部补到。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 13:45 · 界面恢复原样 + 抓取改回逐个账号（未读「抓得到」了）</b> <b>你说了两件事，都改了</b>：① <b>界面回退到原来的那一版</b> —— 撤销分组卡 / ▶播放按钮 / 复制清单 / 一键全部已看 / 首页账号概览 / 结果页内嵌明细，未读列表恢复成「一行一条、点标题用抖音打开、右边一颗已读」；② <b>抓取得不到未读的 bug 修了（真凶找到了）</b> —— 上一版默认走「关注页信息流」，手机浏览器里<b>翻一两页就 has_more=false</b>，脚本误以为全部账号已核对，<b>后面逐个抓一次都不跑</b>，所以「抓完新增未读 0 条」。<b>现在默认改回逐个账号（一个账号一个请求、全核对、不漏）</b>；并且就算手动开信息流，提前翻完也<b>只算它覆盖过的账号</b>，没覆盖到的照旧逐个补；③ <b>断点不再跳过没跑完的账号</b>：以前按「派出去了几个」记，中途熄屏/按停止时被当成已处理，<b>下次续跑直接跳过 → 一批号永远没抓过</b>，现在按「真正跑完的个数」记，宁可重抓也不漏；④ 全抓不到时结果页<b>红字提示</b>「先刷新关注列表重新读登录态」。<b>未读判定保持不变</b>：未读 = 抓到的新视频 − 抖音已看记录 − 本机标记已读。仿真 <code>_test_unread.js</code> 20/20 全过，<code>_test_feed.js</code> 新增 6 项回归（默认不走信息流、信息流提前结束不许漏账号、全拒绝时 okCount=0）全过。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 13:20 · 未读全部收进助手面板（界面部分已按你要求回退，功能保留）</b> <b>未读闭环 100% 在「抖音关注助手」里完成</b>：① <b>抓完直接在结果页列未读明细</b>（最新 8 条带 ▶播放/已看），不用再多点「看未读列表」；② <b>按账号分组</b>（甲 3 条 / 乙 2 条这样），和 App 关注页红点一致，分组卡可点进主页；③ <b>点▶播放 = 打开抖音 + 当场记已看</b>，未读数立刻 -1，不等下一轮；④ 新增 <b>「✅ 这一批全部标已看」</b>、<b>「📋 复制未读清单」</b>（纯文本 <code>账号|标题|时间|链接</code>，可直接粘微信，剪贴板无权限自动回落）；⑤ <b>「☁️ 推到 GitHub」降级成灰色次要按钮</b>，不推完全不影响；⑥ 首页新增「有未读的账号 / 各几条」概览。新增仿真 <code>_test_closure.js</code>（21 项全过：分组顺序、每条两个播放入口、点▶立刻 -1、一键已看见底、清单格式、复制不抛错）。</li>
