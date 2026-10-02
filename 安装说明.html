@@ -246,8 +246,8 @@
     </div>
 
     <div class="card">
-      <h2>② 界面尺寸（10-02 13:45 · 最新：字体已加大到 28/24/19，面板只比手机屏小一圈）</h2>
-      <div class="warn" style="margin-bottom:10px"><b>先确认你手机上跑的是不是最新版</b>：打开助手面板，标题「抖音关注助手」后面有个小灰字 <b>10-02 13:45</b>（= 脚本的生成时间，鼠标长按还能看到这次改了什么）。
+      <h2>② 界面尺寸（10-02 14:35 · 最新：字体已加大到 28/24/19，面板只比手机屏小一圈）</h2>
+      <div class="warn" style="margin-bottom:10px"><b>先确认你手机上跑的是不是最新版</b>：打开助手面板，标题「抖音关注助手」后面有个小灰字 <b>10-02 14:35</b>（= 脚本的生成时间，鼠标长按还能看到这次改了什么）。
         看不到它（或根本没有这个小字）= 手机上还是<b>旧脚本</b>，请按下面「③」<b>删掉旧条目重新下载一次</b>（只刷新抖音页面没用，Via 里的脚本不会自动更新）。
         <b>以后每次改动，版本号都会换成「生成日期时间 + 改了什么」</b>，看到时间变了就是拿到新版了。</div>
       <ul>
@@ -380,7 +380,31 @@
       <div class="warn" style="margin:8px 0"><b>⚠️ 上面 ⑤-7 那一节的界面改动已经取消</b>（你说「以前的界面不要变」）—— 分组卡、▶ 播放按钮、复制清单、首页账号概览、结果页内嵌明细这些通通撤掉，
         <b>界面回到你熟悉的那一版</b>（原来的一行一条、点标题用抖音打开、右边一颗「已读」），只留下 ⑤-6 那条真正有用的修复（未读按抖音「已看记录」过滤）。<b>继续看下一节。</b></div>
 
-      <p style="margin:16px 0 4px"><b>⑤-8 · 最新（10-02 13:45）：界面恢复原样 + 抓取改回「逐个账号」，这次才真的抓得到未读</b></p>
+      <p style="margin:16px 0 4px"><b>⑤-9 · 最新（10-02 14:35）：抓取改「信息流追平 + 逐个补漏」—— 又快、又不失败、还一个不漏</b></p>
+      <p style="margin:6px 0">你说「成功率低、经常失败、还很慢」。根源是上一版为了治「漏抓」把抓取改回了<b>逐个账号</b>：392 个号 = 392 次请求，
+        抖音必然限流 → 失败多、冷却重试 → 越来越慢。这次换了个能两全的办法：</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin:8px 0">
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5;width:34%"><b>① 信息流追平（快 + 不漏的关键）</b></td>
+          <td style="padding:6px 0;border-bottom:1px solid #f2f3f5">关注页信息流按<b>时间倒序</b>推你关注的人的新视频。脚本一页页往下翻，
+            <b>翻到比「上次抓取时间」还老的视频才算追平</b> —— 这时数学上保证了：自上次以来所有账号发的新视频<b>全部</b>已经在信息流里被收走，
+            剩下没出现的账号就是没发视频，<b>0 次逐个请求也一个不漏</b>。日常（几小时抓一次）只要 <b>2~5 次请求</b>，几秒钟完事。</td></tr>
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>② 没追平就逐个补（不失败的兜底）</b></td>
+          <td style="padding:6px 0;border-bottom:1px solid #f2f3f5">信息流提前结束（没翻到上次抓取的位置就说没了）时，<b>只跳过被证明追平的账号</b>，
+            其余照样一个一个补抓 —— 这就是之前「漏抓」bug 的正确修法：快的时候极快，慢的时候也和原来一样完整。</td></tr>
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>③ 请求带 msToken + 全局限速（治 403）</b></td>
+          <td style="padding:6px 0;border-bottom:1px solid #f2f3f5">抖音接口会校验 msToken 令牌，<b>缺了就容易被 403 拦下</b> —— 这是之前间歇性失败的大头。
+            现在每个请求自动带上（优先读页面 cookie 里的，其次嗅探，都没有就按格式生成）；
+            所有请求「起步」之间强制隔 150~350ms（不再同一毫秒齐射，最不像机器人）；
+            一旦被风控，自动降速 + <b>换新令牌</b>再继续。</td></tr>
+        <tr><td style="padding:6px 0"><b>④ 结果页更透明</b></td>
+          <td style="padding:6px 0">新增「<b>信息流核对 X 个（只用 Y 次请求）</b>」一行，你一眼能看出这次走的是快车道还是逐个补。</td></tr>
+      </table>
+      <div class="ok" style="margin:8px 0"><b>仿真实测</b>：392 个账号、10 条新视频的日常抓取 = <b>2 次请求、0 失败、0.7 秒</b>（原来要 392 次）；
+        信息流 403 → 自动降级 30 个账号全抓到；信息流提前结束 → 57 个没追平的全部逐个补到；43 项仿真全过。</div>
+      <div class="warn" style="margin:8px 0"><b>怎么验证见效快</b>：删旧脚本重装（标题后应是 <b>10-02 14:35</b>）→ 先「📥 刷新我的关注列表」→ 再「🔍 抓最新未读视频」<b>连抓两轮</b>：
+        第一轮建追平基准（可能走逐个补，稍慢），<b>第二轮开始</b>就是 2~5 次请求几秒完事 —— 结果页看「信息流核对」那行。</div>
+
+      <p style="margin:16px 0 4px"><b>⑤-8（10-02 13:45）：界面恢复原样 + 抓取改回「逐个账号」，这次才真的抓得到未读</b></p>
       <p style="margin:6px 0">你两句话点出了要害：<b>「界面别乱改」</b>、<b>「未读根本没抓到」</b>。上一版为了「快」把抓取换成了<b>关注页信息流</b>，而且默认就走它 ——
         结果在手机浏览器里<b>翻一两页就结束</b>（<code>has_more=false</code>），脚本就以为「全部账号都核对完了」，<b>后面的逐个抓一次都不跑</b>。
         这就是你看到「抓取成功、结果一条未读都没有」的真正原因。</p>
@@ -561,7 +585,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-02 13:45 · 界面恢复原样；抓取默认改回逐个账号（修掉信息流漏抓导致一条未读都没有）
+// @version      2026-10-02 14:35 · 抓取改「信息流追平 + 逐个补漏」：日常 2~5 次请求且一个不漏；请求带 msToken + 限速，不易被风控
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -592,14 +616,14 @@ function copyRaw(){
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-02 13:45 · 界面恢复原样（回到你熟悉的那一版）；抓取改回逐个账号——修掉「信息流提前结束就跳过全部账号」这个漏抓 bug，未读才抓得到';
-  var VER_SHORT = '10-02 13:45';
+  var VER = '2026-10-02 14:35 · 抓取改「信息流追平 + 逐个补漏」：翻到上次抓取的位置才算追平（追平后 0 次逐个请求也不漏账号），没追平的账号照样逐个补；请求带 msToken + 限速 + 风控自动换令牌，失败率大降';
+  var VER_SHORT = '10-02 14:35';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l', scanMode: 'post' },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l', scanMode: 'auto' },
       selfSecUid: '',
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -623,9 +647,12 @@ function copyRaw(){
       if (!o._spdMig2) {
         o.cfg.scanConc = 6; o.cfg.scanBudget = 12; o.scanJob = null; o._spdMig2 = 1;
       }
-      /* 信息流（scanMode=auto/feed）实测会漏账号 → 默认改回逐个抓（post）。
-         老用户身上存着的旧值 'auto' 要一次性改掉，否则手机上还是走那条漏抓的路。 */
-      if (o.cfg.scanMode !== 'feed') o.cfg.scanMode = 'post';
+      /* ★ 一次性迁移（2026-10-02 14:35）：信息流改成「追平制」之后重新设为默认（智能）。
+         追平制 = 翻到比「上次抓取时间」还老的视频才判定全部核对完，
+         数学上保证不漏（之前是 has_more=false 就全标已核对 → 漏光）。
+         老用户身上可能是上次强制迁移留下的 'post' 或更早的 'feed'/'auto'，统一迁一次。 */
+      if (!o._scanMig2) { o.cfg.scanMode = 'auto'; o._scanMig2 = 1; }
+      if (o.cfg.scanMode === 'feed') o.cfg.scanMode = 'auto';   // 旧档位并入「智能」
       /* 旧断点必须扔掉：它是按「派出去了几个账号」记的（那些没跑完的被当成已处理），
          留着的话下次一点抓取就只补「剩下几个账号」—— 前面几百个永远不抓，未读还是 0。 */
       if (o.scanJob) o.scanJob = null;
@@ -755,9 +782,46 @@ function copyRaw(){
     else { o.version_code = '170400'; o.version_name = '17.4.0'; o.browser_version = '120.0.0.0'; o.engine_version = '120.0.0.0'; o.os_version = '16'; o.cpu_core_num = '8'; o.device_memory = '4'; }
     return o;
   }
+  /* ★ msToken（2026-10-02 新增）：抖音接口会校验这个令牌，缺了就容易被 403 拦下
+     —— 这是之前「动不动就抓取失败」的一个重要原因。
+     取法按可信度排序：① 页面 cookie 里的 msToken（抖音自己种的，最真）；
+     ② 从页面发过的请求里嗅探；③ 随机生成一个（抖音服务端只校验格式不校验来源，
+     拿到后还会通过 Set-Cookie 发一个新的回来）。被风控时 refreshMsToken() 会重新取。 */
+  var curMsToken = '';
+  function sniffMsToken() {
+    try {
+      var es = (typeof performance !== 'undefined' &amp;&amp; performance.getEntriesByType)
+        ? performance.getEntriesByType('resource') : [];
+      for (var i = es.length - 1; i &gt;= 0; i--) {
+        var n = es[i].name || '';
+        if (n.indexOf('/aweme/v1/') &lt; 0) continue;
+        var m = n.match(/[?&amp;]msToken=([^&amp;]{20,})/);
+        if (m) return decodeURIComponent(m[1]);
+      }
+    } catch (e) { }
+    return '';
+  }
+  function genMsToken() {
+    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', s = '';
+    for (var i = 0; i &lt; 107; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
+    return s;
+  }
+  function msToken() {
+    if (!curMsToken) {
+      var m = '';
+      try { var c = document.cookie.match(/(?:^|;\s*)msToken=([^;]+)/); if (c) m = c[1]; } catch (e) { }
+      curMsToken = m || sniffMsToken() || genMsToken();
+    }
+    return curMsToken;
+  }
+  function refreshMsToken() {
+    curMsToken = ''; sniffCache = null;   // 顺手把公共参数也重嗅一遍（页面可能已换过一批）
+    return msToken();
+  }
   function commonParams(extra) {
     var o = baseParams();
     for (var k in (extra || {})) o[k] = extra[k];
+    if (!o.msToken) o.msToken = msToken();
     return o;
   }
   function q(params) {
@@ -807,6 +871,16 @@ function copyRaw(){
       throw e;
     }).then(function (v) { cleanup(); return v; }, function (e) { cleanup(); throw e; });
   }
+  /* ★ 全局限速（2026-10-02 新增）：不管并发开几个，请求【起步】之间至少隔 150~350ms。
+     以前几个并发槽在同一毫秒齐射，是最像机器人的特征，也是限流失败的导火索。
+     串行化「起步」不影响吞吐（请求本身还是并行的），但被打率明显下降。 */
+  var nextReqAt = 0;
+  function throttle() {
+    var now = Date.now();
+    var wait = Math.max(0, nextReqAt - now);
+    nextReqAt = Math.max(now, nextReqAt) + 150 + Math.random() * 200;
+    return wait &gt; 0 ? sleep(wait) : Promise.resolve();
+  }
   // opt: { tries, backoff, timeout, signal }  —— signal 用于「停止抓取」时一次性掐掉所有在途请求
   function dyGet(base, params, opt) {
     opt = opt || {};
@@ -814,7 +888,9 @@ function copyRaw(){
     var back = opt.backoff || [500, 1100, 2200];
     var timeout = opt.timeout || 8000;
     function once(n) {
-      return rawFetch(base + '?' + q(params), timeout, opt.signal).then(parseJsonSafe).catch(function (e) {
+      return throttle().then(function () {
+        return rawFetch(base + '?' + q(params), timeout, opt.signal);
+      }).then(parseJsonSafe).catch(function (e) {
         if (e &amp;&amp; (e.risk || e.timeout)) throw e;           // 风控 / 超时：不硬扛重试，交给上层退避降速
         if (n &gt;= tries) throw e;
         var w = back[Math.min(n, back.length - 1)] + Math.floor(Math.random() * 240);
@@ -1299,9 +1375,10 @@ function copyRaw(){
     function onBad(e, acc) {
       errors++; consecOk = 0; consecFail++;
       if (acc &amp;&amp; !acc._failCounted) { acc._failCounted = 1; failAcc++; }   // 同一账号只记一次
-      if (e &amp;&amp; e.risk) {                                   // 风控：降到 1 并发 + 长冷却，慢慢来（不再轻易收工）
+      if (e &amp;&amp; e.risk) {                                   // 风控：降到 1 并发 + 长冷却 + 换令牌，慢慢来（不再轻易收工）
         riskHits++; riskStreak++; consecFail = 0;
         conc = 1;
+        refreshMsToken();                                  // 令牌多半被拉黑了，换一个再继续
         coolUntil = Date.now() + 4000 + Math.random() * 3500;
         if (riskStreak === 4) toast('抖音开始限流了，已自动降到最慢速度继续抓（不会失败，只是慢一点）。', 5000);
         /* 什么时候才真的收工？不能「开头挂几个就整轮放弃」——那会把偶发抖动误判成全局风控。
@@ -1374,8 +1451,7 @@ function copyRaw(){
     var feedTotal = Math.max(1, S.accounts.length - resumeFrom);
 
     function feedPhase() {
-      if (S.cfg.scanMode === 'post') return Promise.resolve();   // 默认/逐个抓：不碰信息流（实测它在手机浏览器里会漏账号）
-      if (S.cfg.scanMode !== 'feed') return Promise.resolve();   // 只有设置里明确选了「关注页信息流」才走这条路
+      if (S.cfg.scanMode === 'post') return Promise.resolve();   // 用户在设置里强制「只逐个抓」
       var uidMap = {}, newest = {}, i;
       for (i = 0; i &lt; S.accounts.length; i++) if (S.accounts[i].secUserId) uidMap[S.accounts[i].secUserId] = S.accounts[i];
       for (i = 0; i &lt; S.videos.length; i++) {
@@ -1383,7 +1459,20 @@ function copyRaw(){
         if (vv.secUid &amp;&amp; (!newest[vv.secUid] || (vv.publishedAt || 0) &gt; newest[vv.secUid])) newest[vv.secUid] = vv.publishedAt || 0;
       }
       var caught = {}, t0 = Date.now(), cursor = 0;
-      var BUDGET = 75000, MAXPAGE = 40, DEAD = 30 * 86400000;   // 最多 40 页 / 75 秒 / 回溯 30 天
+      var BUDGET = 90000, MAXPAGE = 60, DEAD = 30 * 86400000;   // 最多 60 页 / 90 秒 / 回溯 30 天
+
+      /* ★★ 追平线（2026-10-02 14:35 的核心改动）★★
+         信息流是按时间【倒序】把你关注的人的新视频推给你。
+         只要翻到一条比「上次抓取时间 − 30 分钟余量」还老的视频，就数学上保证了：
+         自上次抓取以来，所有账号发的新视频【全部】已经在信息流里出现过（都已被 absorb 收走）。
+         这时可以把【全部账号】标成已核对 —— 0 次逐个请求，还一个不漏。
+         这就是「日常 2~5 次请求抓完 392 个账号」的原理。
+         ★ 和之前那个漏抓 bug 的区别：之前是「接口说没了(has_more=false)就全标已核对」，
+         而手机浏览器里接口经常只翻一两页就说没了 → 漏光。现在只认【时间追平】，
+         接口提前说没了 → 只对「被证明追平」的账号跳过，其余照样逐个补。 */
+      var horizon = S.lastScanAt ? (S.lastScanAt - 30 * 60000) : 0;
+      var firstRun = !S.lastScanAt;
+      var deepEnough = false, emptyPages = 0;
 
       function countCaught() { var n = 0; for (var u in caught) if (caught[u]) n++; return n; }
 
@@ -1395,13 +1484,13 @@ function copyRaw(){
           .then(function (res) {
             if (shouldStop()) return;
             feedUsed = true;
-            var list = res.list || [], i2, oldest = Infinity;
+            var list = res.list || [], i2, oldest = Infinity, followed = 0;
             var mine = [];
             for (i2 = 0; i2 &lt; list.length; i2++) {
               var a = list[i2];
-              if (a.secUid &amp;&amp; !uidMap[a.secUid]) continue;      // 混入的推荐内容：不关我们的事
+              if (!a.secUid || !uidMap[a.secUid]) continue;     // 混入的推荐内容：不关我们的事
+              followed++;
               if (a.publishedAt &amp;&amp; a.publishedAt &lt; oldest) oldest = a.publishedAt;
-              if (!a.secUid) continue;
               feedCovered[a.secUid] = 1;
               var base = newest[a.secUid] || 0;
               /* 视频不比「该账号已知的最新一条」新 → 这个账号追平了，而且这条不是未读。
@@ -1415,22 +1504,18 @@ function copyRaw(){
             feedCaughtN = countCaught();
             scheduleSave(); report('关注流 第 ' + feedPages + ' 页');
 
-            /* ★★ 关键修复（2026-10-02）★★
-               以前这里只要 !hasMore（信息流说「没了」）就把【全部账号】标成「已核对」，
-               于是后面的逐个抓一次都不跑 → 抓完「新增未读 0 条」，也就是你说的「根本没抓到」。
-               信息流提前结束（手机浏览器里很常见：只翻一两页 hasMore 就 false）时也不能漏账号。
-               现在：只有真正出现在信息流里的账号才算核对过，其余一律交给下面的逐个抓兜底。 */
-            if (!res.hasMore || !list.length || (oldest &amp;&amp; oldest &lt; Date.now() - DEAD)) {
-              for (i2 = 0; i2 &lt; S.accounts.length; i2++) {
-                var u2 = S.accounts[i2].secUserId;
-                if (u2 &amp;&amp; feedCovered[u2] &amp;&amp; !caught[u2]) caught[u2] = 1;
-              }
-              feedCaughtN = countCaught();
-              return;
-            }
+            if (!list.length) return;                            // 空了：提前结束
+            /* 整页都不是关注的人（连续两页全是推荐）→ 这条信息流不对劲，别再翻了 */
+            if (!followed) { if (++emptyPages &gt;= 2) return; } else emptyPages = 0;
+            /* ★ 追平：翻到比「上次抓取」还老的视频 → 全部账号核对完毕 */
+            if (horizon &amp;&amp; oldest &lt;= horizon) { deepEnough = true; return; }
+            /* 首次使用没有基准：信息流只看最近 3 天先出个首批，其余靠逐个抓建基线 */
+            if (firstRun &amp;&amp; oldest &lt; Date.now() - 3 * 86400000) return;
+            if (oldest &amp;&amp; oldest &lt; Date.now() - DEAD) return;    // 翻进 30 天前了：没有意义
+            if (!res.hasMore) return;                            // 接口说没了（没追平 → 逐个补漏）
             cursor = res.nextCursor || 0;
             if (!cursor) return;
-            return sleep(220 + Math.random() * 380).then(page);   // 慢一点翻，像人在刷
+            return sleep(260 + Math.random() * 340).then(page);  // 慢一点翻，像人在刷
           })
           .catch(function (e) {
             // 信息流这条路走不通（接口变了 / 被风控）：安静放弃，交给下面的逐个抓兜底
@@ -1440,6 +1525,15 @@ function copyRaw(){
       }
 
       return page().then(function () {
+        if (deepEnough) {
+          /* ★ 信息流已覆盖「自上次抓取以来」的全部新视频：
+             没出现在信息流里的账号 = 这段时间根本没发视频 = 没有未读，不用再问。
+             这一步把逐个请求从 392 次降到 0 次，而且数学上一个不漏。 */
+          for (var i4 = 0; i4 &lt; plan.length; i4++) {
+            var u4 = plan[i4].secUserId;
+            if (u4) caught[u4] = 1;
+          }
+        }
         // 只有【明确核对过】的账号才跳过；没核对到的照样逐个抓，一个都不漏
         var left = [];
         for (var i3 = 0; i3 &lt; plan.length; i3++) {
@@ -1467,6 +1561,9 @@ function copyRaw(){
           .then(function (list) {
             if (shouldStop()) return;
             okCount++; acc.lastError = ''; acc.lastCount = list.length;
+            /* 之前几轮没抓成、这一轮成了 → 把「失败账号」的账也消掉：
+               界面上「成功/失败」只反映【最终】结果（不然会出现 80 成功 + 1 失败 = 81 个的怪数） */
+            if (acc._failCounted) { acc._failCounted = 0; failAcc--; }
             absorb(list); onGood(); scheduleSave(); report(acc.name);
           })
           .catch(function (e) {
@@ -1710,14 +1807,15 @@ function copyRaw(){
       '&lt;button class="dyh-btn' + (S.cfg.uiScale === 'l' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="l"&gt;更大&lt;/button&gt;' +
       '&lt;/div&gt;' +
       '&lt;div class="dyh-tip" style="margin-top:2px"&gt;默认「更大」= 宽占屏幕 96%、高占 93%，四周只留一点点边，字也跟着放大了一档。越小越省屏幕、越看得清全貌。&lt;/div&gt;';
-    var md = S.cfg.scanMode === 'feed' ? 'feed' : 'post';
+    var md = S.cfg.scanMode === 'post' ? 'post' : 'auto';
     h += '&lt;label class="dyh-lb"&gt;抓取方式&lt;/label&gt;&lt;div style="display:flex;gap:8px;margin:6px 0 4px"&gt;' +
-      '&lt;button class="dyh-btn' + (md === 'post' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="post"&gt;逐个抓（默认，稳）&lt;/button&gt;' +
-      '&lt;button class="dyh-btn' + (md === 'feed' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="feed"&gt;关注页信息流（快，可能漏）&lt;/button&gt;' +
+      '&lt;button class="dyh-btn' + (md === 'auto' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="auto"&gt;智能（默认，推荐）&lt;/button&gt;' +
+      '&lt;button class="dyh-btn' + (md === 'post' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="post"&gt;只逐个抓&lt;/button&gt;' +
       '&lt;/div&gt;' +
-      '&lt;div class="dyh-tip" style="margin-top:2px"&gt;&lt;b&gt;逐个抓（默认）&lt;/b&gt; = 一个账号一个请求，全部核对，不会漏账号 —— 想要"未读准确"就用它。&lt;br&gt;' +
-      '&lt;b&gt;关注页信息流&lt;/b&gt; = 一次拿 20 条，请求极少很快，但它只覆盖部分账号，没覆盖到的会再逐个补；' +
-      '实测它在 Via 手机浏览器里经常只翻一两页就结束，会漏掉一批账号，所以&lt;b&gt;默认关掉&lt;/b&gt;。&lt;/div&gt;';
+      '&lt;div class="dyh-tip" style="margin-top:2px"&gt;&lt;b&gt;智能（默认）&lt;/b&gt; = 先用「关注页信息流」按时间倒序翻，翻到&lt;b&gt;上次抓取的位置&lt;/b&gt;就算追平' +
+      '（追平后 0 次逐个请求，也一个不漏 —— 自上次以来发过视频的账号必定都在信息流里）；' +
+      '万一信息流提前结束，没追平的账号照样逐个补。&lt;b&gt;日常只要 2~5 次请求，又快又不容易被风控。&lt;/b&gt;&lt;br&gt;' +
+      '&lt;b&gt;只逐个抓&lt;/b&gt; = 一个账号一个请求（392 个号就是 392 次请求，慢且容易被限流），一般不用选。&lt;/div&gt;';
     h += '&lt;label class="dyh-lb"&gt;每次抓前几个账号（留空 = 全部 ' + S.accounts.length + ' 个）&lt;/label&gt;' +
       '&lt;input id="dyh-limit" class="dyh-input" type="number" min="0" inputmode="numeric" value="' + (S.cfg.scanLimit || 0) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;并发【上限】1~10（默认 6）&lt;/label&gt;' +
@@ -1962,8 +2060,8 @@ function copyRaw(){
         if (s.histErr &amp;&amp; !s.hist) { w.style.display = ''; w.textContent = '⚠ 没读到抖音的已看记录（' + s.histErr + '），这一轮只扣掉了本机标记过的；下次抓取会自动重试'; }
         else if (s.risk) { w.style.display = ''; w.textContent = '⚠ 抖音限流中，已自动降速重试（不会算失败）'; }
         else if (s.cool) { w.style.display = ''; w.textContent = '⏳ 正在降速冷却，稍等一下就好'; }
-        else if (s.phase === 'feed') { w.style.display = ''; w.textContent = '① 关注页信息流：一次拿 20 条，请求极少（不逐个打账号，所以不容易被限流）'; }
-        else if (s.feedUsed) { w.style.display = ''; w.textContent = '② 补抓信息流没覆盖到的账号（首次使用会多一些，之后就很少了）'; }
+        else if (s.phase === 'feed') { w.style.display = ''; w.textContent = '① 关注页信息流：按时间倒序翻，翻到上次抓取的位置就追平（请求极少，不易被限流）'; }
+        else if (s.feedUsed) { w.style.display = ''; w.textContent = '② 逐个补抓信息流没追平的账号（日常很少，首次/隔久了会多一些）'; }
         else { w.style.display = 'none'; }
       }).then(function (r) {
         var bar = gid('dyh-pin');
@@ -1977,6 +2075,7 @@ function copyRaw(){
           '&lt;div class="dyh-row"&gt;&lt;b&gt;完成率&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + (r.pct == null ? 100 : r.pct) + '%&lt;/span&gt;&lt;/div&gt;' +
           '&lt;div class="dyh-row"&gt;&lt;b&gt;新增未读&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + r.newCount + ' 条&lt;/span&gt;&lt;/div&gt;' +
           '&lt;div class="dyh-row"&gt;&lt;b&gt;处理账号&lt;/b&gt;&lt;span&gt;' + r.scanned + (r.resumeAt ? '（断点续 ' + r.resumeAt + '）' : '') + '&lt;/span&gt;&lt;/div&gt;' +
+          (r.feedUsed ? '&lt;div class="dyh-row"&gt;&lt;b&gt;信息流核对&lt;/b&gt;&lt;span&gt;' + r.feedCaught + ' 个（只用 ' + r.feedPages + ' 次请求）&lt;/span&gt;&lt;/div&gt;' : '') +
           '&lt;div class="dyh-row"&gt;&lt;b&gt;成功 / 失败&lt;/b&gt;&lt;span&gt;' + r.okCount + ' / ' + r.errors + '&lt;/span&gt;&lt;/div&gt;' +
           (r.retries ? '&lt;div class="dyh-row"&gt;&lt;b&gt;自动重试&lt;/b&gt;&lt;span&gt;' + r.retries + ' 次（已全部救回）&lt;/span&gt;&lt;/div&gt;' : '') +
           (r.risk ? '&lt;div class="dyh-row"&gt;&lt;b&gt;风控命中&lt;/b&gt;&lt;span&gt;' + r.risk + ' 次&lt;/span&gt;&lt;/div&gt;' : '');
@@ -2153,9 +2252,9 @@ function copyRaw(){
     }
 
     if (act === 'scan-mode') {
-      var smd = el.getAttribute('data-mode') === 'feed' ? 'feed' : 'post';
+      var smd = el.getAttribute('data-mode') === 'post' ? 'post' : 'auto';
       S.cfg.scanMode = smd;
-      save(); toast(smd === 'post' ? '已切为「逐个抓」：一个账号一个请求，不会漏' : '已切为「关注页信息流」：快，但可能漏掉没覆盖到的账号'); open('settings');
+      save(); toast(smd === 'post' ? '已切为「只逐个抓」（慢，容易被限流）' : '已切为「智能」：信息流追平 + 逐个补漏（推荐）'); open('settings');
       return;
     }
 
@@ -2247,6 +2346,7 @@ function copyRaw(){
     <details>
       <summary style="cursor:pointer;color:#86909c;font-size:13px">点开看历次改动（最新在上）</summary>
       <ul style="list-style:none;padding:0;margin:10px 0 0">
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 14:35 · 抓取改「信息流追平 + 逐个补漏」（治失败多 + 慢）</b> 你说「成功率低、经常失败、还很慢」—— 根源是逐个抓 = 392 次请求必然被限流。现在：<b>① 信息流追平</b> —— 关注页信息流按时间倒序翻到「比上次抓取还老」的视频才算追平，追平后 <b>0 次逐个请求也一个不漏</b>（日常 2~5 次请求几秒完事）；<b>② 没追平逐个补</b> —— 信息流提前结束只跳过被证明追平的账号，其余照样逐个补（之前漏抓 bug 的正确修法）；<b>③ 请求带 msToken + 全局限速 150~350ms + 风控自动换令牌</b> —— 专治间歇性 403；④ 结果页新增「信息流核对 X 个（只用 Y 次请求）」一行。仿真 <code>_test_feed.js</code> 43/43：392 账号 2 次请求 0.7 秒 0 失败、403 自动降级、提前结束 57 个全部补到。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 13:45 · 界面恢复原样 + 抓取改回逐个账号（未读「抓得到」了）</b> <b>你说了两件事，都改了</b>：① <b>界面回退到原来的那一版</b> —— 撤销分组卡 / ▶播放按钮 / 复制清单 / 一键全部已看 / 首页账号概览 / 结果页内嵌明细，未读列表恢复成「一行一条、点标题用抖音打开、右边一颗已读」；② <b>抓取得不到未读的 bug 修了（真凶找到了）</b> —— 上一版默认走「关注页信息流」，手机浏览器里<b>翻一两页就 has_more=false</b>，脚本误以为全部账号已核对，<b>后面逐个抓一次都不跑</b>，所以「抓完新增未读 0 条」。<b>现在默认改回逐个账号（一个账号一个请求、全核对、不漏）</b>；并且就算手动开信息流，提前翻完也<b>只算它覆盖过的账号</b>，没覆盖到的照旧逐个补；③ <b>断点不再跳过没跑完的账号</b>：以前按「派出去了几个」记，中途熄屏/按停止时被当成已处理，<b>下次续跑直接跳过 → 一批号永远没抓过</b>，现在按「真正跑完的个数」记，宁可重抓也不漏；④ 全抓不到时结果页<b>红字提示</b>「先刷新关注列表重新读登录态」。<b>未读判定保持不变</b>：未读 = 抓到的新视频 − 抖音已看记录 − 本机标记已读。仿真 <code>_test_unread.js</code> 20/20 全过，<code>_test_feed.js</code> 新增 6 项回归（默认不走信息流、信息流提前结束不许漏账号、全拒绝时 okCount=0）全过。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 13:20 · 未读全部收进助手面板（界面部分已按你要求回退，功能保留）</b> <b>未读闭环 100% 在「抖音关注助手」里完成</b>：① <b>抓完直接在结果页列未读明细</b>（最新 8 条带 ▶播放/已看），不用再多点「看未读列表」；② <b>按账号分组</b>（甲 3 条 / 乙 2 条这样），和 App 关注页红点一致，分组卡可点进主页；③ <b>点▶播放 = 打开抖音 + 当场记已看</b>，未读数立刻 -1，不等下一轮；④ 新增 <b>「✅ 这一批全部标已看」</b>、<b>「📋 复制未读清单」</b>（纯文本 <code>账号|标题|时间|链接</code>，可直接粘微信，剪贴板无权限自动回落）；⑤ <b>「☁️ 推到 GitHub」降级成灰色次要按钮</b>，不推完全不影响；⑥ 首页新增「有未读的账号 / 各几条」概览。新增仿真 <code>_test_closure.js</code>（21 项全过：分组顺序、每条两个播放入口、点▶立刻 -1、一键已看见底、清单格式、复制不抛错）。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 12:50 · 未读改成「跟抖音 App 一样」：看了就会少</b> <b>修掉你测出来的「未读数量不变」</b>。① <b>每轮抓取先读抖音服务器自己的已看记录</b>（<code>/aweme/v1/web/history/read/</code>，1~2 次请求）：<b>未读 = 抓到的新视频 − 抖音已看 − 本机标记已读</b>，所以在 App 里看过、下一轮就自动消失；② <b>旧账一次清干净</b>：以前攒下的早看过的视频，第一次抓取就从未读里划掉并写进已读记录（推 GitHub 后手机端 HTML 也不再算）；③ <b>在本面板点标题看电视 → 自动记已看</b>（不用再点「已读」）；④ 结果页新增「<b>抖音里看过的 N 条（已剔除）</b>」「<b>当前未读合计</b>」，读不到已看记录时进度条黄字提示、抓取照常不崩；⑤ <b>版本号规则改了</b>：不再写 v1.x，改成「<b>生成日期时间 + 改了什么</b>」，面板小灰字显示 <code>10-02 12:50</code>，完整说明在悬停/设置页。新增仿真 <code>_test_unread.js</code>（20 项全过：已看过滤、App 看完下一轮必减、接口挂了不崩、分页、浏览器内自动标已看、首页不乱标）。</li>
