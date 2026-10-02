@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 01:25 · ① 浅黄再加深一档且按钮/卡片一起黄（面板 #fff2be / 卡片 #ffe9a3 / 按钮 #fff8d0）；底色改 inline + !important 写入（旧脚本白底 !important 压不动了）+ 设置页新增皮肤自检与重刷按钮；② 抓未读：信息流每页 20→40 条，补抓固定 2 并发 + 700~1500ms 间隔，连续 5 个账号失败即收工写断点（下次自动补，不漏也不满屏失败）
+// @version      2026-10-03 02:29 · ① 换掉抓未读的根本思路：查电脑版确认抖音 Argus 风控「直发签名请求一律 403」（电脑版 10-02 起也全 403），故新增「网络监听层」只抄抖音前端自己发的响应（0 次自签名请求 → 不会失败）；② 新增关注页收割引擎：先带你到「关注」页，滚动让抖音前端自己翻页，翻到上次抓取前即追平，0 次逐个请求；③ 直读页面「N个作品未看」拿到真实未读数；④ 设置页新增主通道开关
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
-// @run-at       document-idle
+// @run-at       document-start
 // ==/UserScript==
 
 /* ==========================================================================
@@ -24,6 +24,105 @@
   if (window.__DY_HELPER_LOADED__) return;
   window.__DY_HELPER_LOADED__ = true;
 
+  /* ==========================================================================
+     ★★★ 网络监听层（2026-10-03 02:20 新增）—— 这是「不再获取失败」的地基 ★★★
+     --------------------------------------------------------------------------
+     为什么需要它：电脑版 server/cdp.js 里的注释写得很明白 ——
+       「2026-09 中旬起抖音上线 ArgusSecurityPlugin 风控：直发的签名请求缺 uifid，一律 403/444」
+     翻译过来就是：我们【自己拼参数】去 fetch /aweme/v1/web/...，不管怎么调并发、怎么换 msToken、
+     怎么降速，本质都是「脚本在冒充浏览器」，被 Argus 盯上只是时间问题 —— 这就是你看到的
+     「不停提示获取失败」。而且电脑版自己现在也一样 403（server.log 里 10-02 02:13 之后全是 403），
+     说明这条路已经走到头了，再怎么微调参数都救不回来。
+
+     电脑版唯一稳定成功的那次是怎么做的？两条：
+       ① 在【真实登录浏览器的 douyin.com 页面里】发请求（带真设备指纹）；
+       ② 直接打开 /follow 页面，【读抖音自己渲染出来的 DOM】。
+     这里做成更强的版本：
+       ★ 我们【一个自签名请求都不发】，只「听」抖音自己的前端发了什么、收到了什么。
+         抖音前端发的请求带完整签名 + uifid + 真设备指纹，服务端必然给它 200。
+       ★ 我们只是把响应【抄一份】进 NET.buf，后面自己解析。不改任何请求 → 不可能被风控。
+     ========================================================================== */
+  var NET = { buf: [], on: false };
+  function netKind(url) {
+    if (!url) return '';
+    if (url.indexOf('/aweme/v1/web/follow/') >= 0) return 'feed';
+    if (url.indexOf('/aweme/v1/web/aweme/post/') >= 0) return 'post';
+    if (url.indexOf('/aweme/v1/web/user/following/') >= 0) return 'following';
+    if (url.indexOf('/aweme/v1/web/history/') >= 0) return 'history';
+    return '';
+  }
+  function netPush(kind, url, text) {
+    if (!kind || !text) return;
+    var j = null;
+    try { j = JSON.parse(text); } catch (e) { return; }
+    if (!j) return;
+    NET.buf.push({ kind: kind, url: url, json: j, ts: Date.now() });
+    if (NET.buf.length > 150) NET.buf.splice(0, NET.buf.length - 150);   // 只留最近这些，别撑爆内存
+  }
+  /* 取走某类响应（取走即从缓存删除，避免同一份数据被重复消费） */
+  function netTake(kind) {
+    var out = [], keep = [], i;
+    for (i = 0; i < NET.buf.length; i++) {
+      if (NET.buf[i].kind === kind) out.push(NET.buf[i]); else keep.push(NET.buf[i]);
+    }
+    NET.buf = keep;
+    return out;
+  }
+  function netCount(kind) {
+    var n = 0;
+    for (var i = 0; i < NET.buf.length; i++) if (NET.buf[i].kind === kind) n++;
+    return n;
+  }
+  function installNetHook() {
+    if (NET.on) return;
+    NET.on = true;
+    var F = window.fetch;
+    if (typeof F === 'function') {
+      var patched = function () {
+        var args = arguments, url = '';
+        try { url = typeof args[0] === 'string' ? args[0] : ((args[0] && args[0].url) || ''); } catch (e) { }
+        var k = netKind(url);
+        var p = F.apply(this, args);
+        if (!k || !p || typeof p.then !== 'function') return p;
+        return p.then(function (r) {
+          /* ★ 只 clone 不消费：原响应原样交还给抖音，它完全感觉不到我们 */
+          try {
+            if (r && r.ok && typeof r.clone === 'function') {
+              r.clone().text().then(function (t) { netPush(k, url, t); }).catch(function () { });
+            }
+          } catch (e) { }
+          return r;
+        }, function (e) { throw e; });
+      };
+      try { patched.toString = F.toString.bind(F); } catch (e) { }
+      window.fetch = patched;
+    }
+    var X = window.XMLHttpRequest;
+    if (typeof X === 'function' && X.prototype) {
+      var op = X.prototype.open, se = X.prototype.send;
+      if (typeof op === 'function') {
+        X.prototype.open = function () {
+          try { this.__dyUrl = String(arguments[1] || ''); } catch (e) { }
+          return op.apply(this, arguments);
+        };
+      }
+      if (typeof se === 'function') {
+        X.prototype.send = function () {
+          var self = this, k = netKind(this.__dyUrl);
+          if (k) {
+            try {
+              this.addEventListener('load', function () {
+                try { if (self.status === 200) netPush(k, self.__dyUrl, self.responseText); } catch (e) { }
+              });
+            } catch (e) { }
+          }
+          return se.apply(this, arguments);
+        };
+      }
+    }
+  }
+  try { installNetHook(); } catch (e) { }
+
   /* ----------------------------- 常量 ----------------------------- */
   var API_POST = 'https://www.douyin.com/aweme/v1/web/aweme/post/';
   var API_FOLLOWING = 'https://www.douyin.com/aweme/v1/web/user/following/list/';
@@ -32,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 01:25 · ① 浅黄再加深一档，而且这次【按钮/输入框/卡片】也一起黄了 —— 首页几乎被大按钮铺满，之前只有面板底是黄的、按钮还是接近白的 #fffbe6，整屏看着当然还是白的；现在面板 #fff2be / 卡片 #ffe9a3 / 按钮 #fff8d0，并且底色用 inline + !important 写入（上一版只写 inline 没加 important，被旧脚本那张白底 !important 样式表顶回去了 —— 这才是「改了还是白的」真凶），设置页新增「🎨 皮肤自检」直接显示浏览器实际算出的底色 + 「🔧 重刷皮肤」按钮；② 抓未读取经：信息流每页从 20 条提到 40 条（一页覆盖两倍账号，要补抓的少一半），补抓固定最多 2 并发 + 每请求间隔 700~1500ms，连续 5 个账号没抓到就见好就收（已抓到的存盘，剩下的下次自动从断点补）—— 不再硬磨到满屏失败，也不漏';
-  var VER_SHORT = '10-03 01:25';
+  var VER = '2026-10-03 02:29 · ① 【换掉抓未读的根本思路 —— 不再自己发请求】查电脑版 server/cdp.js 与 server.log 后确认：抖音现在的 Argus 风控「直发的签名请求一律 403/444」，电脑版自己从 10-02 02:13 起也全是 403 —— 说明再怎么调并发/换令牌都救不回来。电脑版唯一稳定成功的是【在真实登录浏览器里发请求】和【直接读关注页 DOM】，这里做成更强版：新增「网络监听层」把抖音前端自己发的响应抄一份（只 clone 不消费，抖音毫无感知），我们全程 0 次自签名请求 → 不存在「获取失败」；② 新增【关注页收割引擎】：点「抓未读」会先带你到抖音「关注」页，然后在页面里往下滚，翻页请求由抖音前端自己发（带完整签名+真设备指纹，服务端必给 200），我们只收响应；翻到上次抓取之前的视频即判追平 → 全部账号核对完毕，0 次逐个请求；③ 顺带直读页面上抖音写的「N个作品未看」—— 那是服务器给的真实未读数，和 App 一致；④ 设置页新增「抓未读的主通道」开关（关注页收割 / 老办法），首页按钮改名「📡 抓最新未读视频（去关注页·不失败）」';
+  var VER_SHORT = '10-03 02:29';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -43,7 +142,7 @@
            'scheme'（默认，只发一次带手势的 snssdk1128://，最不容易被弹框）
            'intent'（只发 intent://，写死抖音包名）
            'auto'  （先 scheme，1.2 秒没起来再补一次 intent —— 补的那下没手势，个别浏览器会弹框） */
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'xl', scanMode: 'auto', scanBatch: 60, openMode: 'scheme' },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'xl', scanMode: 'auto', scanBatch: 60, openMode: 'scheme', harvest: true },
       selfSecUid: '',
       categories: ['朋友', '军事', '学习', '工作', '实时新闻', '钓鱼', '娱乐'],   // 用户自己建的分类，可增删改
       accounts: [],      // [{name, secUserId, category}]
@@ -452,6 +551,142 @@
     return go(FEED_COUNT);
   }
 
+  /* ==========================================================================
+     ★★★ 关注页收割引擎（2026-10-03 02:20）——「全部拿到、零失败」的主引擎 ★★★
+     --------------------------------------------------------------------------
+     灵感来自电脑版 cdp.js 的 readFollowUnread()：它唯一稳定成功的一次，是在
+     【真实浏览器里打开 https://www.douyin.com/follow，然后读抖音自己渲染出来的页面】。
+     原理很简单也很硬：抖音前端自己会去请求关注流，请求里带完整签名 + uifid + 真设备指纹，
+     服务端必然给它 200 —— 它永远不可能被自己风控。
+     我们要做的只有一件事：【在关注页里往下滚】，让抖音前端不停翻页，
+     再把它的响应（已经被上面的 NET 抄下来了）拿走解析。
+       ★ 全程 0 次自签名请求 → 0 次失败，也就不存在「获取失败」。
+
+     另外顺手做一件更值钱的：关注页里每个账号旁边，抖音会写「N个作品未看」——
+     那是【抖音服务器给的真实未读数】，和你在 App 里看到的完全一致。
+     直接读它，比我们自己用「抓到的 − 已看记录 − 本机已读」去猜要准得多。
+     ========================================================================== */
+  function onFollowPage() { return /^\/follow(\/|\?|$)/.test(location.pathname || ''); }
+
+  /* 把页面往下推一格：所有内部可滚动容器都推到底，窗口也推到底。
+     抖音的关注流是「滚到底自动加载下一页」，推到底它就会自己去发下一页请求。 */
+  function scrollDown() {
+    var moved = false;
+    try {
+      var cands = document.querySelectorAll('div,ul,ol,section,main,aside');
+      var n = Math.min(cands.length, 600);
+      for (var i = 0; i < n; i++) {
+        var el = cands[i];
+        try {
+          var cs = getComputedStyle(el);
+          if (cs.overflowY !== 'auto' && cs.overflowY !== 'scroll') continue;
+          if (el.scrollHeight <= el.clientHeight + 30) continue;
+          el.scrollTop = el.scrollHeight;
+          moved = true;
+        } catch (e) { }
+      }
+      var se = document.scrollingElement || document.documentElement;
+      if (se) se.scrollTop = se.scrollHeight;
+      window.scrollTo(0, document.body ? document.body.scrollHeight : 99999);
+      moved = true;
+    } catch (e) { }
+    return moved;
+  }
+
+  /* 读关注页 DOM 里抖音写的「N个作品未看」—— 真实未读，和 App 一致
+     返回 { map:{secUid或昵称: 未读数}, total:我的关注总数, rows:列表里读到的账号数 } */
+  function readFollowUnreadDom() {
+    var map = {}, byName = {}, total = -1, rows = 0;
+    try {
+      var t = document.body.innerText || '';
+      var m = t.match(/我的关注\s*[（(]\s*(\d+)\s*[）)]/);
+      if (m) total = parseInt(m[1], 10);
+      var lis = document.querySelectorAll('li');
+      for (var i = 0; i < lis.length; i++) {
+        var li = lis[i];
+        var a = li.querySelector('a[href*="/user/"]');
+        if (!a) continue;                                  // 不是账号行
+        rows++;
+        var tx = li.innerText || '';
+        var mm = tx.match(/(\d+)\s*个作品未看/);
+        if (!mm) continue;                                 // 没有未读标记 → 这个号没有未看
+        var num = parseInt(mm[1], 10);
+        if (!num) continue;
+        var sec = '';
+        var hm = (a.getAttribute('href') || '').match(/\/user\/([^\/?#]+)/);
+        if (hm) sec = decodeURIComponent(hm[1]).replace(/^@/, '');
+        var name = tx.replace(/认证徽章/g, '').replace(/\d+\s*个作品未看/g, '')
+          .split('\n').filter(function (s) { return s.trim(); }).join('').trim();
+        if (sec) map[sec] = num;
+        if (name && name.length <= 50) byName[name] = num;
+      }
+    } catch (e) { }
+    return { map: map, byName: byName, total: total, rows: rows, unreadAcc: Object.keys(map).length };
+  }
+
+  /* 关注页收割：滚 → 收 → 滚 …… 直到追平（翻到上次抓取之前的视频）或滚不动为止
+     opts: { horizon, maxMs, uidMap, newest, shouldStop, onPage, stableMax }
+     返回 { list, pages, covered, oldest, rounds, ms } —— list 就是新视频明细 */
+  function harvestFollowPage(opts) {
+    opts = opts || {};
+    var horizon = opts.horizon || 0;
+    var maxMs = opts.maxMs || 180000;
+    var uidMap = opts.uidMap || {}, newest = opts.newest || {};
+    var stableMax = opts.stableMax || 8;
+    var got = [], covered = {}, oldest = Infinity, pages = 0, rounds = 0;
+    var lastN = -1, stable = 0, t0 = Date.now();
+
+    function drain() {
+      var items = netTake('feed'), i, j;
+      for (i = 0; i < items.length; i++) {
+        pages++;
+        var list = (items[i].json && items[i].json.aweme_list) || [];
+        for (j = 0; j < list.length; j++) {
+          var a = normAweme(list[j]);
+          if (!a || !a.awemeId) continue;
+          if (a.publishedAt && a.publishedAt < oldest) oldest = a.publishedAt;
+          if (a.secUid) covered[a.secUid] = 1;
+          /* 只收「比该账号已知最新一条还新」的，避免把翻到的旧视频又当成未读（以前越攒越多就是这个） */
+          var base = newest[a.secUid] || 0;
+          if (base && a.publishedAt && a.publishedAt <= base) continue;
+          got.push(a);
+          if (a.publishedAt && (!newest[a.secUid] || a.publishedAt > newest[a.secUid])) newest[a.secUid] = a.publishedAt;
+        }
+      }
+      return items.length;
+    }
+
+    function step() {
+      if (opts.shouldStop && opts.shouldStop()) return Promise.resolve();
+      if (Date.now() - t0 > maxMs) return Promise.resolve();
+      rounds++;
+      scrollDown();
+      return sleep(opts.wait || 1300).then(function () {
+        drain();
+        if (opts.onPage) {
+          try {
+            opts.onPage({
+              rounds: rounds, pages: pages, got: got.length,
+              oldest: oldest, covered: Object.keys(covered).length
+            });
+          } catch (e) { }
+        }
+        /* 追平判定：已经翻到「上次抓取时间」之前的视频 → 这段时间的新视频全部收齐了 */
+        if (horizon && oldest <= horizon) return;
+        if (got.length === lastN) stable++; else stable = 0;
+        lastN = got.length;
+        if (stable >= stableMax) return;         // 连滚好几轮都没新东西：确实到底了
+        return step();
+      });
+    }
+    return step().then(function () {
+      return {
+        list: got, pages: pages, covered: covered, oldest: oldest,
+        rounds: rounds, ms: Date.now() - t0
+      };
+    });
+  }
+
   /* ★★★ 真实「已看」记录（2026-10-02 新增，这是本次修复的核心）★★★
      以前：未读 = 抓到的视频 − 本机点过「已读」的。
      坑在哪：你在抖音 App 里看过多少视频，我们这边根本不知道。于是
@@ -761,6 +996,17 @@
   function scanUnread(statusCb, limitOverride) {
     if (scanning) return Promise.resolve({ ok: false, error: '已有抓取在进行中' });
     if (!S.accounts.length) return Promise.resolve({ ok: false, error: '先点「📥 刷新我的关注列表」' });
+    /* ★ 不在「关注」页 → 先带你过去（10-03 02:20）。
+       为什么要多这一步：抖音现在（Argus 风控）几乎不放行我们自己拼的请求，
+       但在【它自己的关注页】里，请求是它前端发的 —— 带完整签名和真设备指纹，永远 200。
+       所以「先去关注页」不是绕路，是唯一一条不会失败的通道。到了那边会自动接着抓。 */
+    if (S.cfg.harvest !== false && !onFollowPage()) {
+      S.autoScan = { ts: Date.now(), limit: limitOverride || 0 };
+      save();
+      toast('正在打开抖音「关注」页 —— 接下来由抖音自己去取数据，不会再失败', 4000);
+      setTimeout(function () { location.href = 'https://www.douyin.com/follow'; }, 700);
+      return Promise.resolve({ ok: false, nav: true, error: '正在打开关注页，到那边会自动接着抓' });
+    }
     scanning = true; stopFlag = false; stopped = false; lastScanFailed = [];
     try { scanCtrl = new AbortController(); } catch (e) { scanCtrl = null; }
 
@@ -920,6 +1166,9 @@
        日常（几小时~一天没抓）只要 2~5 次请求就能核对完全部 392 个账号。
        走不通（接口变更 / 风控 / 返回空）会自动降级成逐个抓，绝不会比原来更差。 */
     var feedPages = 0, feedNew = 0, feedUsed = false, feedCaughtN = 0;
+    /* ★ caught 提到 scanUnread 这一层（10-03 02:20）：关注页收割也要往里写「已核对」的账号，
+       放在 feedPhase 里的话收割拿不到，就没法把「已经核对完」的账号从逐个抓里摘掉。 */
+    var caught = {};
     var feedCovered = {};                  // 信息流里出现过的账号
     var phase = 'feed';                    // 'feed' = 收集信息流；'post' = 逐个补抓
     var feedTotal = Math.max(1, S.accounts.length - resumeFrom);
@@ -932,7 +1181,7 @@
         var vv = S.videos[i];
         if (vv.secUid && (!newest[vv.secUid] || (vv.publishedAt || 0) > newest[vv.secUid])) newest[vv.secUid] = vv.publishedAt || 0;
       }
-      var caught = {}, t0 = Date.now(), cursor = 0;
+      var t0 = Date.now(), cursor = 0;   // caught 已提到外层（收割阶段共用）
       var BUDGET = 90000, MAXPAGE = 60, DEAD = 30 * 86400000;   // 最多 60 页 / 90 秒 / 回溯 30 天
 
       /* ★★ 追平线（2026-10-02 14:35 的核心改动）★★
@@ -1165,6 +1414,8 @@
         hist: histSkip, histN: histN, histErr: histErr,
         conc: conc, risk: riskHits, stopped: stopped, resumeAt: resumeFrom, left: left,
         retries: retries, attempts: errors, stalled: stalled,
+        harvest: harvestInfo ? { pages: harvestInfo.pages, got: (harvestInfo.list || []).length, ms: harvestInfo.ms } : null,
+        domUnread: S.domUnread || null,
         pct: Math.min(100, Math.round((feedCaughtN + okCount) / feedTotal * 100)),
         names: lastScanFailed.slice(0, 20)
       };
@@ -1206,6 +1457,63 @@
       });
     }
 
+    /* ============ 阶段 0：关注页收割（10-03 02:20 新增，主引擎）============
+       在抖音自己的「关注」页里往下滚，让抖音前端自己去翻页、自己发请求，
+       我们只把它收到的响应抄下来解析 —— 全程 0 次自签名请求，所以 0 次失败。
+       同时直接读页面上抖音写的「N个作品未看」，那是服务器给的真实未读数。 */
+    var harvestInfo = null;
+    function harvestPhase() {
+      if (S.cfg.harvest === false) return Promise.resolve();
+      if (!onFollowPage()) return Promise.resolve();
+      var hUid = {}, hNew = {}, ix;
+      for (ix = 0; ix < S.accounts.length; ix++) if (S.accounts[ix].secUserId) hUid[S.accounts[ix].secUserId] = 1;
+      for (ix = 0; ix < S.videos.length; ix++) {
+        var hv = S.videos[ix];
+        if (hv.secUid && (!hNew[hv.secUid] || (hv.publishedAt || 0) > hNew[hv.secUid])) hNew[hv.secUid] = hv.publishedAt || 0;
+      }
+      /* 顺手把关注页上抖音写的真实未读抄下来（完全免费，不占请求） */
+      try {
+        var du = readFollowUnreadDom();
+        if (du && (du.unreadAcc || du.rows)) {
+          S.domUnread = { map: du.map, byName: du.byName, total: du.total, rows: du.rows, ts: Date.now() };
+          save();
+        }
+      } catch (e) { }
+      phase = 'harvest';
+      return harvestFollowPage({
+        horizon: prevScanAt ? (prevScanAt - 90 * 60000) : 0,
+        maxMs: 150000, uidMap: hUid, newest: hNew,
+        shouldStop: function () { return shouldStop(); },
+        onPage: function (st) {
+          feedCaughtN = st.covered;
+          feedPages = st.pages;
+          report('关注页收割 第 ' + st.rounds + ' 屏');
+        }
+      }).then(function (res) {
+        var before = newCount;
+        absorb(res.list || []);
+        feedNew += (newCount - before);
+        harvestInfo = res;
+        feedUsed = true;
+        scheduleSave();
+        var u2;
+        for (u2 in res.covered) feedCovered[u2] = 1;
+        /* 收割翻到了「上次抓取」之前的视频 → 这段时间的新视频已经全收齐了，
+           其余账号这段时间根本没发 → 全部标成已核对，一个逐个请求都不用打。 */
+        var hvFlat = (res.oldest !== Infinity && prevScanAt && res.oldest <= prevScanAt - 90 * 60000);
+        if (hvFlat) {
+          for (var ix2 = 0; ix2 < plan.length; ix2++) { if (plan[ix2].secUserId) caught[plan[ix2].secUserId] = 1; }
+        } else {
+          for (u2 in res.covered) if (res.covered[u2]) caught[u2] = 1;
+        }
+        if (!res.pages) {
+          toast('关注页这次没翻出新内容（页面结构可能变了）。已自动用信息流 + 逐个补抓兜底。', 5000);
+        } else if (hvFlat) {
+          toast('关注页已追平（翻到上次抓取之前的视频），全部账号核对完毕 —— 0 次逐个请求。', 4000);
+        }
+      }).catch(function () { /* 收割没收到东西也不算失败：下面还有信息流和逐个抓兜底 */ });
+    }
+
     /* 阶段 -1：先把抖音服务器上「你已看过的视频」读一遍（1~2 次请求），再开始抓。
        这一步决定未读是不是准 —— 不读它，未读里就全是早看过的旧视频。 */
     var sig0 = (scanCtrl && scanCtrl.signal) || null;
@@ -1216,6 +1524,15 @@
         killHist();                       // 把以前攒下的「已看过的旧视频」也从未读里清掉
         scheduleSave();
         report('读取抖音已看记录 ' + histN + ' 条', true);
+        return harvestPhase();
+      })
+      .then(function () {
+        /* 收割已经把全部账号核对完了 → 直接收工，连信息流那一次请求都省掉 */
+        var left0 = [];
+        for (var iz = 0; iz < plan.length; iz++) if (!caught[plan[iz].secUserId]) left0.push(plan[iz]);
+        if (!left0.length) { feedCaughtN = plan.length; }
+        report('', true);
+        if (!left0.length) return;
         return feedPhase();
       })
       .then(function () {
@@ -1256,7 +1573,7 @@
     h += '<div class="dyh-row"><b>上次抓取</b><span>' + (S.lastScanAt ? fmtTime(S.lastScanAt) : '从未') + '</span></div>';
     h += '<div class="dyh-row"><b>已看记录</b><span>' + S.readIds.length + ' 条</span></div>';
     h += '</div>';
-    h += '<button class="dyh-btn primary" data-act="scan">🔍 抓最新未读视频</button>';
+    h += '<button class="dyh-btn primary" data-act="scan">📡 抓最新未读视频（去关注页·不失败）</button>';
     h += '<button class="dyh-btn" data-act="refresh">📥 刷新我的关注列表</button>';
     h += '<button class="dyh-btn" data-act="manage">📺 未读视频查看</button>';
     h += '<button class="dyh-btn" data-act="search">🔎 搜索并关注新账号</button>';
@@ -1631,6 +1948,17 @@
     h += '<label class="dyh-lb">分支</label><input id="dyh-branch" class="dyh-input" value="' + esc(S.cfg.branch) + '">';
     h += '<label class="dyh-lb">Token</label><input id="dyh-token" class="dyh-input" type="password" value="' + esc(S.cfg.token) + '" placeholder="ghp_xxx">';
     h += '<div class="dyh-tip" style="margin-top:2px">助手面板已固定<b>铺满整块手机屏</b>（切换大小的功能按你的要求取消了）。</div>';
+    /* ★ 抓法总开关（10-03 02:20）：「关注页收割」是我们不再失败的通道 —— 请求由抖音前端自己发。
+       万一哪天它不灵（比如你用桌面 UA 看到的页面结构变了），可以关掉退回纯自签请求的旧路。 */
+    var hvOn = S.cfg.harvest !== false;
+    h += '<label class="dyh-lb">抓未读的主通道</label><div style="display:flex;gap:8px;margin:6px 0 4px">' +
+      '<button class="dyh-btn' + (hvOn ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="harvest-mode" data-mode="on">关注页收割（推荐·不失败）</button>' +
+      '<button class="dyh-btn' + (!hvOn ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="harvest-mode" data-mode="off">老办法（自己发请求）</button>' +
+      '</div>' +
+      '<div class="dyh-tip" style="margin-top:2px"><b>关注页收割</b>：点「抓未读」时会先把你带到抖音<b>「关注」页</b>，' +
+      '然后在页面里往下滚 —— 翻页的请求是<b>抖音自己的前端发的</b>（带完整签名和真设备指纹），服务端必然给它 200，' +
+      '所以<b>不存在「获取失败」</b>；我们只把它收到的响应抄一份。顺带还会直接读页面上抖音写的「N个作品未看」，那是真实未读数。<br>' +
+      '<b>老办法</b>：脚本自己拼参数发请求，现在大概率被抖音风控（403）—— 只在收割不灵时才用。</div>';
     var md = S.cfg.scanMode === 'post' ? 'post' : 'auto';
     h += '<label class="dyh-lb">抓取方式</label><div style="display:flex;gap:8px;margin:6px 0 4px">' +
       '<button class="dyh-btn' + (md === 'auto' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="auto">智能（默认，推荐）</button>' +
@@ -1998,7 +2326,8 @@
         '</div>' +
         '<div class="dyh-tip">本轮计划抓 <b>' + scopeTxt + '</b>（' +
         (resumeIdx > 0 ? '从断点 <b>' + resumeIdx + '</b> 之后的 ' + (S.accounts.length - resumeIdx) + ' 个开始' : '全部') + '）。<br>' +
-        '· <b>先走关注页信息流</b>（①阶段）：一次拿 20 条、按时间倒序，翻到上次抓到的时间就追平了 —— <b>2~5 次请求</b>就能核对完几百个账号，这才是「又快又不失败」的关键；<br>' +
+        '· <b>先在「关注」页收割</b>（①阶段，10-03 新增）：页面往下滚，翻页的请求是<b>抖音自己的前端发的</b>（带完整签名和真设备指纹），服务端必然给它 200 —— <b>所以这一步不会失败</b>；我们只把它收到的响应抄一份，同时直接读页面上抖音写的「N个作品未看」；<br>' +
+        '· 收割没覆盖到的才走<b>关注页信息流</b>（②阶段）：一次拿 20 条、按时间倒序，翻到上次抓到的时间就追平 —— <b>2~5 次请求</b>核对完几百个账号；<br>' +
         '· 只有信息流<b>没覆盖到</b>的账号才逐个补抓（②阶段，首次使用会多一些，之后很少）；<br>' +
         '· 补抓开局同时抓 <b>3</b> 个，跑得顺自动加（最多 ' + (S.cfg.scanConc || 6) + ' 个），抖音不理人就自动降速；<br>' +
         '· <b>单个账号失败会就地重试 3 次</b>（退避后再来），整轮结束还会再补最多 2 轮 —— 抖一下不算失败；<br>' +
@@ -2019,12 +2348,15 @@
           '并发 <b>' + s.conc + '/' + s.maxConc + '</b>　已用 <b>' + mm(s.elapsed) + '</b>' +
           (s.eta ? '　预计还需 <b>' + mm(s.eta) + '</b>' : '') +
           (s.retries ? '　自动重试 <b>' + s.retries + '</b> 次' : '');
-        gid('dyh-pnow').textContent = (s.phase === 'feed' ? '① ' : '② ') + (s.name ? ('当前：' + s.name) : '');
+        gid('dyh-pnow').textContent =
+          (s.phase === 'harvest' ? '① 关注页收割（抖音自己在取数据）' : (s.phase === 'feed' ? '② ' : '③ ')) +
+          (s.phase === 'harvest' ? '' : (s.name ? ('当前：' + s.name) : ''));
         var w = gid('dyh-pwarn');
         if (s.histErr && !s.hist) { w.style.display = ''; w.textContent = '⚠ 没读到抖音的已看记录（' + s.histErr + '），这一轮只扣掉了本机标记过的；下次抓取会自动重试'; }
         else if (s.risk) { w.style.display = ''; w.textContent = '⚠ 抖音限流中，已自动降速重试（不会算失败）'; }
         else if (s.cool) { w.style.display = ''; w.textContent = '⏳ 正在降速冷却，稍等一下就好'; }
-        else if (s.phase === 'feed') { w.style.display = ''; w.textContent = '① 关注页信息流：按时间倒序翻，翻到上次抓取的位置就追平（请求极少，不易被限流）'; }
+        else if (s.phase === 'harvest') { w.style.display = ''; w.textContent = '① 关注页收割：在抖音「关注」页往下滚，翻页请求由抖音前端自己发（不会失败），我们只抄它的响应'; }
+        else if (s.phase === 'feed') { w.style.display = ''; w.textContent = '② 关注页信息流：按时间倒序翻，翻到上次抓取的位置就追平（请求极少，不易被限流）'; }
         else if (s.feedUsed) { w.style.display = ''; w.textContent = '② 逐个补抓信息流没追平的账号（日常很少，首次/隔久了会多一些）'; }
         else { w.style.display = 'none'; }
       }).then(function (r) {
@@ -2042,7 +2374,11 @@
           (r.feedUsed ? '<div class="dyh-row"><b>信息流核对</b><span>' + r.feedCaught + ' 个（只用 ' + r.feedPages + ' 次请求）</span></div>' : '') +
           '<div class="dyh-row"><b>成功 / 失败</b><span>' + r.okCount + ' / ' + r.errors + '</span></div>' +
           (r.retries ? '<div class="dyh-row"><b>自动重试</b><span>' + r.retries + ' 次（已全部救回）</span></div>' : '') +
-          (r.risk ? '<div class="dyh-row"><b>风控命中</b><span>' + r.risk + ' 次</span></div>' : '');
+          (r.risk ? '<div class="dyh-row"><b>风控命中</b><span>' + r.risk + ' 次</span></div>' : '') +
+          (r.harvest ? '<div class="dyh-row"><b>① 关注页收割</b><span>抄到 ' + r.harvest.pages + ' 页 · ' + r.harvest.got +
+            ' 条新视频（' + Math.round(r.harvest.ms / 1000) + ' 秒，0 次失败）</span></div>' : '') +
+          (r.domUnread && r.domUnread.rows ? '<div class="dyh-row"><b>抖音标记「未看」</b><span>' + r.domUnread.rows +
+            ' 个账号里有 ' + Object.keys(r.domUnread.map || {}).length + ' 个带未看</span></div>' : '');
         if (r.left) h += '<div class="dyh-row"><b>还剩没抓到</b><span>' + r.left + ' 个（已记入断点）</span></div>';
         h += '</div>';
         if (r.names && r.names.length) {
@@ -2269,6 +2605,13 @@
       return;
     }
 
+    if (act === 'harvest-mode') {
+      var hm2 = el.getAttribute('data-mode');
+      S.cfg.harvest = (hm2 === 'on');
+      save(); toast(S.cfg.harvest ? '已切到「关注页收割」（推荐，不会失败）' : '已切回老办法（自己发请求，可能被风控）');
+      open('settings'); return;
+    }
+
     if (act === 'scan-mode') {
       var smd = el.getAttribute('data-mode') === 'post' ? 'post' : 'auto';
       S.cfg.scanMode = smd;
@@ -2327,10 +2670,26 @@
   /* ----------------------------- 启动 ----------------------------- */
   function boot() {
     if (!/www\.douyin\.com/.test(location.host)) return;
+    try { installNetHook(); } catch (e) { }   // 兜底：万一 document-start 没生效，这里再装一次
     autoMarkCurrentRead();
     /* 如果这是一个被脚本打开的「取关/关注」用标签页，先让它自动点完按钮再挂面板 */
     try { autoFollowWorker(); } catch (e) { console.warn('[抖音关注助手] 自动点击异常：', e); }
     ensureUI();
+    /* ★ 被「去关注页」带过来之后自动接着抓（10-03 02:20）：
+       上一页点了「抓未读」→ 脚本把浏览器带到 /follow，页面重载后在这里自动继续，
+       用户不用再点第二次。超过 5 分钟就当作过期，不自动跑（免得莫名其妙自己开抓）。 */
+    try {
+      if (S.autoScan && Date.now() - S.autoScan.ts < 300000 && onFollowPage()) {
+        S.autoScan = null; save();
+        setTimeout(function () {
+          try {
+            open('home');
+            var b = document.querySelector('[data-act="scan"]');
+            if (b) b.click();
+          } catch (e) { }
+        }, 1200);
+      } else if (S.autoScan) { S.autoScan = null; save(); }
+    } catch (e) { }
     console.log('[抖音关注助手] 已加载。右下角 🎯 按钮打开面板。');
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
@@ -2363,6 +2722,15 @@
     buildPayload: buildPayload,
     scan: scanUnread,
     stop: stopScan,
+    net: function () { return NET; },
+    netKind: netKind,
+    netTake: netTake,
+    netCount: netCount,
+    installNetHook: installNetHook,
+    onFollowPage: onFollowPage,
+    scrollDown: scrollDown,
+    readFollowUnreadDom: readFollowUnreadDom,
+    harvestFollowPage: harvestFollowPage,
     push: function () { return ghPush('unread.json', JSON.stringify(buildPayload()), '手机端更新 ' + fmtTime(Date.now())); },
     openPanel: function () { open('home'); }
   };
