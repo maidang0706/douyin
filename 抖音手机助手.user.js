@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-02 23:47 · 首页按钮改名「📺 未读视频查看」：进去默认「全部分类」，点分类名弹下拉切换；每个公众号「名称/多少未读/设分类/取关」并排一行，点名称看该号未读视频，点视频直接唤起抖音 App；取消切换界面大小功能（固定铺满屏）；背景改浅黄色
+// @version      2026-10-03 00:20 · ① 背景色真正改成浅黄（上一版太淡看着像白的）：面板 #fff6cc、卡片/小标签 #ffefab、按钮/输入框 #fffbe6、描边 #ecd98c，底色另用 inline style 再写一遍防被抖音样式顶回白底；② 点「▶ 用抖音看」不再弹「允许网站打开抖音吗」（去掉隐藏 iframe，改成点击回调里直接跳 snssdk1128://，带用户手势直接拉起抖音，1.2s 没起来补一次 intent://）；③ 唤起后网页端不做任何动作：不跳视频网页、不开新标签、不刷新，面板原样留在那
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -32,8 +32,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-02 23:47 · ① 首页那颗「🚫 批量取关 / 管理分类」改名成「📺 未读视频查看」—— 它本来就是用来看谁有未读的；② 进去默认就是「全部分类」，点那一行会弹出下拉，里面列出全部分类 + 每个分类的账号数和未读数，选一个就切过去（新建 / 改名 / 删分类 / 整类取关都收在下拉底部）；③ 下面的公众号【名称 · 多少未读 · 设分类 · 取关】四个并排挤在一行，一眼扫过去；④ 点公众号名称 → 进这个号自己的未读视频列表，点任意一条直接唤起【抖音 App】观看（没装或没唤起会自动退回网页版），打开的同时就记成已看，未读数当场减一；⑤ 取消了切换界面大小的功能（右上角 ⤢ 和设置里那排按钮都删了），面板固定铺满整块手机屏；⑥ 整个面板背景改成浅黄色';
-  var VER_SHORT = '10-02 23:47';
+  var VER = '2026-10-03 00:20 · ① 背景色这次是真的浅黄了 —— 上一版 #fffbe6 太淡，手机上看着还是白的，整体加深一档：面板 #fff6cc、卡片/小标签 #ffefab、按钮/输入框 #fffbe6、描边 #ecd98c、分割线 #f2e3a8，并且底色再用 inline style 写一遍（inline 优先级最高，抖音后插的样式压不掉，不会退回白底）；② 点「▶ 用抖音看」不再弹「允许网站打开抖音吗」—— 去掉隐藏 iframe（iframe 发起的跳转不带用户手势，浏览器才会弹那个确认框），改成在点击回调里同步直接跳 snssdk1128://，带着手势系统直接拉起抖音，1.2 秒没起来再补一次 intent://（写死抖音包名，不会弹「用哪个应用打开」）；③ 唤起之后网页端什么都不做：不跳视频网页、不开新标签、不刷新，面板原样留在那（真没装抖音只弹一句提示，绝不跳转）';
+  var VER_SHORT = '10-03 00:20';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1513,8 +1513,8 @@
       '<div class="dyh-row"><b>未读视频</b><span class="dyh-hl">' + vids.length + ' 条</span></div>' +
       (acc && acc.category ? '<div class="dyh-row"><b>分类</b><span>' + esc(acc.category) + '</span></div>' : '') +
       '</div>';
-    h += '<div class="dyh-tip">点任意一条 → 直接唤起<b>抖音 App</b> 观看（没装 / 没唤起会自动退回网页版），' +
-      '打开的同时记成已看，未读数当场减一。</div>';
+    h += '<div class="dyh-tip">点任意一条 → 直接唤起<b>抖音 App</b> 观看：<b>不再弹「允许网站打开抖音吗」</b>，' +
+      '唤起之后<b>网页端不跳转、不做任何动作</b>（面板原样留在这）；打开的同时记成已看，未读数当场减一。</div>';
     for (i = 0; i < vids.length; i++) {
       var v = vids[i];
       h += '<div class="dyh-vid" data-act="play" data-id="' + esc(v.awemeId) + '" data-url="' + esc(v.url) + '">' +
@@ -1527,28 +1527,31 @@
     return h;
   }
 
-  /* 唤起抖音 App 打开视频详情页
-     做法：塞一个隐藏 iframe 指向 snssdk1128:// 的详情页；1.4 秒后看页面有没有被切到后台，
-     没被切走说明 App 没起来 → 用 window.open 打开网页版兜底（不让用户卡在空白页）。 */
-  function openInApp(awemeId, url) {
-    var moved = false, ifr = null;
-    function onHide() { moved = true; }
-    try { document.addEventListener('visibilitychange', onHide); } catch (e) { }
-    try {
-      ifr = document.createElement('iframe');
-      ifr.style.display = 'none';
-      ifr.src = 'snssdk1128://aweme/detail/' + encodeURIComponent(awemeId);
-      document.body.appendChild(ifr);
-    } catch (e) { }
+  /* 唤起抖音 App 打开视频详情页（10-03 00:20 重写）
+     ---------------------------------------------------------------------------
+     旧做法：塞一个隐藏 iframe 指到 snssdk1128:// —— iframe 发起的跳转【不带用户手势】，
+     浏览器就把它当「网页想偷偷拉起别的 App」，于是弹「允许网站打开抖音吗？」那个确认框。
+     新做法：在【点击的回调里同步】用当前页面直接跳 scheme（带着用户手势）→ 系统直接拉起抖音，
+     不弹确认框、不经过任何中间页。
+     ★ 网页端不做任何动作：不 window.open、不跳视频网页、不刷新，面板原样留着；
+       没装抖音 / 被浏览器拦了也只是原地不动（2.7 秒后给一句提示，绝不跳转）。 */
+  function openInApp(awemeId) {
+    var id = encodeURIComponent(awemeId || '');
+    var scheme = 'snssdk1128://aweme/detail/' + id;
+    // Android intent 写法：直接写死抖音包名，避免再弹「用哪个应用打开」的选择框
+    var intent = 'intent://aweme/detail/' + id +
+      '#Intent;scheme=snssdk1128;package=com.ss.android.ugc.aweme;end';
+    try { window.location.href = scheme; } catch (e) { }
+    // 1.2 秒还在前台 = 上面那一下没起来，换 intent 再试一次（没写兜底网址，不会把页面顶走）
     setTimeout(function () {
-      try { document.removeEventListener('visibilitychange', onHide); } catch (e) { }
-      try { if (ifr && ifr.parentNode) ifr.parentNode.removeChild(ifr); } catch (e) { }
-      if (!moved && !document.hidden) {
-        var w = null;
-        try { w = window.open(url, '_blank'); } catch (e) { }
-        if (!w) { try { window.location.href = url; } catch (e2) { } }
-      }
-    }, 1400);
+      if (document.hidden) return;
+      try { window.location.href = intent; } catch (e) { }
+    }, 1200);
+    // 再等 1.5 秒还在前台 → 只提示，绝不跳转、绝不开新标签
+    setTimeout(function () {
+      if (document.hidden) return;
+      toast('没跳到抖音？多半是没装抖音，或浏览器拦了外部唤起（网页保持不动，这条已记成已看）');
+    }, 2700);
   }
 
   function renderSearch() {
@@ -1597,6 +1600,10 @@
   }
 
   /* ----------------------------- 面板骨架 ----------------------------- */
+  /* 浅黄配色集中定义（10-03 00:20：用户说第一版太淡看着还是白的，整体加深一档）
+     面板 #fff6cc / 卡片·小标签 #ffefab / 按钮·输入框 #fffbe6 / 描边 #ecd98c / 分割线 #f2e3a8
+     ★ BG_PANEL 这个常量下面 CSS 和 inline 两处都要用，改色只改这里 */
+  var BG_PANEL = '#fff6cc';
   var fab = null, panel = null, bodyEl = null;
 
   function ensureUI() {
@@ -1608,89 +1615,89 @@
       'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.28);user-select:none}' +
       '.dyh-panel{position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483645;background:rgba(0,0,0,.55);' +
       'display:none;align-items:center;justify-content:center}' +
-      /* 面板固定铺满整屏（切换大小的功能已取消）+ 浅黄底色（10-02 23:40 按用户要求）
+      /* 面板固定铺满整屏（切换大小的功能已取消）+ 浅黄底色（10-03 00:20 加深一档，第一版太淡看着像白的）
          ★ 关键样式一律 !important：抖音自己后插入的样式表压不掉我们（否则会被顶回白底/小窗） */
-      '.dyh-box{background:#fffbe6!important;width:100%!important;max-width:none;height:100%!important;max-height:none;' +
+      '.dyh-box{background:' + BG_PANEL + '!important;width:100%!important;max-width:none;height:100%!important;max-height:none;' +
       'overflow:hidden;border-radius:0;padding:12px 12px calc(12px + env(safe-area-inset-bottom));' +
       'font-size:24px!important;color:#1d2129;' +
       'display:flex!important;flex-direction:column;box-sizing:border-box;line-height:1.65}' +
-      '.dyh-box.sz-full{background:#fffbe6!important;border-radius:0;font-size:24px!important;' +
+      '.dyh-box.sz-full{background:' + BG_PANEL + '!important;border-radius:0;font-size:24px!important;' +
       'padding:12px 12px calc(12px + env(safe-area-inset-bottom))!important}' +
-      '.dyh-box.sz-s,.dyh-box.sz-m,.dyh-box.sz-l,.dyh-box.sz-xl{background:#fffbe6!important}' +
+      '.dyh-box.sz-s,.dyh-box.sz-m,.dyh-box.sz-l,.dyh-box.sz-xl{background:' + BG_PANEL + '!important}' +
       '.dyh-box h3{margin:0 0 17px!important;font-size:28px!important;display:flex!important;align-items:center;flex:0 0 auto}' +
       '.dyh-box h3 span{margin-left:auto;font-size:40px!important;color:#c9cdd4;padding:0 8px}' +
       '.dyh-ver{font-size:16px!important;color:#c9cdd4;font-weight:400;margin-left:9px!important}' +
-      '.dyh-zbtn{font-size:30px!important;color:#4e5969;background:#fff4cf;border-radius:8px;' +
+      '.dyh-zbtn{font-size:30px!important;color:#4e5969;background:#ffefab;border-radius:8px;' +
       'padding:4px 14px;margin-left:auto!important}' +
       '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
-      '.dyh-btn{display:block;width:100%;margin:11px 0;padding:19px 20px;border:1px solid #ecdfb4;border-radius:10px;' +
-      'background:#fffdf3;font-size:24px!important;color:#1d2129;text-align:left}' +
+      '.dyh-btn{display:block;width:100%;margin:11px 0;padding:19px 20px;border:1px solid #ecd98c;border-radius:10px;' +
+      'background:#fffbe6;font-size:24px!important;color:#1d2129;text-align:left}' +
       '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
       '.dyh-btn.gray{color:#8a6d1f}' +
-      '.dyh-card{background:#fff4cf;border-radius:10px;padding:15px 17px;margin-bottom:13px}' +
-      '.dyh-row{display:flex;align-items:center;padding:16px 0;border-bottom:1px solid #f2e4b8;font-size:24px!important}' +
+      '.dyh-card{background:#ffefab;border-radius:10px;padding:15px 17px;margin-bottom:13px}' +
+      '.dyh-row{display:flex;align-items:center;padding:16px 0;border-bottom:1px solid #f2e3a8;font-size:24px!important}' +
       '.dyh-row:last-child{border-bottom:0}' +
       '.dyh-row b{font-weight:500;color:#4e5969}' +
       '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
       '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
-      '.dyh-item{padding:16px 0;border-bottom:1px solid #f2e4b8}' +
+      '.dyh-item{padding:16px 0;border-bottom:1px solid #f2e3a8}' +
       '.dyh-item-t{font-size:24px!important;line-height:1.5;color:#1d2129}' +
       '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:9px;font-size:19px;color:#8a6d1f}' +
       '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:9px 17px}' +
       '.dyh-tip{font-size:19px!important;color:#8a6d1f;line-height:1.75;margin:11px 0}' +
       '.dyh-back{font-size:20px;color:#fe2c55;margin-bottom:13px}' +
       /* ---- 分类下拉选择器 ---- */
-      '.dyh-sel{display:flex;align-items:center;gap:8px;background:#fff4cf;border:1px solid #ecdfb4;' +
+      '.dyh-sel{display:flex;align-items:center;gap:8px;background:#ffefab;border:1px solid #ecd98c;' +
       'border-radius:10px;padding:14px 16px;margin:6px 0 10px}' +
       '.dyh-sel b{font-size:25px;font-weight:600;color:#1d2129}' +
       '.dyh-sel .dyh-caret{font-size:20px;color:#8a6d1f}' +
       '.dyh-sel em{margin-left:auto;font-size:18px;font-style:normal;color:#8a6d1f;white-space:nowrap}' +
       '.dyh-sel em b{color:#fe2c55;font-weight:700}' +
-      '.dyh-drop{background:#fffdf3;border:1px solid #ecdfb4;border-radius:10px;padding:6px 8px;margin:0 0 10px}' +
-      '.dyh-drop-i{display:flex;align-items:center;gap:10px;padding:13px 10px;border-bottom:1px solid #f2e4b8;font-size:23px}' +
-      '.dyh-drop-i.on{background:#ffeaa8;border-radius:8px;font-weight:600}' +
+      '.dyh-drop{background:#fffbe6;border:1px solid #ecd98c;border-radius:10px;padding:6px 8px;margin:0 0 10px}' +
+      '.dyh-drop-i{display:flex;align-items:center;gap:10px;padding:13px 10px;border-bottom:1px solid #f2e3a8;font-size:23px}' +
+      '.dyh-drop-i.on{background:#ffe58f;border-radius:8px;font-weight:600}' +
       '.dyh-drop-i em{margin-left:auto;font-size:17px;font-style:normal;color:#8a6d1f;white-space:nowrap}' +
-      '.dyh-drop-a{display:flex;gap:8px;flex-wrap:wrap;padding:10px 6px 6px;border-top:1px solid #f2e4b8}' +
+      '.dyh-drop-a{display:flex;gap:8px;flex-wrap:wrap;padding:10px 6px 6px;border-top:1px solid #f2e3a8}' +
       /* ---- 公众号行：名称 / 未读数 / 设分类 / 取关 四个并排 ---- */
-      '.dyh-acc2{display:flex;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid #f2e4b8}' +
+      '.dyh-acc2{display:flex;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid #f2e3a8}' +
       '.dyh-nm{flex:1 1 auto;min-width:0;font-size:23px;color:#1d2129;line-height:1.35;' +
       'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '.dyh-urn2{flex:0 0 auto;font-size:18px;font-weight:700;color:#fe2c55;white-space:nowrap}' +
       '.dyh-urn2.ok{color:#b3a66a;font-weight:400}' +
       '.dyh-acc2 .dyh-mini{flex:0 0 auto;padding:7px 10px;font-size:17px}' +
       /* ---- 某个公众号的未读视频列表 ---- */
-      '.dyh-vid{padding:14px 0;border-bottom:1px solid #f2e4b8}' +
+      '.dyh-vid{padding:14px 0;border-bottom:1px solid #f2e3a8}' +
       '.dyh-vid-t{font-size:23px;line-height:1.5;color:#1d2129;word-break:break-all}' +
       '.dyh-vid-m{display:flex;align-items:center;gap:10px;margin-top:9px;font-size:19px;color:#8a6d1f}' +
       '.dyh-vid-m span:first-child{margin-right:auto}' +
       '.dyh-mini.go{background:#fe2c55;border-color:#fe2c55;color:#fff;font-weight:600}' +
       /* ---- 老的分类行 / 账号行（保留样式，防止旧页面残留） ---- */
-      '.dyh-cat{display:flex;align-items:center;gap:10px;padding:14px 6px;border-bottom:1px solid #f2e4b8}' +
-      '.dyh-cat.sel{background:#ffeaa8;border-radius:8px;margin:2px -6px;padding-left:12px;padding-right:6px}' +
+      '.dyh-cat{display:flex;align-items:center;gap:10px;padding:14px 6px;border-bottom:1px solid #f2e3a8}' +
+      '.dyh-cat.sel{background:#ffe58f;border-radius:8px;margin:2px -6px;padding-left:12px;padding-right:6px}' +
       '.dyh-cat-l{display:flex;align-items:baseline;gap:9px;min-width:0}' +
       '.dyh-cat-l b{font-size:23px;font-weight:600}' +
       '.dyh-cat-l span{font-size:17px;color:#8a6d1f}' +
       '.dyh-cat-r{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}' +
-      '.dyh-mini{display:inline-block;padding:8px 13px;border:1px solid #ecdfb4;border-radius:8px;background:#fff4cf;' +
+      '.dyh-mini{display:inline-block;padding:8px 13px;border:1px solid #ecd98c;border-radius:8px;background:#ffefab;' +
       'color:#4e5969;font-size:17px;text-decoration:none;white-space:nowrap}' +
       '.dyh-mini.dg{background:#fff0f1;border-color:#ffd9dc;color:#fe2c55}' +
       '.dyh-mini.on{background:#fe2c55;border-color:#fe2c55;color:#fff;font-weight:600}' +
-      '.dyh-acc{padding:13px 0;border-bottom:1px solid #f2e4b8}' +
+      '.dyh-acc{padding:13px 0;border-bottom:1px solid #f2e3a8}' +
       '.dyh-acc-t{font-size:23px;color:#1d2129;line-height:1.45;word-break:break-all}' +
       '.dyh-urn{color:#fe2c55;font-weight:700;font-size:18px;margin-left:9px}' +
       '.dyh-urn.ok{color:#b3a66a;font-weight:400;margin-left:9px}' +
       '.dyh-acc-m{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}' +
-      '.dyh-input{width:100%;box-sizing:border-box;padding:15px 16px;border:1px solid #ecdfb4;border-radius:8px;' +
-      'background:#fffdf3;font-size:20px;margin:4px 0 13px}' +
+      '.dyh-input{width:100%;box-sizing:border-box;padding:15px 16px;border:1px solid #ecd98c;border-radius:8px;' +
+      'background:#fffbe6;font-size:20px;margin:4px 0 13px}' +
       '.dyh-lb{font-size:18px;color:#8a6d1f;display:block;margin-top:11px}' +
-      '.dyh-prog{background:#fff4cf;border-radius:8px;padding:16px 18px;margin:12px 0;font-size:19px;line-height:1.75}' +
+      '.dyh-prog{background:#ffefab;border-radius:8px;padding:16px 18px;margin:12px 0;font-size:19px;line-height:1.75}' +
       /* ---- 抓取进度条 ---- */
-      '.dyh-pwrap{background:#fffdf3;border:1px solid #ecdfb4;border-radius:12px;padding:16px 18px;margin:12px 0}' +
+      '.dyh-pwrap{background:#fffbe6;border:1px solid #ecd98c;border-radius:12px;padding:16px 18px;margin:12px 0}' +
       '.dyh-ptop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}' +
       '.dyh-pnum{font-size:36px;font-weight:700;color:#fe2c55;line-height:1.1}' +
       '.dyh-pnum small{font-size:20px;font-weight:600}' +
       '.dyh-pcnt{font-size:19px;color:#4e5969;margin-left:auto}' +
-      '.dyh-pbar{position:relative;height:22px;background:#f3e7c0;border-radius:11px;overflow:hidden;margin:12px 0 10px}' +
+      '.dyh-pbar{position:relative;height:22px;background:#f0dfa0;border-radius:11px;overflow:hidden;margin:12px 0 10px}' +
       '.dyh-pin{height:100%;width:0;border-radius:11px;transition:width .35s ease;' +
       'background:linear-gradient(90deg,#fe2c55,#ff7d00);' +
       'background-size:28px 28px;' +
@@ -1753,6 +1760,12 @@
     box.style.width = Math.round(W) + 'px';
     box.style.height = Math.round(H) + 'px';
     box.style.maxWidth = 'none'; box.style.maxHeight = 'none';
+    /* ★ 浅黄底色也用 inline 再写一遍：inline 优先级最高，抖音后插的样式表压不掉，
+       即使 CSS 类被页面样式顶掉，底色也不会退回白色（10-03 00:20） */
+    box.style.background = BG_PANEL;
+    box.style.backgroundColor = BG_PANEL;
+    var bd = panel.querySelector('#dyh-body');
+    if (bd) { bd.style.background = 'transparent'; }
   }
 
   function open(view) {
@@ -2039,10 +2052,9 @@
     }
     if (act === 'play') {
       var pid = el.getAttribute('data-id');
-      var purl = el.getAttribute('data-url') || ('https://www.douyin.com/video/' + pid);
-      openInApp(pid, purl);
+      openInApp(pid);          // 只唤起抖音 App；网页端不跳转、不开新标签
       if (pid && S.readIds.indexOf(pid) < 0) { S.readIds.push(pid); save(); }
-      toast('正在用抖音打开…（已记成已看）');
+      toast('已唤起抖音 App（网页保持不动）');
       open('accv'); return;
     }
     if (act === 'read-one') {
