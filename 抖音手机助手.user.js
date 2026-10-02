@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 00:55 · ① 点「▶ 用抖音看」仍弹「允许网站打开抖音吗」：查清是 Via（WebView 内核）自己的「链接处理」确认框，网页 JS 关不掉，彻底关掉要去 Via → 设置 → 高级设置 → 链接处理 →「直接打开」（或弹框时勾「记住选择」）；② 默认只发一次【带手势】的 snssdk1128://，不再补发第二次【没手势】的跳转（那必然又是一个框）；③ 视频列表页新增「唤起方式」开关：只scheme / 只intent（写死抖音包名）/ 自动，可循环切换并记住；④ 唤起失败只提示，网页端始终不跳转、不开新标签
+// @version      2026-10-03 01:25 · ① 浅黄再加深一档且按钮/卡片一起黄（面板 #fff2be / 卡片 #ffe9a3 / 按钮 #fff8d0）；底色改 inline + !important 写入（旧脚本白底 !important 压不动了）+ 设置页新增皮肤自检与重刷按钮；② 抓未读：信息流每页 20→40 条，补抓固定 2 并发 + 700~1500ms 间隔，连续 5 个账号失败即收工写断点（下次自动补，不漏也不满屏失败）
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -32,8 +32,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 00:55 · ① 点「▶ 用抖音看」还弹「允许网站打开抖音吗」—— 查清了：那是 Via（WebView 内核）自己的「链接处理」确认框，网页里的 JS 关不掉，彻底关掉要走 Via → 设置 → 高级设置 → 链接处理 →「直接打开」（弹框时勾「记住选择」也一样）；② 脚本这边也改了：默认只发一次【带手势】的 snssdk1128://，不再偷偷补发第二次【没手势】的跳转（那必然又是一个框）；③ 视频列表页顶部新增「唤起方式」开关，可循环切换 只scheme / 只intent（写死抖音包名）/ 自动，哪条在你手机上不弹框就锁哪条，会记住';
-  var VER_SHORT = '10-03 00:55';
+  var VER = '2026-10-03 01:25 · ① 浅黄再加深一档，而且这次【按钮/输入框/卡片】也一起黄了 —— 首页几乎被大按钮铺满，之前只有面板底是黄的、按钮还是接近白的 #fffbe6，整屏看着当然还是白的；现在面板 #fff2be / 卡片 #ffe9a3 / 按钮 #fff8d0，并且底色用 inline + !important 写入（上一版只写 inline 没加 important，被旧脚本那张白底 !important 样式表顶回去了 —— 这才是「改了还是白的」真凶），设置页新增「🎨 皮肤自检」直接显示浏览器实际算出的底色 + 「🔧 重刷皮肤」按钮；② 抓未读取经：信息流每页从 20 条提到 40 条（一页覆盖两倍账号，要补抓的少一半），补抓固定最多 2 并发 + 每请求间隔 700~1500ms，连续 5 个账号没抓到就见好就收（已抓到的存盘，剩下的下次自动从断点补）—— 不再硬磨到满屏失败，也不漏';
+  var VER_SHORT = '10-03 01:25';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -430,18 +430,26 @@
      剩下的账号确实没更新，根本不用再问。日常 2~5 次请求就能覆盖全部 392 个账号。
      用不了（接口变更/风控）会自动降级回逐个抓，不会比原来更差。 */
   var API_FOLLOW_FEED = 'https://www.douyin.com/aweme/v1/web/follow/feed/';
+  /* ★ 每页多要点（10-03 01:25）：默认一页 40 条（原来是 20）。
+     同样的翻页次数能覆盖两倍多的账号 → 需要逐个补抓的账号大幅变少 → 失败自然变少、也更快。
+     抖音不认大 count 时会返回空，自动退回 20 再要一次（FEED_COUNT 记住这次教训，后面不再白试）。 */
+  var FEED_COUNT = 40;
   function fetchFollowFeed(cursor, opt) {
-    return dyGet(API_FOLLOW_FEED, commonParams({
-      count: '20', max_cursor: String(cursor || 0),
-      refresh_index: '0', source_type: '0', feed_style: '0', is_top: '0', pull_type: '0'
-    }), opt).then(function (j) {
-      var list = j && (j.aweme_list || []);
-      return {
-        list: (list || []).map(normAweme),
-        hasMore: !!(j && j.has_more),
-        nextCursor: (j && j.max_cursor) || 0
-      };
-    });
+    function go(n) {
+      return dyGet(API_FOLLOW_FEED, commonParams({
+        count: String(n), max_cursor: String(cursor || 0),
+        refresh_index: '0', source_type: '0', feed_style: '0', is_top: '0', pull_type: '0'
+      }), opt).then(function (j) {
+        var list = (j && (j.aweme_list || [])) || [];
+        if (!list.length && n > 20) { FEED_COUNT = 20; return go(20); }   // 不认 40：退回 20
+        return {
+          list: list.map(normAweme),
+          hasMore: !!(j && j.has_more),
+          nextCursor: (j && j.max_cursor) || 0
+        };
+      });
+    }
+    return go(FEED_COUNT);
   }
 
   /* ★★★ 真实「已看」记录（2026-10-02 新增，这是本次修复的核心）★★★
@@ -781,6 +789,7 @@
     var newCount = 0, errors = 0, okCount = 0, failAcc = 0;
     var histMap = {}, histN = 0, histSkip = 0, histErr = '';   // 抖音服务器端的「你看过」记录
     var consecOk = 0, consecFail = 0, coolUntil = 0, riskHits = 0, riskStreak = 0, bailout = false, dispatched = 0;
+    var accFailStreak = 0, slowRounds = 0;   // 连续【账号】级失败数 + 已经「歇过几次」（连挂 5 个歇一次）
     var retries = 0, stalled = false, batchEnd = false;   // batchEnd = 分批跑完的正常收尾（≠异常收工）
     var prefixTotal = 0;   // 断点用：本轮【从头算起的连续成功账号数】（遇到第一个没抓到的就停）
     // 上限取设置里的值（默认 6），但【开局只用 3 个】——先探路，顺了再往上加
@@ -815,13 +824,31 @@
     }
     // AIMD：顺了才加速，卡了立刻减速（降到 1 之后恢复得更快：连成 4 个就 +1）
     function onGood() {
-      consecOk++; consecFail = 0; riskStreak = 0;
+      consecOk++; consecFail = 0; riskStreak = 0; accFailStreak = 0;
       var need = conc <= 1 ? 4 : 6;
       if (consecOk >= need && conc < maxConc) { conc++; consecOk = 0; }
     }
     function onBad(e, acc) {
       errors++; consecOk = 0; consecFail++;
-      if (acc && !acc._failCounted) { acc._failCounted = 1; failAcc++; }   // 同一账号只记一次
+      if (acc && !acc._failCounted) { acc._failCounted = 1; failAcc++; accFailStreak++; }   // 同一账号只记一次
+      /* ★ 连续 5 个账号没抓到 → 先「歇口气」再继续（10-03 01:25）。
+         旧行为是硬磨：一个接一个 403，满屏失败，还把抖音盯得更死，下一轮更难抓。
+         现在是：连挂 5 个 → 降到 1 并发 + 换令牌 + 长冷却 10~15 秒（让风控过去），
+         ★ 注意是【冷却后继续】，不是【收工】—— 一轮能抓完就尽量一轮抓完，不让你多按几次。
+         只有连着歇了 3 次还是没起色（累计约 15 个账号连挂，说明抖音这次真的不给了），
+         才收工写断点；没抓到的下次自动从断点补，一个都不会漏。 */
+      if (accFailStreak >= 5 && !bailout) {
+        accFailStreak = 0; slowRounds++;
+        conc = 1;
+        refreshMsToken();
+        coolUntil = Date.now() + (10000 + Math.random() * 5000);
+        if (slowRounds >= 3) {
+          bailout = true; stopped = true;
+          toast('抖音这会儿一直不给数据，本轮先收尾（已抓到的都存好了）；没抓到的下次自动从断点补，不会漏。', 6000);
+        } else {
+          toast('连着几个没抓到，先歇十几秒再继续（这轮会接着抓完，不用你再点）。', 4000);
+        }
+      }
       if (e && e.risk) {                                   // 风控：降到 1 并发 + 长冷却 + 换令牌，慢慢来（不再轻易收工）
         riskHits++; riskStreak++; consecFail = 0;
         conc = 1;
@@ -1022,8 +1049,11 @@
        无论成败都一定 resolve，绝不漏掉并发槽位（漏槽位 = 卡死的元凶）。 */
     var MAX_TRY = 2;   // 首次之外再额外试 2 次
     function runItem(acc) {
-      // 错峰：别让几个请求在同一毫秒齐射出去（齐射最像机器人，容易被盯）
-      var waitMs = Math.max(0, coolUntil - Date.now()) + 80 + Math.floor(Math.random() * 220);
+      /* 错峰：别让几个请求在同一毫秒齐射出去（齐射最像机器人，容易被盯）。
+         ★ 逐个补抓一律走「慢而稳」的节奏（10-03 01:25：700~1500ms）：
+           这条路上一个账号就是一次请求，请求密了必然 403；慢一点代价只是时间，
+           换来的是「几乎不失败」—— 失败要重跑整批，反倒更慢。 */
+      var waitMs = Math.max(0, coolUntil - Date.now()) + 700 + Math.floor(Math.random() * 800);
       dispatched++;
       return sleep(waitMs).then(function () { return step(0); });
 
@@ -1156,6 +1186,10 @@
       return n;
     }
     function runPass(list, pass) {
+      /* ★ 逐个补抓固定用「最多 2 并发」（10-03 01:25）：
+         这条路上一个账号一次请求，并发越高越像机器人 → 403 → 满屏失败。
+         信息流阶段已经把绝大多数账号核对掉了，这里剩下的本来就不多，用 2 并发慢慢磨最稳。 */
+      conc = Math.min(2, maxConc);
       var BATCH = list.length <= 120 ? list.length
         : Math.max(10, Math.min(60, parseInt(S.cfg.scanBatch, 10) || 60));
       var next = (pass || 0) + 1;
@@ -1617,6 +1651,15 @@
       '想更快 → 上限填 <b>8~10</b>；还是失败多 → 上限填 <b>3~4</b>（慢一点但几乎不失败）。<br>' +
       '全部 ' + S.accounts.length + ' 个账号：上限 6 大约 2~5 分钟，上限 3 大约 4~8 分钟。</div>';
     h += '<button class="dyh-btn primary" data-act="save-settings">💾 保存</button>';
+    /* 皮肤自检：直接把浏览器【实际算出来】的底色打印出来。
+       如果这里显示的是白色/透明，说明有别的东西（旧脚本的样式表 / Via 的夜间模式）在压我们 ——
+       一眼就能定位，不用再猜「到底改没改上」。 */
+    h += '<label class="dyh-lb">🎨 浅黄皮肤自检</label>';
+    h += '<div class="dyh-card"><div class="dyh-tip" style="margin:0">' + skinProbe() + '</div></div>';
+    h += '<button class="dyh-btn" data-act="reskin">🔧 重刷皮肤（底色被压回白色时点这个）</button>';
+    h += '<div class="dyh-tip" style="margin-top:2px">如果自检里写到 <b>rgb(255, 255, 255)</b> 或 <b>rgba(0,0,0,0)</b>：' +
+      '① 点一下上面这颗「重刷皮肤」；② 还是白 → 你手机里多半<b>还装着旧版脚本</b>（在 Via 的脚本/书签里把旧的删掉，只留一个）；' +
+      '③ 开着 <b>Via 的夜间模式 / 深色网页</b> 会把浅色反掉，先关掉再看。</div>';
     h += '<button class="dyh-btn gray" data-act="clear-job">🧹 清掉抓取断点（下次全部重抓）</button>';
     h += '<button class="dyh-btn" data-act="export">📤 导出数据到手机本地（下载 json）</button>';
     h += '<button class="dyh-btn gray" data-act="clear">🗑 清空本地数据</button>';
@@ -1628,10 +1671,10 @@
 
   /* ----------------------------- 面板骨架 ----------------------------- */
   /* 浅黄配色集中定义（10-03 00:20：用户说第一版太淡看着还是白的，整体加深一档）
-     面板 #fff6cc / 卡片·小标签 #ffefab / 按钮·输入框 #fffbe6 / 描边 #ecd98c / 分割线 #f2e3a8
+     面板 #fff2be / 卡片·小标签 #ffe9a3 / 按钮·输入框 #fff8d0 / 描边 #e5cd7d / 分割线 #efdc9c
      ★ BG_PANEL 这个常量下面 CSS 和 inline 两处都要用，改色只改这里 */
-  var BG_PANEL = '#fff6cc';
-  var fab = null, panel = null, bodyEl = null;
+  var BG_PANEL = '#fff2be';
+  var fab = null, panel = null, bodyEl = null, skinEl = null;
 
   function ensureUI() {
     if (fab) return;
@@ -1654,77 +1697,77 @@
       '.dyh-box h3{margin:0 0 17px!important;font-size:28px!important;display:flex!important;align-items:center;flex:0 0 auto}' +
       '.dyh-box h3 span{margin-left:auto;font-size:40px!important;color:#c9cdd4;padding:0 8px}' +
       '.dyh-ver{font-size:16px!important;color:#c9cdd4;font-weight:400;margin-left:9px!important}' +
-      '.dyh-zbtn{font-size:30px!important;color:#4e5969;background:#ffefab;border-radius:8px;' +
+      '.dyh-zbtn{font-size:30px!important;color:#4e5969;background:#ffe9a3;border-radius:8px;' +
       'padding:4px 14px;margin-left:auto!important}' +
       '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
-      '.dyh-btn{display:block;width:100%;margin:11px 0;padding:19px 20px;border:1px solid #ecd98c;border-radius:10px;' +
-      'background:#fffbe6;font-size:24px!important;color:#1d2129;text-align:left}' +
+      '.dyh-btn{display:block;width:100%;margin:11px 0;padding:19px 20px;border:1px solid #e5cd7d;border-radius:10px;' +
+      'background:#fff8d0;font-size:24px!important;color:#1d2129;text-align:left}' +
       '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
       '.dyh-btn.gray{color:#8a6d1f}' +
-      '.dyh-card{background:#ffefab;border-radius:10px;padding:15px 17px;margin-bottom:13px}' +
-      '.dyh-row{display:flex;align-items:center;padding:16px 0;border-bottom:1px solid #f2e3a8;font-size:24px!important}' +
+      '.dyh-card{background:#ffe9a3;border-radius:10px;padding:15px 17px;margin-bottom:13px}' +
+      '.dyh-row{display:flex;align-items:center;padding:16px 0;border-bottom:1px solid #efdc9c;font-size:24px!important}' +
       '.dyh-row:last-child{border-bottom:0}' +
       '.dyh-row b{font-weight:500;color:#4e5969}' +
       '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
       '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
-      '.dyh-item{padding:16px 0;border-bottom:1px solid #f2e3a8}' +
+      '.dyh-item{padding:16px 0;border-bottom:1px solid #efdc9c}' +
       '.dyh-item-t{font-size:24px!important;line-height:1.5;color:#1d2129}' +
       '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:9px;font-size:19px;color:#8a6d1f}' +
       '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:9px 17px}' +
       '.dyh-tip{font-size:19px!important;color:#8a6d1f;line-height:1.75;margin:11px 0}' +
       '.dyh-back{font-size:20px;color:#fe2c55;margin-bottom:13px}' +
       /* ---- 分类下拉选择器 ---- */
-      '.dyh-sel{display:flex;align-items:center;gap:8px;background:#ffefab;border:1px solid #ecd98c;' +
+      '.dyh-sel{display:flex;align-items:center;gap:8px;background:#ffe9a3;border:1px solid #e5cd7d;' +
       'border-radius:10px;padding:14px 16px;margin:6px 0 10px}' +
       '.dyh-sel b{font-size:25px;font-weight:600;color:#1d2129}' +
       '.dyh-sel .dyh-caret{font-size:20px;color:#8a6d1f}' +
       '.dyh-sel em{margin-left:auto;font-size:18px;font-style:normal;color:#8a6d1f;white-space:nowrap}' +
       '.dyh-sel em b{color:#fe2c55;font-weight:700}' +
-      '.dyh-drop{background:#fffbe6;border:1px solid #ecd98c;border-radius:10px;padding:6px 8px;margin:0 0 10px}' +
-      '.dyh-drop-i{display:flex;align-items:center;gap:10px;padding:13px 10px;border-bottom:1px solid #f2e3a8;font-size:23px}' +
+      '.dyh-drop{background:#fff8d0;border:1px solid #e5cd7d;border-radius:10px;padding:6px 8px;margin:0 0 10px}' +
+      '.dyh-drop-i{display:flex;align-items:center;gap:10px;padding:13px 10px;border-bottom:1px solid #efdc9c;font-size:23px}' +
       '.dyh-drop-i.on{background:#ffe58f;border-radius:8px;font-weight:600}' +
       '.dyh-drop-i em{margin-left:auto;font-size:17px;font-style:normal;color:#8a6d1f;white-space:nowrap}' +
-      '.dyh-drop-a{display:flex;gap:8px;flex-wrap:wrap;padding:10px 6px 6px;border-top:1px solid #f2e3a8}' +
+      '.dyh-drop-a{display:flex;gap:8px;flex-wrap:wrap;padding:10px 6px 6px;border-top:1px solid #efdc9c}' +
       /* ---- 公众号行：名称 / 未读数 / 设分类 / 取关 四个并排 ---- */
-      '.dyh-acc2{display:flex;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid #f2e3a8}' +
+      '.dyh-acc2{display:flex;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid #efdc9c}' +
       '.dyh-nm{flex:1 1 auto;min-width:0;font-size:23px;color:#1d2129;line-height:1.35;' +
       'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '.dyh-urn2{flex:0 0 auto;font-size:18px;font-weight:700;color:#fe2c55;white-space:nowrap}' +
       '.dyh-urn2.ok{color:#b3a66a;font-weight:400}' +
       '.dyh-acc2 .dyh-mini{flex:0 0 auto;padding:7px 10px;font-size:17px}' +
       /* ---- 某个公众号的未读视频列表 ---- */
-      '.dyh-vid{padding:14px 0;border-bottom:1px solid #f2e3a8}' +
+      '.dyh-vid{padding:14px 0;border-bottom:1px solid #efdc9c}' +
       '.dyh-vid-t{font-size:23px;line-height:1.5;color:#1d2129;word-break:break-all}' +
       '.dyh-vid-m{display:flex;align-items:center;gap:10px;margin-top:9px;font-size:19px;color:#8a6d1f}' +
       '.dyh-vid-m span:first-child{margin-right:auto}' +
       '.dyh-mini.go{background:#fe2c55;border-color:#fe2c55;color:#fff;font-weight:600}' +
       /* ---- 老的分类行 / 账号行（保留样式，防止旧页面残留） ---- */
-      '.dyh-cat{display:flex;align-items:center;gap:10px;padding:14px 6px;border-bottom:1px solid #f2e3a8}' +
+      '.dyh-cat{display:flex;align-items:center;gap:10px;padding:14px 6px;border-bottom:1px solid #efdc9c}' +
       '.dyh-cat.sel{background:#ffe58f;border-radius:8px;margin:2px -6px;padding-left:12px;padding-right:6px}' +
       '.dyh-cat-l{display:flex;align-items:baseline;gap:9px;min-width:0}' +
       '.dyh-cat-l b{font-size:23px;font-weight:600}' +
       '.dyh-cat-l span{font-size:17px;color:#8a6d1f}' +
       '.dyh-cat-r{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}' +
-      '.dyh-mini{display:inline-block;padding:8px 13px;border:1px solid #ecd98c;border-radius:8px;background:#ffefab;' +
+      '.dyh-mini{display:inline-block;padding:8px 13px;border:1px solid #e5cd7d;border-radius:8px;background:#ffe9a3;' +
       'color:#4e5969;font-size:17px;text-decoration:none;white-space:nowrap}' +
       '.dyh-mini.dg{background:#fff0f1;border-color:#ffd9dc;color:#fe2c55}' +
       '.dyh-mini.on{background:#fe2c55;border-color:#fe2c55;color:#fff;font-weight:600}' +
-      '.dyh-acc{padding:13px 0;border-bottom:1px solid #f2e3a8}' +
+      '.dyh-acc{padding:13px 0;border-bottom:1px solid #efdc9c}' +
       '.dyh-acc-t{font-size:23px;color:#1d2129;line-height:1.45;word-break:break-all}' +
       '.dyh-urn{color:#fe2c55;font-weight:700;font-size:18px;margin-left:9px}' +
       '.dyh-urn.ok{color:#b3a66a;font-weight:400;margin-left:9px}' +
       '.dyh-acc-m{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}' +
-      '.dyh-input{width:100%;box-sizing:border-box;padding:15px 16px;border:1px solid #ecd98c;border-radius:8px;' +
-      'background:#fffbe6;font-size:20px;margin:4px 0 13px}' +
+      '.dyh-input{width:100%;box-sizing:border-box;padding:15px 16px;border:1px solid #e5cd7d;border-radius:8px;' +
+      'background:#fff8d0;font-size:20px;margin:4px 0 13px}' +
       '.dyh-lb{font-size:18px;color:#8a6d1f;display:block;margin-top:11px}' +
-      '.dyh-prog{background:#ffefab;border-radius:8px;padding:16px 18px;margin:12px 0;font-size:19px;line-height:1.75}' +
+      '.dyh-prog{background:#ffe9a3;border-radius:8px;padding:16px 18px;margin:12px 0;font-size:19px;line-height:1.75}' +
       /* ---- 抓取进度条 ---- */
-      '.dyh-pwrap{background:#fffbe6;border:1px solid #ecd98c;border-radius:12px;padding:16px 18px;margin:12px 0}' +
+      '.dyh-pwrap{background:#fff8d0;border:1px solid #e5cd7d;border-radius:12px;padding:16px 18px;margin:12px 0}' +
       '.dyh-ptop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}' +
       '.dyh-pnum{font-size:36px;font-weight:700;color:#fe2c55;line-height:1.1}' +
       '.dyh-pnum small{font-size:20px;font-weight:600}' +
       '.dyh-pcnt{font-size:19px;color:#4e5969;margin-left:auto}' +
-      '.dyh-pbar{position:relative;height:22px;background:#f0dfa0;border-radius:11px;overflow:hidden;margin:12px 0 10px}' +
+      '.dyh-pbar{position:relative;height:22px;background:#edd68f;border-radius:11px;overflow:hidden;margin:12px 0 10px}' +
       '.dyh-pin{height:100%;width:0;border-radius:11px;transition:width .35s ease;' +
       'background:linear-gradient(90deg,#fe2c55,#ff7d00);' +
       'background-size:28px 28px;' +
@@ -1737,7 +1780,12 @@
       '.dyh-pmeta b{color:#1d2129;font-weight:600}' +
       '.dyh-pnow{font-size:17px;color:#4e5969;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
       '.dyh-pwarn{margin-top:8px;font-size:17px;color:#ff7d00;font-weight:600}';
+    /* ★ 皮肤样式表打标记 + 每次打开面板都把它重新塞到 <head> 的最后面：
+       万一你手机里还装着【旧版脚本】（旧版那张样式表是白底 + !important），
+       同优先级下「后出现的赢」—— 把我们的挪到最后，旧版就压不动我们了（10-03 01:25）。 */
+    st.setAttribute('data-dyh-skin', '1');
     document.head.appendChild(st);
+    skinEl = st;
 
     fab = document.createElement('div');
     fab.className = 'dyh-fab';
@@ -1787,12 +1835,44 @@
     box.style.width = Math.round(W) + 'px';
     box.style.height = Math.round(H) + 'px';
     box.style.maxWidth = 'none'; box.style.maxHeight = 'none';
-    /* ★ 浅黄底色也用 inline 再写一遍：inline 优先级最高，抖音后插的样式表压不掉，
-       即使 CSS 类被页面样式顶掉，底色也不会退回白色（10-03 00:20） */
-    box.style.background = BG_PANEL;
-    box.style.backgroundColor = BG_PANEL;
-    var bd = panel.querySelector('#dyh-body');
-    if (bd) { bd.style.background = 'transparent'; }
+    applySkin(box);
+  }
+
+  /* ★★ 浅黄皮肤三保险（10-03 01:25，专门治「改了还是白的」）
+     ① inline 用 setProperty(..., 'important') —— inline + !important 是最高优先级，
+        连旧版脚本那张「白底 + !important」的样式表都压不过它（上一版只写了 inline 没加 important，
+        碰上旧的 !important 白底就会被顶回去，这就是上一版在你手机上没生效的真凶）；
+     ② 把我们的皮肤样式表重新 append 到 <head> 最后面（同优先级下后出现的赢）；
+     ③ 内容区保持透明，底色全部由面板这一层决定。 */
+  function applySkin(box) {
+    if (!box) { if (panel) box = panel.querySelector('.dyh-box'); }
+    if (!box) return;
+    try {
+      box.style.setProperty('background', BG_PANEL, 'important');
+      box.style.setProperty('background-color', BG_PANEL, 'important');
+      box.style.setProperty('background-image', 'none', 'important');
+    } catch (e) {
+      box.style.background = BG_PANEL;            // 老浏览器兜底
+      box.style.backgroundColor = BG_PANEL;
+    }
+    if (panel) {
+      var bd = panel.querySelector('#dyh-body');
+      if (bd) { bd.style.background = 'transparent'; bd.style.backgroundColor = 'transparent'; }
+    }
+    if (skinEl && skinEl.parentNode && skinEl.parentNode.lastChild !== skinEl) {
+      try { skinEl.parentNode.appendChild(skinEl); } catch (e2) { }   // 挪到最后：谁最后谁说话
+    }
+  }
+  /* 皮肤自检：把浏览器【实际算出来的】底色报出来，一眼就能看出到底有没有生效 */
+  function skinProbe() {
+    if (!panel) return '（面板还没打开）';
+    var box = panel.querySelector('.dyh-box');
+    if (!box) return '（找不到面板）';
+    var cs = (window.getComputedStyle ? window.getComputedStyle(box) : null);
+    var real = cs ? (cs.backgroundColor || cs.background || '') : '';
+    var inline = box.style.backgroundColor || box.style.background || '';
+    return '浏览器实际底色：<b>' + esc(real || '空') + '</b><br>内联写入值：<b>' + esc(inline || '空') + '</b>' +
+      '<br>期望值：<b>' + BG_PANEL + '</b>（rgb(255, 242, 190)）';
   }
 
   function open(view) {
@@ -2070,6 +2150,15 @@
     }
 
     if (act === 'uf-stop') { UF_CANCEL = true; toast('已停手，剩下几个保持原样'); return; }
+
+    /* 重刷浅黄皮肤：把样式表挪到 head 末尾 + 用 inline !important 重写底色 */
+    if (act === 'reskin') {
+      ensureUI();
+      applySkin(panel ? panel.querySelector('.dyh-box') : null);
+      toast('皮肤已重刷：' + (window.getComputedStyle && panel ?
+        (window.getComputedStyle(panel.querySelector('.dyh-box')).backgroundColor || '') : ''));
+      open('settings'); return;
+    }
 
     /* ---------- 看某个公众号的未读视频 ---------- */
     if (act === 'acc-videos') {
