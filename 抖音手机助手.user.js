@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 02:29 · ① 换掉抓未读的根本思路：查电脑版确认抖音 Argus 风控「直发签名请求一律 403」（电脑版 10-02 起也全 403），故新增「网络监听层」只抄抖音前端自己发的响应（0 次自签名请求 → 不会失败）；② 新增关注页收割引擎：先带你到「关注」页，滚动让抖音前端自己翻页，翻到上次抓取前即追平，0 次逐个请求；③ 直读页面「N个作品未看」拿到真实未读数；④ 设置页新增主通道开关
+// @version      2026-10-03 03:10 · ① 修「抓完以后未读视频查看没按抓取结果显示」三个真 bug：ⓐ 统计口径两边不一致（视频按作者 secUid 入账，查看页按关注列表 secUserId 查）→ 现在 secUid 与昵称两个 key 都登记；ⓑ 作者不在关注列表里就整个不显示 → 合成虚拟账号照常列出；ⓒ 抓完之后仍把全部账号逐个再打一遍 → 收割核对过的已剔除；② 未读数改用抖音关注页「N个作品未看」校准并标 ⁺；③ 结果页新增对账行 + 「去看未读视频」按钮
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -131,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 02:29 · ① 【换掉抓未读的根本思路 —— 不再自己发请求】查电脑版 server/cdp.js 与 server.log 后确认：抖音现在的 Argus 风控「直发的签名请求一律 403/444」，电脑版自己从 10-02 02:13 起也全是 403 —— 说明再怎么调并发/换令牌都救不回来。电脑版唯一稳定成功的是【在真实登录浏览器里发请求】和【直接读关注页 DOM】，这里做成更强版：新增「网络监听层」把抖音前端自己发的响应抄一份（只 clone 不消费，抖音毫无感知），我们全程 0 次自签名请求 → 不存在「获取失败」；② 新增【关注页收割引擎】：点「抓未读」会先带你到抖音「关注」页，然后在页面里往下滚，翻页请求由抖音前端自己发（带完整签名+真设备指纹，服务端必给 200），我们只收响应；翻到上次抓取之前的视频即判追平 → 全部账号核对完毕，0 次逐个请求；③ 顺带直读页面上抖音写的「N个作品未看」—— 那是服务器给的真实未读数，和 App 一致；④ 设置页新增「抓未读的主通道」开关（关注页收割 / 老办法），首页按钮改名「📡 抓最新未读视频（去关注页·不失败）」';
-  var VER_SHORT = '10-03 02:29';
+  var VER = '2026-10-03 03:10 · ① 修「抓完以后『未读视频查看』没按抓取结果显示」的三个真 bug：ⓐ 统计口径两边不一致 —— 抓到的视频按【作者的 secUid】入账，查看页却拿【关注列表的 secUserId】去查，只要有一边缺失（老数据只有昵称 / 关注列表没刷新过）就查不到，抓到了也显示 0 未读；现在同一个账号的 secUid 和昵称【两个 key 都登记】，谁查都查得到，而且只数一次；ⓑ 作者不在关注列表里就整个不显示 —— 现在合成为「新·」开头的虚拟账号照常列出来，抓到的东西一条都不会凭空消失；ⓒ 抓完之后仍会把 plan 里【全部账号逐个再打一遍】（收割划掉的账号没从名单里剔除），既慢又会把刚抓到的结果搅乱，现在收割核对过的直接剔除；② 查看页的未读数改用【抖音关注页写的「N个作品未看」】校准：本机明细不够就以抖音给的为准并标 ⁺，点进某个号还会写明「抖音标了 5 条、本机抓到 3 条明细」，不再让你以为是漏抓；③ 结果页新增「现在全部未读 N 条 / M 个号」对账行 + 「📺 去看未读视频」按钮，抓完一键直达';
+  var VER_SHORT = '10-03 03:10';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1527,12 +1527,16 @@
         return harvestPhase();
       })
       .then(function () {
-        /* 收割已经把全部账号核对完了 → 直接收工，连信息流那一次请求都省掉 */
+        /* 收割核对过的账号要从本轮名单里划掉。
+           ★ 以前这里写得有问题：left0 算出来了，却只用它决定「要不要跑信息流」，
+             没用它缩小 plan —— 下一环节拿着【完整的 plan】照样把几百个账号逐个打一遍，
+             于是收割刚抄到的新视频，又被后续这堆请求折腾一遍，性能和结果都对不上。 */
         var left0 = [];
         for (var iz = 0; iz < plan.length; iz++) if (!caught[plan[iz].secUserId]) left0.push(plan[iz]);
-        if (!left0.length) { feedCaughtN = plan.length; }
+        if (!left0.length) feedCaughtN = plan.length;
+        plan = left0;
         report('', true);
-        if (!left0.length) return;
+        if (!plan.length) return;
         return feedPhase();
       })
       .then(function () {
@@ -1600,7 +1604,7 @@
      删掉的分类里的账号自动落到「未分类」，不会跟着消失。
      每个账号后面标未读条数：视频对象里带 secUid 就按 secUid 数（对方改名也不怕），
      拿不到就退回按昵称数。 */
-  var MGR = { cat: '', kw: '', adding: false, editing: '', drop: false, acc: '', sync: false };
+  var MGR = { cat: '', kw: '', adding: false, editing: '', drop: false, acc: '', accName: '', sync: false };
   var NO_CAT = '__none__';                       // 「未分类」的空槽（真值仍是空字符串）
   var ALL_CAT = '__all__';                       // 「全部分类」（进管理页默认就是这个）
 
@@ -1614,17 +1618,90 @@
     return arr;
   }
 
-  function unreadByAccount() {
-    var readMap = {}, m = {}, i, j;
+  function normName(s) { return String(s || '').replace(/\s+/g, ''); }
+
+  /* ======================= 未读统计的统一视图（10-03 03:10 重做）=======================
+     以前 unreadByAccount 用「视频的 secUid」建表，而列表用「账号的 secUserId」去查 ——
+     两边只要有一边缺失（老数据只有昵称 / 关注列表没刷新到），就查不到 → 抓到了也显示 0 未读，
+     也就是你说的「抓完以后查看页没按抓取结果显示」。现在两边都写、两边都能查。
+
+     顺便解决两件事：
+       ① 作者不在关注列表里（列表没刷新过 / 刚关注）→ 合成「虚拟账号」照样列出来，绝不吞掉；
+       ② 抖音关注页上写的「N 个作品未看」是服务器给的真实未读数，本机明细不够时以它为准。 */
+  function buildUnreadView() {
+    var readMap = {}, groups = {}, order = [], i, v, k;
     for (i = 0; i < S.readIds.length; i++) readMap[S.readIds[i]] = 1;
-    for (j = 0; j < S.videos.length; j++) {
-      var v = S.videos[j];
-      if (readMap[v.awemeId]) continue;
-      var k = v.secUid || v.account;
-      if (!k) continue;
-      m[k] = (m[k] || 0) + 1;
+    for (i = 0; i < S.videos.length; i++) {
+      v = S.videos[i];
+      if (!v || !v.awemeId || readMap[v.awemeId]) continue;
+      k = v.secUid || ('n:' + normName(v.account || ''));
+      if (!groups[k]) { groups[k] = { key: k, secUid: v.secUid || '', name: v.account || '', n: 0, newest: 0 }; order.push(k); }
+      var g = groups[k];
+      g.n++;
+      if (!g.name && v.account) g.name = v.account;
+      if (!g.secUid && v.secUid) g.secUid = v.secUid;
+      if ((v.publishedAt || 0) > g.newest) g.newest = v.publishedAt || 0;
     }
-    return m;
+    /* 同一个账号的两个 key 都登记同一个数 —— 谁查都查得到，但只数一次 */
+    var map = {};
+    for (i = 0; i < order.length; i++) {
+      var g2 = groups[order[i]], n = g2.n;
+      if (g2.secUid) map[g2.secUid] = n;
+      var nn = normName(g2.name);
+      if (nn) map[nn] = Math.max(map[nn] || 0, n);
+      if (g2.name) map[g2.name] = Math.max(map[g2.name] || 0, n);
+    }
+    return { map: map, groups: groups, order: order };
+  }
+
+  /* 兼容旧写法：unreadByAccount() 直接当 map 用 */
+  function unreadByAccount() { return buildUnreadView().map; }
+
+  /* 一个账号有几个未读：本机明细（userid / 昵称 都能命中） */
+  function localUnread(a, um) {
+    if (!a) return 0;
+    if (a.secUserId && um[a.secUserId]) return um[a.secUserId];
+    if (a.name && um[a.name]) return um[a.name];
+    var nn = normName(a.name);
+    return (nn && um[nn]) || 0;
+  }
+
+  /* 抖音自己在关注页写的「N 个作品未看」—— 服务器给的真实未读数。
+     只认 6 小时内的（更久之前的是上一次抓的快照，不能拿来压现在的数）。 */
+  function serverUnread(a) {
+    var du = S.domUnread;
+    if (!du || !du.ts || Date.now() - du.ts > 6 * 3600000) return 0;
+    if (!a) return 0;
+    if (a.secUserId && du.map && du.map[a.secUserId]) return du.map[a.secUserId];
+    if (a.name && du.byName) {
+      if (du.byName[a.name]) return du.byName[a.name];
+      var nn = normName(a.name);
+      if (du.byName[nn]) return du.byName[nn];
+    }
+    return 0;
+  }
+
+  /* 显示用的未读数：本机有明细就用明细；抖音说更多 → 以抖音为准（说明还有几条没抓到明细） */
+  function accUnread(a, um) {
+    var local = localUnread(a, um), srv = serverUnread(a);
+    return srv > local ? srv : local;
+  }
+
+  /* 抓到视频了、但这个作者不在你的关注列表里（列表没刷新 / 刚关注 / 列表是旧的）
+     → 也给你列出来，不能让抓到的东西凭空消失。 */
+  function ghostAuthors(view) {
+    var have = {}, out = [], i, a;
+    for (i = 0; i < S.accounts.length; i++) {
+      a = S.accounts[i];
+      if (a.secUserId) have[a.secUserId] = 1;
+      if (a.name) have[normName(a.name)] = 1;
+    }
+    for (i = 0; i < view.order.length; i++) {
+      var g = view.groups[view.order[i]];
+      if ((g.secUid && have[g.secUid]) || (g.name && have[normName(g.name)])) continue;
+      out.push({ secUserId: g.secUid || '', name: g.name || g.key, category: '', _ghost: 1 });
+    }
+    return out;
   }
 
   function catOf(a) { return (a.category || NO_CAT); }
@@ -1641,26 +1718,39 @@
     return n;
   }
   function catUnread(cat, um) {
-    var n = 0;
-    for (var i = 0; i < S.accounts.length; i++) {
+    var n = 0, i;
+    for (i = 0; i < S.accounts.length; i++) {
       var a = S.accounts[i];
       if (cat !== ALL_CAT && catOf(a) !== cat) continue;
-      n += um[(a.secUserId || a.name)] || 0;
+      n += accUnread(a, um);
+    }
+    /* 抓到了视频、但作者不在关注列表里 —— 这部分也算进未读总数，
+       否则会出现「抓到 30 条、查看页只显示 12 条」的怪事。 */
+    if (cat === ALL_CAT || cat === NO_CAT) {
+      var gs = ghostAuthors(buildUnreadView());
+      for (i = 0; i < gs.length; i++) n += accUnread(gs[i], um);
     }
     return n;
   }
   // 一个分类下【当前】的成员（已按昵称关键字过滤）；未读多的排前面
   function catMembers(cat, um) {
-    var kw = (MGR.kw || '').trim().toLowerCase(), out = [];
-    for (var i = 0; i < S.accounts.length; i++) {
-      var a = S.accounts[i];
+    var kw = (MGR.kw || '').trim().toLowerCase(), out = [], i, a;
+    for (i = 0; i < S.accounts.length; i++) {
+      a = S.accounts[i];
       if (cat !== ALL_CAT && catOf(a) !== cat) continue;
       if (kw && String(a.name || a.secUserId || '').toLowerCase().indexOf(kw) < 0) continue;
       out.push(a);
     }
-    out.sort(function (x, y) {
-      return (um[(y.secUserId || y.name)] || 0) - (um[(x.secUserId || x.name)] || 0);
-    });
+    /* ★ 抓到视频却不在关注列表里的作者也要露出来（10-03 03:10）
+       以前只看 S.accounts：关注列表要是没刷新过，抓到的东西就整个显示不出来。 */
+    if (cat === ALL_CAT || cat === NO_CAT) {
+      var gs = ghostAuthors(buildUnreadView());
+      for (i = 0; i < gs.length; i++) {
+        if (kw && String(gs[i].name || gs[i].secUserId || '').toLowerCase().indexOf(kw) < 0) continue;
+        out.push(gs[i]);
+      }
+    }
+    out.sort(function (x, y) { return accUnread(y, um) - accUnread(x, um); });
     return out;
   }
 
@@ -1824,11 +1914,14 @@
     var n = Math.min(shown, 300);
     for (var i = 0; i < n; i++) {
       var a = mem[i];
-      var un = um[(a.secUserId || a.name)] || 0;
+      var un = accUnread(a, um);
+      var loc = localUnread(a, um);
+      /* 抖音说还有更多的（本机没抓到明细）标个 +，让你知道不是没抓到、是还没抓到明细 */
+      var plus = (un > loc) ? '<small style="font-size:15px;opacity:.75">⁺</small>' : '';
       h += '<div class="dyh-acc2">' +
         '<span class="dyh-nm" data-act="acc-videos" data-sec="' + esc(a.secUserId) + '" data-name="' + esc(a.name || '') + '">' +
-        esc(a.name || a.secUserId) + '</span>' +
-        '<span class="dyh-urn2' + (un ? '' : ' ok') + '">' + (un ? un + ' 未读' : '已看完') + '</span>' +
+        (a._ghost ? '<small style="font-size:15px;opacity:.7">新·</small>' : '') + esc(a.name || a.secUserId) + '</span>' +
+        '<span class="dyh-urn2' + (un ? '' : ' ok') + '">' + (un ? un + ' 未读' + plus : '已看完') + '</span>' +
         '<span class="dyh-mini" data-act="setcat" data-sec="' + esc(a.secUserId) + '">' + esc(a.category || '设分类') + '</span>' +
         '<span class="dyh-mini dg" data-act="unfollow-one" data-sec="' + esc(a.secUserId) + '" data-name="' + esc(a.name || '') + '">取关</span>' +
         '</div>';
@@ -1842,16 +1935,17 @@
      点进来只看这一个号的未读；点任意一条 → 唤起抖音 App 看（没唤起就退回网页版），
      并当场记成已看（未读数立刻 -1，不用等下一轮抓取）。 */
   function unreadVideosOf(sec, acc) {
-    var readMap = {}, out = [], i;
+    var readMap = {}, out = [], i, v;
     for (i = 0; i < S.readIds.length; i++) readMap[S.readIds[i]] = 1;
     var name = acc ? (acc.name || '') : '';
+    var nName = normName(name);
     for (i = 0; i < S.videos.length; i++) {
-      var v = S.videos[i];
-      if (readMap[v.awemeId]) continue;
-      // 优先按 secUid 认（对方改名也不怕）；老数据只有昵称的，退回比昵称
-      var ok = sec ? (v.secUid === sec || (!v.secUid && name && v.account === name))
-        : (!!name && v.account === name);
-      if (ok) out.push(v);
+      v = S.videos[i];
+      if (!v || readMap[v.awemeId]) continue;
+      /* ★ 两边都认（10-03 03:10）：以前只认 secUid，视频只有昵称时（老数据）一条都不显示 */
+      var hitSec = !!(sec && v.secUid && v.secUid === sec);
+      var hitName = !!(nName && normName(v.account) === nName) || !!(name && v.account === name);
+      if (hitSec || hitName) out.push(v);
     }
     out.sort(function (a, b) { return (b.publishedAt || 0) - (a.publishedAt || 0); });
     return out;
@@ -1860,14 +1954,32 @@
   function renderAccVideos() {
     var sec = MGR.acc || '', acc = null, i;
     for (i = 0; i < S.accounts.length; i++) if (S.accounts[i].secUserId === sec) { acc = S.accounts[i]; break; }
+    /* 不在关注列表里的作者（列表没刷新 / 刚关注）：从抓到的视频里把名字捞出来照常显示 */
+    if (!acc && MGR.accName) acc = { secUserId: sec, name: MGR.accName, category: '', _ghost: 1 };
+    if (!acc) {
+      var vv = buildUnreadView(), gg = null;
+      for (i = 0; i < vv.order.length; i++) {
+        var g0 = vv.groups[vv.order[i]];
+        if (g0.secUid === sec) { gg = g0; break; }
+      }
+      if (gg) acc = { secUserId: gg.secUid, name: gg.name, category: '', _ghost: 1 };
+    }
     var name = acc ? (acc.name || sec) : sec;
     var vids = unreadVideosOf(sec, acc);
+    var srvN = serverUnread(acc);            // 抖音在关注页标的数量（服务器给的真实未读）
     var h = '<div class="dyh-back" data-act="manage">← 返回</div>';
     h += '<div class="dyh-card">' +
       '<div class="dyh-row"><b>公众号</b><span>' + esc(name) + '</span></div>' +
       '<div class="dyh-row"><b>未读视频</b><span class="dyh-hl">' + vids.length + ' 条</span></div>' +
+      (srvN ? '<div class="dyh-row"><b>抖音标记</b><span>' + srvN + ' 条未看</span></div>' : '') +
       (acc && acc.category ? '<div class="dyh-row"><b>分类</b><span>' + esc(acc.category) + '</span></div>' : '') +
       '</div>';
+    /* ★ 抖音说没看完、但本机只有这几条明细 → 说明剩下的还没抓到明细，说清楚，别让你以为抓漏了 */
+    if (srvN > vids.length) {
+      h += '<div class="dyh-tip">抖音那边标了 <b>' + srvN + '</b> 条未看，本机抓到了 <b>' + vids.length +
+        '</b> 条明细 —— 差的那几条这个号发布时间比较早，关注页滚动时没翻到。' +
+        '再抓一轮（在「关注」页多往下滚一会）一般就补齐了。</div>';
+    }
     h += '<div class="dyh-tip">点任意一条 → 用<b>抖音 App</b> 观看，唤起后<b>网页端不跳转、不做任何动作</b>' +
       '（面板原样留在这）；打开的同时记成已看，未读数当场减一。</div>';
     /* 「唤起方式」开关：不同手机 / 不同浏览器对 scheme 和 intent 的放行程度不一样，
@@ -2380,6 +2492,11 @@
           (r.domUnread && r.domUnread.rows ? '<div class="dyh-row"><b>抖音标记「未看」</b><span>' + r.domUnread.rows +
             ' 个账号里有 ' + Object.keys(r.domUnread.map || {}).length + ' 个带未看</span></div>' : '');
         if (r.left) h += '<div class="dyh-row"><b>还剩没抓到</b><span>' + r.left + ' 个（已记入断点）</span></div>';
+        /* ★ 抓完直接对一次账（10-03 03:10）：本机抓到的明细条数 vs 抖音自己标的数量，
+           以前结果页只说「新增 N 条」，进去查看页又是另一套统计，看着就像没按抓取结果显示。 */
+        var nowUnread = unreadVideos().length;
+        var nowAcc = buildUnreadView().order.length;
+        h += '<div class="dyh-row"><b>现在全部未读</b><span class="dyh-hl">' + nowUnread + ' 条 / ' + nowAcc + ' 个号</span></div>';
         h += '</div>';
         if (r.names && r.names.length) {
           h += '<div class="dyh-tip">这次没抓成的（下次会自动补）：' + esc(r.names.join('、')) +
@@ -2390,14 +2507,15 @@
         if (!r.newCount && r.feedCaught) {
           h += '<div class="dyh-tip">✅ 本轮用 <b>' + r.feedPages + '</b> 次请求就核对完 <b>' + r.feedCaught + '</b> 个账号：' +
             '你关注的人在这段时间确实没发新视频（只要发，不用逐个问，这几下请求里就直接收进来了）。' +
-            '想按账号看谁的未读最多，去「🚫 批量取关 / 管理分类」那一页，每个号后面都标了未读条数。</div>';
+            '想按账号看谁的未读最多，点下面的「📺 去看未读视频」，每个号后面都标了未读条数。</div>';
         }
         /* 一个都没抓到：明确告诉用户原因，别让他对着「新增未读 0」干瞪眼 */
         if (!r.okCount && !r.feedCaught) {
           h += '<div class="dyh-tip" style="color:#f53f3f">⚠ 这轮<b>一个账号都没抓到</b>（抖音多半是没认登录 / 直接拒了请求）。' +
             '先点「📥 刷新我的关注列表」重新读一次登录态，然后再抓一轮就好。</div>';
         }
-        h +=           '<button class="dyh-btn primary" data-act="push">☁️ 推到 GitHub</button>' +
+        h += '<button class="dyh-btn primary" data-act="manage">📺 去看未读视频（按账号排列）</button>' +
+          '<button class="dyh-btn gray" data-act="push">☁️ 推到 GitHub</button>' +
           '<button class="dyh-btn gray" data-act="scan">🔁 再抓一轮（自动补剩下的）</button>';
         if (r.left) h += '<div class="dyh-tip">还有 ' + r.left + ' 个没抓到，点上面「再抓一轮」即可从断点补完，不会重复请求。</div>';
         setBody(h);
@@ -2499,6 +2617,7 @@
     /* ---------- 看某个公众号的未读视频 ---------- */
     if (act === 'acc-videos') {
       MGR.acc = el.getAttribute('data-sec') || '';
+      MGR.accName = el.getAttribute('data-name') || '';   // 虚拟账号（不在关注列表里）靠它显示名字
       if (!MGR.cat) MGR.cat = ALL_CAT;
       open('accv'); return;
     }
@@ -2710,6 +2829,14 @@
     unreadVideosOf: unreadVideosOf,
     openInApp: openInApp,
     unreadByAccount: unreadByAccount,
+    buildUnreadView: buildUnreadView,
+    accUnread: accUnread,
+    localUnread: localUnread,
+    serverUnread: serverUnread,
+    ghostAuthors: ghostAuthors,
+    catMembers: catMembers,
+    catUnread: catUnread,
+    normName: normName,
     applyCatFile: applyCatFile,
     pullCats: pullCats,
     applyBoxSize: applyBoxSize,
