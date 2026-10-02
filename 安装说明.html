@@ -246,8 +246,8 @@
     </div>
 
     <div class="card">
-      <h2>② 界面尺寸（10-02 13:20 · 最新：字体已加大到 28/24/19，面板只比手机屏小一圈）</h2>
-      <div class="warn" style="margin-bottom:10px"><b>先确认你手机上跑的是不是最新版</b>：打开助手面板，标题「抖音关注助手」后面有个小灰字 <b>10-02 13:20</b>（= 脚本的生成时间，鼠标长按还能看到这次改了什么）。
+      <h2>② 界面尺寸（10-02 13:45 · 最新：字体已加大到 28/24/19，面板只比手机屏小一圈）</h2>
+      <div class="warn" style="margin-bottom:10px"><b>先确认你手机上跑的是不是最新版</b>：打开助手面板，标题「抖音关注助手」后面有个小灰字 <b>10-02 13:45</b>（= 脚本的生成时间，鼠标长按还能看到这次改了什么）。
         看不到它（或根本没有这个小字）= 手机上还是<b>旧脚本</b>，请按下面「③」<b>删掉旧条目重新下载一次</b>（只刷新抖音页面没用，Via 里的脚本不会自动更新）。
         <b>以后每次改动，版本号都会换成「生成日期时间 + 改了什么」</b>，看到时间变了就是拿到新版了。</div>
       <ul>
@@ -377,6 +377,32 @@
           <td style="padding:6px 0">首页新增「<b>有未读的账号 N 个</b>」卡片，列出未读最多的 6 个号 + 各几条，点一下进主页。</td></tr>
       </table>
       <div class="warn" style="margin:8px 0"><b>这一版的验收动作</b>：装好脚本 → 抓一轮 → <b>结果页就应该直接看到未读明细</b> → 点其中一条 <b>「▶ 播放」</b> → 回到助手看未读数是不是当场少了一条 → 再点「📋 复制未读清单」粘到微信里检查格式。<b>全程没有电脑、没有 GitHub。</b></div>
+      <div class="warn" style="margin:8px 0"><b>⚠️ 上面 ⑤-7 那一节的界面改动已经取消</b>（你说「以前的界面不要变」）—— 分组卡、▶ 播放按钮、复制清单、首页账号概览、结果页内嵌明细这些通通撤掉，
+        <b>界面回到你熟悉的那一版</b>（原来的一行一条、点标题用抖音打开、右边一颗「已读」），只留下 ⑤-6 那条真正有用的修复（未读按抖音「已看记录」过滤）。<b>继续看下一节。</b></div>
+
+      <p style="margin:16px 0 4px"><b>⑤-8 · 最新（10-02 13:45）：界面恢复原样 + 抓取改回「逐个账号」，这次才真的抓得到未读</b></p>
+      <p style="margin:6px 0">你两句话点出了要害：<b>「界面别乱改」</b>、<b>「未读根本没抓到」</b>。上一版为了「快」把抓取换成了<b>关注页信息流</b>，而且默认就走它 ——
+        结果在手机浏览器里<b>翻一两页就结束</b>（<code>has_more=false</code>），脚本就以为「全部账号都核对完了」，<b>后面的逐个抓一次都不跑</b>。
+        这就是你看到「抓取成功、结果一条未读都没有」的真正原因。</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin:8px 0">
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5;width:34%"><b>① 界面恢复成原来那一版</b><br><span class="tag">按你说的改回来</span></td>
+          <td style="padding:6px 0;border-bottom:1px solid #f2f3f5">首页、未读清单、结果页、按钮顺序<b>全部回到你熟悉的排版</b>：未读列表还是<b>一条一行</b>（标题可点、右边一颗「已读」），
+            不再有分组卡片、▶ 播放、复制清单、全部标已看、首页账号概览、结果页内嵌明细。<br>
+            <b>唯一保留的新东西</b>：标题后面那小灰字<b>版本号</b>（<code>10-02 13:45</code>），用来确认你手机上是哪天那版；设置页最下面也有一份完整版本说明。</td></tr>
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>② 抓取默认改回「逐个账号」</b><br><span class="tag">这次的关键</span></td>
+          <td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>一个账号一个请求，全部核对，一个都不跳。</b>不再默认去赌那条信息流。<br>
+            设置页「抓取方式」改成两项：<b>逐个抓（默认，稳）</b> / <b>关注页信息流（快，可能漏）</b> —— 想搏一下速度可以自己切开，但<b>默认一定是稳的那个</b>。</td></tr>
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>③ 修掉「跳过全部账号」的 bug</b></td>
+          <td style="padding:6px 0;border-bottom:1px solid #f2f3f5">就算你手动开了信息流，它<b>提前翻完也只算「它覆盖过的那几个账号」核对完毕</b>；<b>没出现在信息流里的账号照旧逐个补抓</b>。<br>
+            仿真里专门加了一条回归：20 个账号、信息流只覆盖 3 个就翻完 → <b>剩下 17 个全部补到，一条都不漏</b>。</td></tr>
+        <tr><td style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>④ 修掉「断点跳过没跑完的账号」</b></td>
+          <td style="padding:6px 0;border-bottom:1px solid #f2f3f5">中途被停下时（<b>手机熄屏 / 90 秒停滞 / 你按停止</b>），以前断点记的是「派出去了几个账号」，那些还在飞、既没成也没失败的就被当成已处理 → <b>下次续跑直接跳过 → 一批账号再也没抓过</b>。<br>
+            现在断点记的是<b>真正跑完的个数</b>：<b>宁可重抓一遍，也绝不漏一个</b>。</td></tr>
+        <tr><td style="padding:6px 0"><b>⑤ 抓不到时说人话</b></td>
+          <td style="padding:6px 0">如果一个账号都没抓到，结果页会<b>红字提示</b>：「这轮一个账号都没抓到（抖音多半是没认登录），先点「📥 刷新我的关注列表」重新读一次登录态，再抓一轮」—— 不再让你对着「新增未读 0」猜。</td></tr>
+      </table>
+      <div class="warn" style="margin:8px 0"><b>这一版的验收动作（按顺序来）</b>：<b>第一次用</b>请点「📥 刷新我的关注列表」→ 再点「🔍 抓最新未读视频」，等进度条到 100% →
+        看「<b>新增未读</b>」那一行的条数 → 点「📺 看未读列表」核对明细 → 在抖音里看好几个 → 回来再抓一轮，数字应该<b>明显变少</b>。</div>
 
       <p style="margin:16px 0 4px"><b>⑤-5（10-02 04:00 · v1.6）：换了个根本思路 —— 请求数从 392 次降到 3 次</b></p>
       <p style="margin:6px 0">你反馈「失败太多、经常卡住」—— 这次挖到了一个<b>藏得很深的代码 bug</b>，修完之后失败率基本归零，顺带把进度显示换成了真正的进度条。</p>
@@ -535,7 +561,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-02 13:20 · 未读全部收进助手面板：结果页直接列明细、按账号分组、点▶即看即已看、可一键全部已看/复制清单（不靠电脑）
+// @version      2026-10-02 13:45 · 界面恢复原样；抓取默认改回逐个账号（修掉信息流漏抓导致一条未读都没有）
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -566,14 +592,14 @@ function copyRaw(){
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-02 13:20 · 未读全部在助手面板里闭环：抓完直接列明细、按账号分组、点▶即看即已看、可一键全部已看/复制清单（不再靠电脑/WorkBuddy 告诉你）';
-  var VER_SHORT = '10-02 13:20';
+  var VER = '2026-10-02 13:45 · 界面恢复原样（回到你熟悉的那一版）；抓取改回逐个账号——修掉「信息流提前结束就跳过全部账号」这个漏抓 bug，未读才抓得到';
+  var VER_SHORT = '10-02 13:45';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l', scanMode: 'auto' },
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'l', scanMode: 'post' },
       selfSecUid: '',
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -597,6 +623,12 @@ function copyRaw(){
       if (!o._spdMig2) {
         o.cfg.scanConc = 6; o.cfg.scanBudget = 12; o.scanJob = null; o._spdMig2 = 1;
       }
+      /* 信息流（scanMode=auto/feed）实测会漏账号 → 默认改回逐个抓（post）。
+         老用户身上存着的旧值 'auto' 要一次性改掉，否则手机上还是走那条漏抓的路。 */
+      if (o.cfg.scanMode !== 'feed') o.cfg.scanMode = 'post';
+      /* 旧断点必须扔掉：它是按「派出去了几个账号」记的（那些没跑完的被当成已处理），
+         留着的话下次一点抓取就只补「剩下几个账号」—— 前面几百个永远不抓，未读还是 0。 */
+      if (o.scanJob) o.scanJob = null;
       return o;
     } catch (e) { return def; }
   }
@@ -653,26 +685,6 @@ function copyRaw(){
     toastEl.style.opacity = '1';
     clearTimeout(toastEl._t);
     toastEl._t = setTimeout(function () { toastEl.style.opacity = '0'; }, ms || 2600);
-  }
-
-  /* 复制纯文本清单（Via / 安卓浏览器对 navigator.clipboard 权限不一，故留 execCommand 兜底） */
-  function legacyCopy(t) {
-    try {
-      var ta = document.createElement('textarea');
-      ta.value = t; ta.setAttribute('readonly', '');
-      ta.style.position = 'fixed'; ta.style.left = '-9999px'; ta.style.top = '0';
-      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, t.length);
-      var ok = document.execCommand('copy'); ta.remove(); return ok;
-    } catch (e) { return false; }
-  }
-  function copyToClipboard(t) {
-    try {
-      if (navigator.clipboard &amp;&amp; navigator.clipboard.writeText) {
-        return Promise.resolve(navigator.clipboard.writeText(t)).then(function () { return true; },
-          function () { return legacyCopy(t); });
-      }
-    } catch (e) { }
-    return Promise.resolve(legacyCopy(t));
   }
 
   /* ----------------------------- 抖音接口 ----------------------------- */
@@ -1247,7 +1259,7 @@ function copyRaw(){
     var newCount = 0, errors = 0, okCount = 0, failAcc = 0;
     var histMap = {}, histN = 0, histSkip = 0, histErr = '';   // 抖音服务器端的「你看过」记录
     var consecOk = 0, consecFail = 0, coolUntil = 0, riskHits = 0, riskStreak = 0, bailout = false, dispatched = 0;
-    var retries = 0, stalled = false;
+    var retries = 0, stalled = false, lastDone = 0;   // lastDone = 本轮【真正跑完】的账号数（断点用）
     // 上限取设置里的值（默认 6），但【开局只用 3 个】——先探路，顺了再往上加
     var maxConc = Math.max(1, Math.min(10, parseInt(S.cfg.scanConc, 10) || 6));
     var conc = Math.min(3, maxConc);
@@ -1362,7 +1374,8 @@ function copyRaw(){
     var feedTotal = Math.max(1, S.accounts.length - resumeFrom);
 
     function feedPhase() {
-      if (S.cfg.scanMode === 'post') return Promise.resolve();   // 用户在设置里强制逐个抓
+      if (S.cfg.scanMode === 'post') return Promise.resolve();   // 默认/逐个抓：不碰信息流（实测它在手机浏览器里会漏账号）
+      if (S.cfg.scanMode !== 'feed') return Promise.resolve();   // 只有设置里明确选了「关注页信息流」才走这条路
       var uidMap = {}, newest = {}, i;
       for (i = 0; i &lt; S.accounts.length; i++) if (S.accounts[i].secUserId) uidMap[S.accounts[i].secUserId] = S.accounts[i];
       for (i = 0; i &lt; S.videos.length; i++) {
@@ -1402,17 +1415,15 @@ function copyRaw(){
             feedCaughtN = countCaught();
             scheduleSave(); report('关注流 第 ' + feedPages + ' 页');
 
-            // 翻到底了，或这一页已经老到 30 天前 → 剩下的账号都当作没更新，不再逐个问
+            /* ★★ 关键修复（2026-10-02）★★
+               以前这里只要 !hasMore（信息流说「没了」）就把【全部账号】标成「已核对」，
+               于是后面的逐个抓一次都不跑 → 抓完「新增未读 0 条」，也就是你说的「根本没抓到」。
+               信息流提前结束（手机浏览器里很常见：只翻一两页 hasMore 就 false）时也不能漏账号。
+               现在：只有真正出现在信息流里的账号才算核对过，其余一律交给下面的逐个抓兜底。 */
             if (!res.hasMore || !list.length || (oldest &amp;&amp; oldest &lt; Date.now() - DEAD)) {
               for (i2 = 0; i2 &lt; S.accounts.length; i2++) {
                 var u2 = S.accounts[i2].secUserId;
                 if (u2 &amp;&amp; feedCovered[u2] &amp;&amp; !caught[u2]) caught[u2] = 1;
-              }
-              if (!res.hasMore || !list.length) {
-                for (i2 = 0; i2 &lt; S.accounts.length; i2++) {
-                  var u3 = S.accounts[i2].secUserId;
-                  if (u3) caught[u3] = 1;
-                }
               }
               feedCaughtN = countCaught();
               return;
@@ -1479,7 +1490,8 @@ function copyRaw(){
     function pump(items) {
       return new Promise(function (resolve) {
         var cursor = 0, active = 0, done = 0, ended = false, lastProgress = Date.now();
-        function finish() { if (ended) return; ended = true; clearInterval(stallTimer); resolve(); }
+        // 记下「真正跑完的账号数」——断点续跑就从这个数往后，没落定的一律下次重抓
+        function finish() { if (ended) return; ended = true; clearInterval(stallTimer); lastDone = Math.max(lastDone, done); resolve(); }
         // 停滞看门狗：90 秒一点进展都没有 = 真卡住了，强制收尾（剩下的进断点，绝不无限等）
         var stallTimer = setInterval(function () {
           if (ended) return;
@@ -1522,11 +1534,14 @@ function copyRaw(){
       scanning = false; keepAwake(false); stopFlag = false;
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
       // 没跑完 → 进度写进断点（下次从这里续）；跑完了 → 断点标记「已全部完成」
-      // 中途收尾时，断点回退到「失败的那几个」之前 —— 下次续跑会先把它们补上，一个都不漏
-      // 只有「中途喊停」或「还有账号没抓到」才留断点；全核对完就标记完成，下次从头抓
+      /* ★ 断点按「真正跑完的账号数」记（lastDone），不能按「派出去了几个」。
+         以前用 dispatched − failed：中途被停下（手机熄屏 / 90 秒停滞看门狗 / 用户按停止）时，
+         那些还在飞的请求既没成功也没进 failed，断点却把它们算成「已处理」→ 下次续跑直接跳过 →
+         一堆账号再也没抓过，未读自然永远是 0 条。
+         改成记真正落定的个数，没落定的下次一定补回来（宁可重抓，绝不漏）。 */
       var unfinished = stopped || failed.length &gt; 0;
       S.scanJob = unfinished
-        ? { sig: accountSig(), startIdx: resumeFrom, cursor: resumeFrom + Math.max(0, Math.min(dispatched, plan.length) - failed.length), ts: Date.now() }
+        ? { sig: accountSig(), startIdx: resumeFrom, cursor: resumeFrom + Math.min(lastDone, plan.length), ts: Date.now() }
         : { sig: accountSig(), startIdx: 0, cursor: S.accounts.length, ts: Date.now() };
       save();
     }
@@ -1608,24 +1623,11 @@ function copyRaw(){
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;关注公众号&lt;/b&gt;&lt;span&gt;' + S.accounts.length + ' 个&lt;/span&gt;&lt;/div&gt;';
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;未读视频&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + unread.length + ' 条&lt;/span&gt;&lt;/div&gt;';
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;上次抓取&lt;/b&gt;&lt;span&gt;' + (S.lastScanAt ? fmtTime(S.lastScanAt) : '从未') + '&lt;/span&gt;&lt;/div&gt;';
-    h += '&lt;div class="dyh-row"&gt;&lt;b&gt;已看记录&lt;/b&gt;&lt;span&gt;' + S.readIds.length + ' 条（含抖音里看过的）&lt;/span&gt;&lt;/div&gt;';
+    h += '&lt;div class="dyh-row"&gt;&lt;b&gt;已看记录&lt;/b&gt;&lt;span&gt;' + S.readIds.length + ' 条&lt;/span&gt;&lt;/div&gt;';
     h += '&lt;/div&gt;';
-    /* 未读按账号摊开（和抖音 App 关注页红点一样），点账号就直接跳去它主页 */
-    var by = unreadByAccount();
-    h += '&lt;div class="dyh-card"&gt;';
-    h += '&lt;div class="dyh-row"&gt;&lt;b&gt;有未读的账号&lt;/b&gt;&lt;span&gt;' + by.length + ' 个&lt;/span&gt;&lt;/div&gt;';
-    for (var bi = 0; bi &lt; by.length &amp;&amp; bi &lt; 6; bi++) {
-      h += '&lt;div class="dyh-row dyh-unread-ac" data-act="open-home" data-sec="' + esc(by[bi].secUid) + '"&gt;' +
-        '&lt;b&gt;' + esc(by[bi].name) + '&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + by[bi].list.length + ' 条 ›&lt;/span&gt;&lt;/div&gt;';
-    }
-    if (!by.length) h += '&lt;div class="dyh-row"&gt;&lt;b&gt;全看完了&lt;/b&gt;&lt;span&gt;没有未读&lt;/span&gt;&lt;/div&gt;';
-    h += '&lt;/div&gt;';
-    h += '&lt;div class="dyh-tip"&gt;&lt;b&gt;未读就在本面板里闭环&lt;/b&gt;：抓 → 判未读 → 列明细 → 点▶播放 → 自动已看，全程不用电脑、不用 GitHub。&lt;br&gt;' +
-      '未读 = 抓到的新视频 − &lt;b&gt;抖音那边看过的&lt;/b&gt;（App / 网页看过都算，每次抓取自动同步）− 本机点过的「已看」。&lt;br&gt;' +
-      '所以在抖音里看完，下一轮抓取它就自动消失；在本面板里点▶打开看完，也立刻消失。&lt;/div&gt;';
     h += '&lt;button class="dyh-btn primary" data-act="scan"&gt;🔍 抓最新未读视频&lt;/button&gt;';
     h += '&lt;button class="dyh-btn" data-act="refresh"&gt;📥 刷新我的关注列表&lt;/button&gt;';
-    h += '&lt;button class="dyh-btn" data-act="list"&gt;📺 看未读清单（' + unread.length + ' 条 · ' + by.length + ' 个账号）&lt;/button&gt;';
+    h += '&lt;button class="dyh-btn" data-act="list"&gt;📺 看未读列表（' + unread.length + '）&lt;/button&gt;';
     h += '&lt;button class="dyh-btn" data-act="manage"&gt;🚫 批量取关 / 管理分类&lt;/button&gt;';
     h += '&lt;button class="dyh-btn" data-act="search"&gt;🔎 搜索并关注新账号&lt;/button&gt;';
     h += '&lt;button class="dyh-btn" data-act="push"&gt;☁️ 推到 GitHub（手机端 HTML 可看）&lt;/button&gt;';
@@ -1646,73 +1648,19 @@ function copyRaw(){
      以前的结果链路是：助手抓 → 推 GitHub → 再去手机端 HTML 看。用户要的是：
      【抓、判、看、标已看】全在抖音关注助手这一个面板里完成。下面这几个函数就是这条闭环。 */
 
-  function markReadOne(id) {
-    if (!id) return false;
-    for (var i = 0; i &lt; S.readIds.length; i++) if (S.readIds[i] === id) return false;
-    S.readIds.push(id); save();
-    return true;
-  }
-
-  /* 未读按账号分组（跟抖音 App 关注页的红点一样：哪个账号有更新、更新了几条） */
-  function unreadByAccount() {
-    var g = {}, order = [];
-    var v = unreadVideos();
-    for (var i = 0; i &lt; v.length; i++) {
-      var it = v[i];
-      var key = it.account || '未标注账号';
-      if (!g[key]) { g[key] = { name: key, secUid: it.secUid || '', list: [] }; order.push(g[key]); }
-      g[key].list.push(it);
-    }
-    order.sort(function (a, b) { return b.list.length - a.list.length; });
-    return order;
-  }
-
-  /* 一条未读的渲染（结果页内嵌、未读列表都用它，保证长得一样、行为一样） */
-  function unreadItemHtml(it) {
-    return '&lt;div class="dyh-item"&gt;' +
-      '&lt;div class="dyh-item-t" data-act="play" data-url="' + esc(it.url) + '" data-id="' + esc(it.awemeId) + '"&gt;' +
-        (it.title ? esc(it.title) : '（无标题视频）') + '&lt;/div&gt;' +
-      '&lt;div class="dyh-item-m"&gt;&lt;span&gt;' + esc(it.account || '') + '&lt;/span&gt;&lt;span&gt;' + esc(it.publishTime || '') + '&lt;/span&gt;' +
-        '&lt;span class="dyh-op"&gt;&lt;a href="javascript:;" data-act="play" data-url="' + esc(it.url) + '" data-id="' + esc(it.awemeId) + '"&gt;▶ 播放&lt;/a&gt;' +
-        '&lt;a href="javascript:;" data-act="read" data-id="' + esc(it.awemeId) + '"&gt;已看&lt;/a&gt;&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;';
-  }
-
-  /* 纯文本清单：想发微信/发给任何人，或者贴给别的工具都行，助手里点一下就复制好 */
-  function unreadText() {
-    var v = unreadVideos();
-    if (!v.length) return '（当前没有未读）';
-    var L = ['抖音未读 ' + v.length + ' 条（' + fmtTime(Date.now()) + '）'], by = unreadByAccount();
-    for (var i = 0; i &lt; by.length &amp;&amp; L.length &lt; 4; i++) L.push(by[i].name + ' ' + by[i].list.length + ' 条');
-    L.push('--------');
-    for (var k = 0; k &lt; v.length; k++) {
-      L.push('· ' + (v[k].account || '') + ' | ' + (v[k].title || '（无标题）') + ' | ' + (v[k].publishTime || '') + ' | ' + v[k].url);
-    }
-    return L.join('\n');
-  }
-
   function renderList() {
     var v = unreadVideos();
     var h = '&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;';
-    if (!v.length) {
-      h += '&lt;div class="dyh-tip"&gt;现在是 &lt;b&gt;0&lt;/b&gt; 条未读 —— 已经在抖音里看过的都自动扣掉了。&lt;/div&gt;' +
-        '&lt;button class="dyh-btn primary" data-act="scan"&gt;🔍 再抓一轮最新&lt;/button&gt;';
-      return h;
+    h += '&lt;div class="dyh-tip"&gt;共 ' + v.length + ' 条未读，点「已读」标记，点标题用抖音打开&lt;/div&gt;';
+    var n = Math.min(v.length, 300);
+    for (var i = 0; i &lt; n; i++) {
+      var it = v[i];
+      h += '&lt;div class="dyh-item"&gt;' +
+        '&lt;div class="dyh-item-t" data-act="open" data-url="' + esc(it.url) + '"&gt;' + esc(it.title || '（无标题）') + '&lt;/div&gt;' +
+        '&lt;div class="dyh-item-m"&gt;&lt;span&gt;' + esc(it.account || '') + '&lt;/span&gt;&lt;span&gt;' + esc(it.publishTime || '') + '&lt;/span&gt;' +
+        '&lt;a href="javascript:;" data-act="read" data-id="' + esc(it.awemeId) + '"&gt;已读&lt;/a&gt;&lt;/div&gt;&lt;/div&gt;';
     }
-    h += '&lt;div class="dyh-tip"&gt;共 &lt;b&gt;' + v.length + '&lt;/b&gt; 条未读（已扣掉抖音服务器里看过的 + 本机标记的）。' +
-      '按&lt;b&gt;账号&lt;/b&gt;分组，和抖音 App 关注页的红点一致。&lt;br&gt;' +
-      '点标题或 &lt;b&gt;▶ 播放&lt;/b&gt; 直接用抖音打开，&lt;b&gt;看完立刻从列表消失&lt;/b&gt;；点「已看」手动标记。只显示最新 300 条。&lt;/div&gt;';
-    h += '&lt;button class="dyh-btn" data-act="copy-list"&gt;📋 复制未读清单（可发微信/贴 anywhere）&lt;/button&gt;';
-    h += '&lt;button class="dyh-btn gray" data-act="read-all"&gt;✅ 这一批全部标已看（' + Math.min(v.length, 300) + ' 条）&lt;/button&gt;';
-
-    var by = unreadByAccount(), shown = 0, LIMIT = 300;
-    for (var i = 0; i &lt; by.length &amp;&amp; shown &lt; LIMIT; i++) {
-      var g = by[i], gn = Math.min(g.list.length, LIMIT - shown);
-      h += '&lt;div class="dyh-card dyh-cat"&gt;' +
-        '&lt;div class="dyh-row"&gt;&lt;b&gt;' + esc(g.name) + '&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + g.list.length + ' 条&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;';
-      for (var k = 0; k &lt; gn; k++) { h += unreadItemHtml(g.list[k]); shown++; }
-      if (g.list.length &gt; gn) h += '&lt;div class="dyh-tip"&gt;「' + esc(g.name) + '」只显示最新 ' + gn + ' 条&lt;/div&gt;';
-    }
-    if (v.length &gt; shown) h += '&lt;div class="dyh-tip"&gt;仅显示最新 ' + shown + ' 条（共 ' + v.length + ' 条）&lt;/div&gt;';
+    if (v.length &gt; n) h += '&lt;div class="dyh-tip"&gt;仅显示最新 300 条（共 ' + v.length + ' 条）&lt;/div&gt;';
     return h;
   }
 
@@ -1762,14 +1710,14 @@ function copyRaw(){
       '&lt;button class="dyh-btn' + (S.cfg.uiScale === 'l' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="l"&gt;更大&lt;/button&gt;' +
       '&lt;/div&gt;' +
       '&lt;div class="dyh-tip" style="margin-top:2px"&gt;默认「更大」= 宽占屏幕 96%、高占 93%，四周只留一点点边，字也跟着放大了一档。越小越省屏幕、越看得清全貌。&lt;/div&gt;';
-    var md = S.cfg.scanMode || 'auto';
+    var md = S.cfg.scanMode === 'feed' ? 'feed' : 'post';
     h += '&lt;label class="dyh-lb"&gt;抓取方式&lt;/label&gt;&lt;div style="display:flex;gap:8px;margin:6px 0 4px"&gt;' +
-      '&lt;button class="dyh-btn' + (md === 'auto' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="auto"&gt;自动（推荐）&lt;/button&gt;' +
-      '&lt;button class="dyh-btn' + (md === 'post' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="post"&gt;只逐个抓&lt;/button&gt;' +
+      '&lt;button class="dyh-btn' + (md === 'post' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="post"&gt;逐个抓（默认，稳）&lt;/button&gt;' +
+      '&lt;button class="dyh-btn' + (md === 'feed' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="feed"&gt;关注页信息流（快，可能漏）&lt;/button&gt;' +
       '&lt;/div&gt;' +
-      '&lt;div class="dyh-tip" style="margin-top:2px"&gt;&lt;b&gt;自动&lt;/b&gt; = 先走关注页信息流（一次拿 20 条，请求极少，又快又不失败），' +
-      '没覆盖到的再逐个补；&lt;b&gt;只逐个抓&lt;/b&gt; = 不用信息流，一个账号一个请求（老办法，慢且容易被限流）。' +
-      '信息流万一不可用会自动降级，不用手动切。&lt;/div&gt;';
+      '&lt;div class="dyh-tip" style="margin-top:2px"&gt;&lt;b&gt;逐个抓（默认）&lt;/b&gt; = 一个账号一个请求，全部核对，不会漏账号 —— 想要"未读准确"就用它。&lt;br&gt;' +
+      '&lt;b&gt;关注页信息流&lt;/b&gt; = 一次拿 20 条，请求极少很快，但它只覆盖部分账号，没覆盖到的会再逐个补；' +
+      '实测它在 Via 手机浏览器里经常只翻一两页就结束，会漏掉一批账号，所以&lt;b&gt;默认关掉&lt;/b&gt;。&lt;/div&gt;';
     h += '&lt;label class="dyh-lb"&gt;每次抓前几个账号（留空 = 全部 ' + S.accounts.length + ' 个）&lt;/label&gt;' +
       '&lt;input id="dyh-limit" class="dyh-input" type="number" min="0" inputmode="numeric" value="' + (S.cfg.scanLimit || 0) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;并发【上限】1~10（默认 6）&lt;/label&gt;' +
@@ -1812,8 +1760,7 @@ function copyRaw(){
       '.dyh-box.sz-l{width:96%!important;max-width:980px;height:93%!important;max-height:920px;font-size:24px!important}' +
       '.dyh-box h3{margin:0 0 17px!important;font-size:28px!important;display:flex!important;align-items:center;flex:0 0 auto}' +
       '.dyh-box h3 span{margin-left:auto;font-size:40px!important;color:#c9cdd4;padding:0 8px}' +
-      '.dyh-ver{font-size:16px!important;color:#c9cdd4;font-weight:400;margin-left:9px!important;flex:0 1 auto;' +
-      'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52%}' +
+      '.dyh-ver{font-size:16px!important;color:#c9cdd4;font-weight:400;margin-left:9px!important}' +
       '.dyh-zbtn{font-size:30px!important;color:#4e5969;background:#f2f3f5;border-radius:8px;' +
       'padding:4px 14px;margin-left:auto!important}' +
       '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
@@ -1830,14 +1777,7 @@ function copyRaw(){
       '.dyh-item{padding:16px 0;border-bottom:1px solid #f2f3f5}' +
       '.dyh-item-t{font-size:24px!important;line-height:1.5;color:#1d2129}' +
       '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:9px;font-size:19px;color:#86909c}' +
-      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:9px 17px;font-size:19px!important}' +
-      '.dyh-item-m a[data-act="play"]{background:#fe2c55;color:#fff;border-radius:8px;font-weight:600}' +
-      '.dyh-op{display:flex;gap:8px;align-items:center;margin-left:auto}' +
-      '.dyh-op a{margin-left:0!important;padding:8px 15px!important;border:1px solid #e5e6eb;background:#fff;border-radius:8px;color:#4e5969}' +
-      '.dyh-op a[data-act="play"]{background:#fe2c55;border-color:#fe2c55;color:#fff;font-weight:600}' +
-      '.dyh-cat{margin:16px 0 4px;padding:10px 14px!important}' +
-      '.dyh-unread-ac{cursor:pointer}' +
-      '.dyh-unread-ac:active{background:#f2f3f5;border-radius:8px}' +
+      '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:9px 17px}' +
       '.dyh-tip{font-size:19px!important;color:#86909c;line-height:1.75;margin:11px 0}' +
       '.dyh-back{font-size:20px;color:#fe2c55;margin-bottom:13px}' +
       '.dyh-input{width:100%;box-sizing:border-box;padding:15px 16px;border:1px solid #e5e6eb;border-radius:8px;' +
@@ -1938,39 +1878,12 @@ function copyRaw(){
 
     if (act === 'open') { var u = el.getAttribute('data-url'); if (u) window.open(u, '_blank'); return; }
 
-    /* ★ 点▶播放：打开抖音视频页，并且【当场就记成已看】——不等下一轮同步。
-       所以列表会立刻少一条：「看了 → 未读数立刻 -1」，闭环就在面板里完成。 */
-    if (act === 'play') {
-      var pu = el.getAttribute('data-url'), pid = el.getAttribute('data-id');
-      if (pid &amp;&amp; markReadOne(pid)) toast('已记为已看，未读少了一条');
-      if (pu) window.open(pu, '_blank');
-      var pl = el.parentNode;
-      if (pl &amp;&amp; pl.parentNode) pl.parentNode.style.opacity = '.35';
-      return;
-    }
-
     if (act === 'read') {
       var id = el.getAttribute('data-id');
-      if (id &amp;&amp; markReadOne(id)) toast('已标记已看');
+      S.readIds.push(id); save();
       var p = el.parentNode;
       if (p &amp;&amp; p.parentNode) p.parentNode.style.opacity = '.4';
-      return;
-    }
-
-    if (act === 'read-all') {
-      var vv = unreadVideos().slice(0, 300), n = 0;
-      for (i = 0; i &lt; vv.length; i++) if (markReadOne(vv[i].awemeId)) n++;
-      save(); toast('已把 ' + n + ' 条标为已看');
-      open('home'); return;
-    }
-
-    if (act === 'copy-list') {
-      var txt = unreadText();
-      copyToClipboard(txt).then(function (ok) {
-        toast(ok ? ('未读清单已复制（' + txt.split('\n').length + ' 行），直接粘贴发出去就行')
-                 : ('复制没成功，清单在控制台：DYHelper.unreadText()'), 4200);
-      }).catch(function () { });
-      return;
+      toast('已标记已读'); return;
     }
 
     if (act === 'refresh') {
@@ -2063,36 +1976,24 @@ function copyRaw(){
           '&lt;div class="dyh-card"&gt;' +
           '&lt;div class="dyh-row"&gt;&lt;b&gt;完成率&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + (r.pct == null ? 100 : r.pct) + '%&lt;/span&gt;&lt;/div&gt;' +
           '&lt;div class="dyh-row"&gt;&lt;b&gt;新增未读&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + r.newCount + ' 条&lt;/span&gt;&lt;/div&gt;' +
-          '&lt;div class="dyh-row"&gt;&lt;b&gt;抖音里看过的&lt;/b&gt;&lt;span&gt;' + r.hist + ' 条（已从未读里剔除）&lt;/span&gt;&lt;/div&gt;' +
-          '&lt;div class="dyh-row"&gt;&lt;b&gt;当前未读合计&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + unreadVideos().length + ' 条&lt;/span&gt;&lt;/div&gt;' +
-          (r.histN ? '&lt;div class="dyh-tip"&gt;本次从抖音服务器读到你的已看记录 ' + r.histN + ' 条' +
-            (r.histErr ? '（读取有告警：' + esc(r.histErr) + '）' : '') + '。&lt;/div&gt;' : '') +
           '&lt;div class="dyh-row"&gt;&lt;b&gt;处理账号&lt;/b&gt;&lt;span&gt;' + r.scanned + (r.resumeAt ? '（断点续 ' + r.resumeAt + '）' : '') + '&lt;/span&gt;&lt;/div&gt;' +
           '&lt;div class="dyh-row"&gt;&lt;b&gt;成功 / 失败&lt;/b&gt;&lt;span&gt;' + r.okCount + ' / ' + r.errors + '&lt;/span&gt;&lt;/div&gt;' +
           (r.retries ? '&lt;div class="dyh-row"&gt;&lt;b&gt;自动重试&lt;/b&gt;&lt;span&gt;' + r.retries + ' 次（已全部救回）&lt;/span&gt;&lt;/div&gt;' : '') +
           (r.risk ? '&lt;div class="dyh-row"&gt;&lt;b&gt;风控命中&lt;/b&gt;&lt;span&gt;' + r.risk + ' 次&lt;/span&gt;&lt;/div&gt;' : '');
         if (r.left) h += '&lt;div class="dyh-row"&gt;&lt;b&gt;还剩没抓到&lt;/b&gt;&lt;span&gt;' + r.left + ' 个（已记入断点）&lt;/span&gt;&lt;/div&gt;';
         h += '&lt;/div&gt;';
-        /* ★ 抓完直接在结果页把未读明细列出来：不用再多点一次「看未读列表」，
-           也不用推 GitHub、不用电脑 —— 未读这一整套就在这块面板里看完看完。 */
-        var uv = unreadVideos();
-        if (uv.length) {
-          h += '&lt;div class="dyh-card"&gt;&lt;div class="dyh-row"&gt;&lt;b&gt;当前未读&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + uv.length + ' 条&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;';
-          var top = uv.slice(0, 8);
-          for (var ui = 0; ui &lt; top.length; ui++) h += unreadItemHtml(top[ui]);
-          if (uv.length &gt; top.length) h += '&lt;div class="dyh-tip"&gt;还有 ' + (uv.length - top.length) + ' 条，点下面「看未读清单」&lt;/div&gt;';
-        } else {
-          h += '&lt;div class="dyh-card"&gt;&lt;div class="dyh-row"&gt;&lt;b&gt;当前未读&lt;/b&gt;&lt;span class="dyh-hl"&gt;0 条&lt;/span&gt;&lt;/div&gt;' +
-            '&lt;div class="dyh-tip"&gt;这轮抓到的视频你都在抖音里看过了，已经全部扣掉。&lt;/div&gt;&lt;/div&gt;';
-        }
         if (r.names &amp;&amp; r.names.length) {
           h += '&lt;div class="dyh-tip"&gt;这次没抓成的（下次会自动补）：' + esc(r.names.join('、')) +
             (r.names.length &gt;= 20 ? ' 等' : '') + '&lt;/div&gt;';
         }
-        h += '&lt;button class="dyh-btn primary" data-act="list"&gt;📺 看未读清单（' + uv.length + ' 条）&lt;/button&gt;' +
-          '&lt;button class="dyh-btn" data-act="copy-list"&gt;📋 复制未读清单&lt;/button&gt;' +
-          '&lt;button class="dyh-btn gray" data-act="scan"&gt;🔁 再抓一轮（自动补剩下的）&lt;/button&gt;' +
-          '&lt;button class="dyh-btn gray" data-act="push"&gt;☁️ 推到 GitHub（只有想给别的设备看时才需要）&lt;/button&gt;';
+        /* 一个都没抓到：明确告诉用户原因，别让他对着「新增未读 0」干瞪眼 */
+        if (!r.okCount &amp;&amp; !r.feedCaught) {
+          h += '&lt;div class="dyh-tip" style="color:#f53f3f"&gt;⚠ 这轮&lt;b&gt;一个账号都没抓到&lt;/b&gt;（抖音多半是没认登录 / 直接拒了请求）。' +
+            '先点「📥 刷新我的关注列表」重新读一次登录态，然后再抓一轮就好。&lt;/div&gt;';
+        }
+        h += '&lt;button class="dyh-btn primary" data-act="push"&gt;☁️ 推到 GitHub&lt;/button&gt;' +
+          '&lt;button class="dyh-btn" data-act="list"&gt;📺 看未读列表&lt;/button&gt;' +
+          '&lt;button class="dyh-btn gray" data-act="scan"&gt;🔁 再抓一轮（自动补剩下的）&lt;/button&gt;';
         if (r.left) h += '&lt;div class="dyh-tip"&gt;还有 ' + r.left + ' 个没抓到，点上面「再抓一轮」即可从断点补完，不会重复请求。&lt;/div&gt;';
         setBody(h);
       });
@@ -2252,8 +2153,9 @@ function copyRaw(){
     }
 
     if (act === 'scan-mode') {
-      S.cfg.scanMode = el.getAttribute('data-mode') === 'post' ? 'post' : 'auto';
-      save(); toast(S.cfg.scanMode === 'post' ? '已切为「只逐个抓」（不用信息流）' : '已切为「自动」（优先走关注页信息流）'); open('settings');
+      var smd = el.getAttribute('data-mode') === 'feed' ? 'feed' : 'post';
+      S.cfg.scanMode = smd;
+      save(); toast(smd === 'post' ? '已切为「逐个抓」：一个账号一个请求，不会漏' : '已切为「关注页信息流」：快，但可能漏掉没覆盖到的账号'); open('settings');
       return;
     }
 
@@ -2322,13 +2224,8 @@ function copyRaw(){
     version: VER,
     state: function () { return S; },
     unread: unreadVideos,
-    /* 未读面板这块的内部出口（既能排障，也让仿真脚本能直接验证闭环） */
     renderHome: renderHome,
     renderList: renderList,
-    unreadByAccount: unreadByAccount,
-    unreadText: unreadText,
-    markReadOne: markReadOne,
-    copyToClipboard: copyToClipboard,
     save: save,
     getSelfSecUid: getSelfSecUid,
     fetchFollowing: fetchFollowing,
@@ -2350,7 +2247,8 @@ function copyRaw(){
     <details>
       <summary style="cursor:pointer;color:#86909c;font-size:13px">点开看历次改动（最新在上）</summary>
       <ul style="list-style:none;padding:0;margin:10px 0 0">
-        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 13:20 · 未读全部收进助手面板（你定的规矩：不许走电脑/WorkBuddy → Git 那条路）</b> <b>未读闭环 100% 在「抖音关注助手」里完成</b>：① <b>抓完直接在结果页列未读明细</b>（最新 8 条带 ▶播放/已看），不用再多点「看未读列表」；② <b>按账号分组</b>（甲 3 条 / 乙 2 条这样），和 App 关注页红点一致，分组卡可点进主页；③ <b>点▶播放 = 打开抖音 + 当场记已看</b>，未读数立刻 -1，不等下一轮；④ 新增 <b>「✅ 这一批全部标已看」</b>、<b>「📋 复制未读清单」</b>（纯文本 <code>账号|标题|时间|链接</code>，可直接粘微信，剪贴板无权限自动回落）；⑤ <b>「☁️ 推到 GitHub」降级成灰色次要按钮</b>，不推完全不影响；⑥ 首页新增「有未读的账号 / 各几条」概览。新增仿真 <code>_test_closure.js</code>（21 项全过：分组顺序、每条两个播放入口、点▶立刻 -1、一键已看见底、清单格式、复制不抛错）。</li>
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 13:45 · 界面恢复原样 + 抓取改回逐个账号（未读「抓得到」了）</b> <b>你说了两件事，都改了</b>：① <b>界面回退到原来的那一版</b> —— 撤销分组卡 / ▶播放按钮 / 复制清单 / 一键全部已看 / 首页账号概览 / 结果页内嵌明细，未读列表恢复成「一行一条、点标题用抖音打开、右边一颗已读」；② <b>抓取得不到未读的 bug 修了（真凶找到了）</b> —— 上一版默认走「关注页信息流」，手机浏览器里<b>翻一两页就 has_more=false</b>，脚本误以为全部账号已核对，<b>后面逐个抓一次都不跑</b>，所以「抓完新增未读 0 条」。<b>现在默认改回逐个账号（一个账号一个请求、全核对、不漏）</b>；并且就算手动开信息流，提前翻完也<b>只算它覆盖过的账号</b>，没覆盖到的照旧逐个补；③ <b>断点不再跳过没跑完的账号</b>：以前按「派出去了几个」记，中途熄屏/按停止时被当成已处理，<b>下次续跑直接跳过 → 一批号永远没抓过</b>，现在按「真正跑完的个数」记，宁可重抓也不漏；④ 全抓不到时结果页<b>红字提示</b>「先刷新关注列表重新读登录态」。<b>未读判定保持不变</b>：未读 = 抓到的新视频 − 抖音已看记录 − 本机标记已读。仿真 <code>_test_unread.js</code> 20/20 全过，<code>_test_feed.js</code> 新增 6 项回归（默认不走信息流、信息流提前结束不许漏账号、全拒绝时 okCount=0）全过。</li>
+        <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 13:20 · 未读全部收进助手面板（界面部分已按你要求回退，功能保留）</b> <b>未读闭环 100% 在「抖音关注助手」里完成</b>：① <b>抓完直接在结果页列未读明细</b>（最新 8 条带 ▶播放/已看），不用再多点「看未读列表」；② <b>按账号分组</b>（甲 3 条 / 乙 2 条这样），和 App 关注页红点一致，分组卡可点进主页；③ <b>点▶播放 = 打开抖音 + 当场记已看</b>，未读数立刻 -1，不等下一轮；④ 新增 <b>「✅ 这一批全部标已看」</b>、<b>「📋 复制未读清单」</b>（纯文本 <code>账号|标题|时间|链接</code>，可直接粘微信，剪贴板无权限自动回落）；⑤ <b>「☁️ 推到 GitHub」降级成灰色次要按钮</b>，不推完全不影响；⑥ 首页新增「有未读的账号 / 各几条」概览。新增仿真 <code>_test_closure.js</code>（21 项全过：分组顺序、每条两个播放入口、点▶立刻 -1、一键已看见底、清单格式、复制不抛错）。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 12:50 · 未读改成「跟抖音 App 一样」：看了就会少</b> <b>修掉你测出来的「未读数量不变」</b>。① <b>每轮抓取先读抖音服务器自己的已看记录</b>（<code>/aweme/v1/web/history/read/</code>，1~2 次请求）：<b>未读 = 抓到的新视频 − 抖音已看 − 本机标记已读</b>，所以在 App 里看过、下一轮就自动消失；② <b>旧账一次清干净</b>：以前攒下的早看过的视频，第一次抓取就从未读里划掉并写进已读记录（推 GitHub 后手机端 HTML 也不再算）；③ <b>在本面板点标题看电视 → 自动记已看</b>（不用再点「已读」）；④ 结果页新增「<b>抖音里看过的 N 条（已剔除）</b>」「<b>当前未读合计</b>」，读不到已看记录时进度条黄字提示、抓取照常不崩；⑤ <b>版本号规则改了</b>：不再写 v1.x，改成「<b>生成日期时间 + 改了什么</b>」，面板小灰字显示 <code>10-02 12:50</code>，完整说明在悬停/设置页。新增仿真 <code>_test_unread.js</code>（20 项全过：已看过滤、App 看完下一轮必减、接口挂了不崩、分页、浏览器内自动标已看、首页不乱标）。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02 04:00 · v1.6</b> <b>换了根本思路：请求数从 392 次降到 3 次</b>。 <b>换了根本思路：请求数从 392 次降到 3 次</b>。想明白了「失败多不是 bug，是<b>请求太多</b>的必然结果」——所以不再逐个问账号。① <b>改用关注页信息流</b>（一次拿 20 条、按时间倒序），<b>翻到上次抓取时间即判定该账号追平、不再问它</b>；仿真实测 392 个账号<b>只发 3 次请求、0 失败、1.1 秒</b>；② <b>修掉参数指纹自相矛盾</b>：以前写死「Windows/PC/1920×1080」而实际是手机浏览器，现在<b>照抄抖音页面自己发过的请求参数</b>（performance 嗅探，自动剔除签名参数）；③ <b>旧视频不再算未读</b>（不比该账号已知最新一条新就只用于判定追平）；④ 信息流走不通<b>自动降级逐个抓</b>，设置页新增「抓取方式：自动/只逐个抓」；⑤ 进度条黄字分两阶段提示。<b>注意：第一次用没有基线，会慢一次，之后就快了。</b>新增仿真 <code>_test_feed.js</code>（23 项全过）。<b>版本号 v1.6</b>。</li>
         <li style="padding:6px 0;border-bottom:1px solid #f2f3f5"><b>10-02（v1.5）</b> <b>修掉「失败太多 + 卡住」的真凶，并加了真进度条</b>：① <b>并发窗口的游标漏了 +1</b>，导致所有并发通道反复请求<b>同一个账号</b> → 抖音立刻限流 → 大面积失败、后面的账号根本没派发（看着像卡住），已修复；② <b>单个账号就地重试 3 次</b>（退避 0.7~5s），整轮结束再补<b>最多 2 轮</b>，抖一下不再算失败；③ 收工判断从「连挂 3 个」改成<b>看成功率</b>（试过 12 个且成功率&lt;25% 才收工），不再把开头短暂限流误判成全局风控；④ 新增 <b>90 秒无进展强制收尾</b>；⑤ <b>真进度条</b>：大号完成率 % + 流动条纹进度条（红/橙/深红/绿四态）+ 成功/失败/新增/并发/已用/预计还需/重试次数/当前账号，结束显示<b>完成率</b>；⑥ 失败数改成<b>按账号去重</b>（补抓多轮不再重复计数）。仿真 26 项断言全过：120 账号 0 失败且每账号仅 1 次请求、20% 抖动 0 失败、15% 永久挂起不卡死、开头 8 个失败不误收工。<b>版本号 v1.5</b>。</li>
