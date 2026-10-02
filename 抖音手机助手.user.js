@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 00:20 · ① 背景色真正改成浅黄（上一版太淡看着像白的）：面板 #fff6cc、卡片/小标签 #ffefab、按钮/输入框 #fffbe6、描边 #ecd98c，底色另用 inline style 再写一遍防被抖音样式顶回白底；② 点「▶ 用抖音看」不再弹「允许网站打开抖音吗」（去掉隐藏 iframe，改成点击回调里直接跳 snssdk1128://，带用户手势直接拉起抖音，1.2s 没起来补一次 intent://）；③ 唤起后网页端不做任何动作：不跳视频网页、不开新标签、不刷新，面板原样留在那
+// @version      2026-10-03 00:55 · ① 点「▶ 用抖音看」仍弹「允许网站打开抖音吗」：查清是 Via（WebView 内核）自己的「链接处理」确认框，网页 JS 关不掉，彻底关掉要去 Via → 设置 → 高级设置 → 链接处理 →「直接打开」（或弹框时勾「记住选择」）；② 默认只发一次【带手势】的 snssdk1128://，不再补发第二次【没手势】的跳转（那必然又是一个框）；③ 视频列表页新增「唤起方式」开关：只scheme / 只intent（写死抖音包名）/ 自动，可循环切换并记住；④ 唤起失败只提示，网页端始终不跳转、不开新标签
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -32,14 +32,18 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 00:20 · ① 背景色这次是真的浅黄了 —— 上一版 #fffbe6 太淡，手机上看着还是白的，整体加深一档：面板 #fff6cc、卡片/小标签 #ffefab、按钮/输入框 #fffbe6、描边 #ecd98c、分割线 #f2e3a8，并且底色再用 inline style 写一遍（inline 优先级最高，抖音后插的样式压不掉，不会退回白底）；② 点「▶ 用抖音看」不再弹「允许网站打开抖音吗」—— 去掉隐藏 iframe（iframe 发起的跳转不带用户手势，浏览器才会弹那个确认框），改成在点击回调里同步直接跳 snssdk1128://，带着手势系统直接拉起抖音，1.2 秒没起来再补一次 intent://（写死抖音包名，不会弹「用哪个应用打开」）；③ 唤起之后网页端什么都不做：不跳视频网页、不开新标签、不刷新，面板原样留在那（真没装抖音只弹一句提示，绝不跳转）';
-  var VER_SHORT = '10-03 00:20';
+  var VER = '2026-10-03 00:55 · ① 点「▶ 用抖音看」还弹「允许网站打开抖音吗」—— 查清了：那是 Via（WebView 内核）自己的「链接处理」确认框，网页里的 JS 关不掉，彻底关掉要走 Via → 设置 → 高级设置 → 链接处理 →「直接打开」（弹框时勾「记住选择」也一样）；② 脚本这边也改了：默认只发一次【带手势】的 snssdk1128://，不再偷偷补发第二次【没手势】的跳转（那必然又是一个框）；③ 视频列表页顶部新增「唤起方式」开关，可循环切换 只scheme / 只intent（写死抖音包名）/ 自动，哪条在你手机上不弹框就锁哪条，会记住';
+  var VER_SHORT = '10-03 00:55';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
   function loadState() {
     var def = {
-      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'xl', scanMode: 'auto', scanBatch: 60 },
+      /* openMode：点视频时用哪条路唤起抖音 App
+           'scheme'（默认，只发一次带手势的 snssdk1128://，最不容易被弹框）
+           'intent'（只发 intent://，写死抖音包名）
+           'auto'  （先 scheme，1.2 秒没起来再补一次 intent —— 补的那下没手势，个别浏览器会弹框） */
+      cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'xl', scanMode: 'auto', scanBatch: 60, openMode: 'scheme' },
       selfSecUid: '',
       categories: ['朋友', '军事', '学习', '工作', '实时新闻', '钓鱼', '娱乐'],   // 用户自己建的分类，可增删改
       accounts: [],      // [{name, secUserId, category}]
@@ -1513,8 +1517,18 @@
       '<div class="dyh-row"><b>未读视频</b><span class="dyh-hl">' + vids.length + ' 条</span></div>' +
       (acc && acc.category ? '<div class="dyh-row"><b>分类</b><span>' + esc(acc.category) + '</span></div>' : '') +
       '</div>';
-    h += '<div class="dyh-tip">点任意一条 → 直接唤起<b>抖音 App</b> 观看：<b>不再弹「允许网站打开抖音吗」</b>，' +
-      '唤起之后<b>网页端不跳转、不做任何动作</b>（面板原样留在这）；打开的同时记成已看，未读数当场减一。</div>';
+    h += '<div class="dyh-tip">点任意一条 → 用<b>抖音 App</b> 观看，唤起后<b>网页端不跳转、不做任何动作</b>' +
+      '（面板原样留在这）；打开的同时记成已看，未读数当场减一。</div>';
+    /* 「唤起方式」开关：不同手机 / 不同浏览器对 scheme 和 intent 的放行程度不一样，
+       哪个不弹「允许网站打开抖音吗」就锁哪个（点一下循环切换，会记住）。 */
+    var om = S.cfg.openMode || 'scheme';
+    var omNext = (om === 'scheme') ? 'intent' : (om === 'intent' ? 'auto' : 'scheme');
+    var omTxt = { scheme: '① 只 scheme（默认，发一次）', intent: '② 只 intent（写死包名）', auto: '③ 自动（scheme 失败再补 intent）' };
+    h += '<div class="dyh-row"><b>唤起方式</b>' +
+      '<span class="dyh-mini" data-act="openmode" data-mode="' + esc(omNext) + '">' + esc(omTxt[om]) + ' ⇄</span></div>';
+    h += '<div class="dyh-tip" style="margin:4px 0 10px">还是弹「允许网站打开抖音吗」？那是 <b>Via 自己</b>的框（网页关不掉）：' +
+      'Via → 设置 → 高级设置 → <b>链接处理 → 改成「直接打开」</b>（或弹框时勾「记住选择」再点允许）。' +
+      '也可以点上面那颗按钮换一种唤起方式试试。</div>';
     for (i = 0; i < vids.length; i++) {
       var v = vids[i];
       h += '<div class="dyh-vid" data-act="play" data-id="' + esc(v.awemeId) + '" data-url="' + esc(v.url) + '">' +
@@ -1527,30 +1541,43 @@
     return h;
   }
 
-  /* 唤起抖音 App 打开视频详情页（10-03 00:20 重写）
+  /* 唤起抖音 App 打开视频详情页（10-03 00:50 重写）
      ---------------------------------------------------------------------------
-     旧做法：塞一个隐藏 iframe 指到 snssdk1128:// —— iframe 发起的跳转【不带用户手势】，
-     浏览器就把它当「网页想偷偷拉起别的 App」，于是弹「允许网站打开抖音吗？」那个确认框。
-     新做法：在【点击的回调里同步】用当前页面直接跳 scheme（带着用户手势）→ 系统直接拉起抖音，
-     不弹确认框、不经过任何中间页。
-     ★ 网页端不做任何动作：不 window.open、不跳视频网页、不刷新，面板原样留着；
-       没装抖音 / 被浏览器拦了也只是原地不动（2.7 秒后给一句提示，绝不跳转）。 */
+     ★★ 那个「允许网站打开抖音吗」的框到底是谁弹的（改这段代码前必读）：
+        Via 这类浏览器是 **WebView 内核**。WebView 遇到非 http(s) 的 scheme（snssdk1128://、intent://）
+        一律交给浏览器自己处理，Via 就按它自己的「链接处理」设定弹确认框。
+        这是【浏览器层面】的框 —— 网页里的 JS 关不掉（iframe 没手势会弹，location 跳转照样会弹）。
+        彻底关掉它的唯一办法在浏览器设置里（详见说明页 ⑤-15）：
+          Via → 设置 → 高级设置 → 链接处理 → 改成「直接打开」
+          （有的版本写作「允许外部应用打开链接」并带「记住选择」：框出来时勾上「记住」点一次允许，以后不再问）
+        脚本这边能做的是：
+          ① 只在【点击的回调里同步】发起（带用户手势 —— 能不弹就不弹）；
+          ② 不再偷偷补发第二次【没有手势】的跳转（那必然又是一个框）：默认只发一次；
+          ③ 给一个「唤起方式」开关（cfg.openMode = scheme / intent / auto），
+             哪条路在你机器上不弹框，就锁哪条，下次一直按它来。
+     ★ 网页端始终不做任何动作：不 window.open、不跳视频网页、不刷新，面板原样留着。 */
   function openInApp(awemeId) {
     var id = encodeURIComponent(awemeId || '');
+    var mode = S.cfg.openMode || 'scheme';
     var scheme = 'snssdk1128://aweme/detail/' + id;
-    // Android intent 写法：直接写死抖音包名，避免再弹「用哪个应用打开」的选择框
+    // intent 写法：写死抖音包名 → 系统不会弹「用哪个应用打开」的选择框，也不会跳网页（没给 fallback URL）
     var intent = 'intent://aweme/detail/' + id +
       '#Intent;scheme=snssdk1128;package=com.ss.android.ugc.aweme;end';
-    try { window.location.href = scheme; } catch (e) { }
-    // 1.2 秒还在前台 = 上面那一下没起来，换 intent 再试一次（没写兜底网址，不会把页面顶走）
+    var first = (mode === 'intent') ? intent : scheme;
+    try { window.location.href = first; } catch (e) { }
+    /* 只有「自动」档才补第二下（1.2 秒还在前台 = 第一下没起来）。
+       ⚠ 这一下不在点击手势里，个别浏览器会专门为它弹一个确认框 ——
+         不想看到框就把「唤起方式」锁成 scheme 或 intent，别用自动。 */
+    if (mode === 'auto') {
+      setTimeout(function () {
+        if (document.hidden) return;
+        try { window.location.href = intent; } catch (e) { }
+      }, 1200);
+    }
+    // 还是没起来 → 只提示，绝不跳转、绝不开新标签
     setTimeout(function () {
       if (document.hidden) return;
-      try { window.location.href = intent; } catch (e) { }
-    }, 1200);
-    // 再等 1.5 秒还在前台 → 只提示，绝不跳转、绝不开新标签
-    setTimeout(function () {
-      if (document.hidden) return;
-      toast('没跳到抖音？多半是没装抖音，或浏览器拦了外部唤起（网页保持不动，这条已记成已看）');
+      toast('没跳到抖音？去 Via「设置 → 高级设置 → 链接处理」改成「直接打开」（这条已记成已看，网页没动）');
     }, 2700);
   }
 
@@ -2055,6 +2082,14 @@
       openInApp(pid);          // 只唤起抖音 App；网页端不跳转、不开新标签
       if (pid && S.readIds.indexOf(pid) < 0) { S.readIds.push(pid); save(); }
       toast('已唤起抖音 App（网页保持不动）');
+      open('accv'); return;
+    }
+    /* 切换「唤起方式」：scheme → intent → auto → scheme，记住选择 */
+    if (act === 'openmode') {
+      var m = el.getAttribute('data-mode') || 'scheme';
+      S.cfg.openMode = (m === 'intent' || m === 'auto') ? m : 'scheme';
+      save();
+      toast('唤起方式：' + (m === 'intent' ? '只 intent://' : m === 'auto' ? '自动（会补一次）' : '只 scheme'));
       open('accv'); return;
     }
     if (act === 'read-one') {
