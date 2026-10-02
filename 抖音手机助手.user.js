@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-02 23:08 · 管理分类页新增「从 GitHub 拉分类」：一键把电脑端整理好的分类灌进手机（按 secUid 对号，对方改名也认得）；顺带修分类名乱码、setBody 面板未开时会崩
+// @version      2026-10-02 23:47 · 首页按钮改名「📺 未读视频查看」：进去默认「全部分类」，点分类名弹下拉切换；每个公众号「名称/多少未读/设分类/取关」并排一行，点名称看该号未读视频，点视频直接唤起抖音 App；取消切换界面大小功能（固定铺满屏）；背景改浅黄色
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -32,8 +32,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-02 23:08 · ① 管理分类页新增「☁️ 从 GitHub 拉分类」：电脑端整理好的分类清单（categories.json，只有 40KB，不是 3.9MB 的 unread.json）一键灌进手机，按 secUid 对号 —— 对方改名也认得出来；两个模式：「拉取并覆盖分类」以电脑端为准，「只补空缺」只填空白的、本机已有分类不动；清单里没有的账号保持原样，绝不动；② 电脑端 data.json 里 5 个被 U+FFFD 咬坏的分类名（实时新闻被吃成「实时��闻」之类）已自动归并修复，手机端也会拒收带乱码的分类名；③ 顺带修一个真 bug：面板没打开时调 setBody 会抛异常';
-  var VER_SHORT = '10-02 23:08';
+  var VER = '2026-10-02 23:47 · ① 首页那颗「🚫 批量取关 / 管理分类」改名成「📺 未读视频查看」—— 它本来就是用来看谁有未读的；② 进去默认就是「全部分类」，点那一行会弹出下拉，里面列出全部分类 + 每个分类的账号数和未读数，选一个就切过去（新建 / 改名 / 删分类 / 整类取关都收在下拉底部）；③ 下面的公众号【名称 · 多少未读 · 设分类 · 取关】四个并排挤在一行，一眼扫过去；④ 点公众号名称 → 进这个号自己的未读视频列表，点任意一条直接唤起【抖音 App】观看（没装或没唤起会自动退回网页版），打开的同时就记成已看，未读数当场减一；⑤ 取消了切换界面大小的功能（右上角 ⤢ 和设置里那排按钮都删了），面板固定铺满整块手机屏；⑥ 整个面板背景改成浅黄色';
+  var VER_SHORT = '10-02 23:47';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1220,11 +1220,11 @@
     h += '</div>';
     h += '<button class="dyh-btn primary" data-act="scan">🔍 抓最新未读视频</button>';
     h += '<button class="dyh-btn" data-act="refresh">📥 刷新我的关注列表</button>';
-    h += '<button class="dyh-btn" data-act="manage">🚫 批量取关 / 管理分类</button>';
+    h += '<button class="dyh-btn" data-act="manage">📺 未读视频查看</button>';
     h += '<button class="dyh-btn" data-act="search">🔎 搜索并关注新账号</button>';
     h += '<button class="dyh-btn" data-act="push">☁️ 推到 GitHub（手机端 HTML 可看）</button>';
     h += '<button class="dyh-btn gray" data-act="settings">⚙️ 设置（GitHub / 数据）</button>';
-    h += '<div class="dyh-tip">面板右上角的 <b>⤢</b> 可以切换界面大小（小 / 中 / 更大 / 满屏，默认满屏＝铺满整块手机屏），点一下立刻变；标题后面那个 <b>' + VER_SHORT +
+    h += '<div class="dyh-tip">标题后面那个 <b>' + VER_SHORT +
       '</b> 是版本号（生成时间 + 本次改动，完整说明在设置页最下面），用来确认手机上跑的是不是最新版。</div>';
     return h;
   }
@@ -1245,8 +1245,9 @@
      删掉的分类里的账号自动落到「未分类」，不会跟着消失。
      每个账号后面标未读条数：视频对象里带 secUid 就按 secUid 数（对方改名也不怕），
      拿不到就退回按昵称数。 */
-  var MGR = { cat: '', kw: '', adding: false, editing: '' };
+  var MGR = { cat: '', kw: '', adding: false, editing: '', drop: false, acc: '', sync: false };
   var NO_CAT = '__none__';                       // 「未分类」的空槽（真值仍是空字符串）
+  var ALL_CAT = '__all__';                       // 「全部分类」（进管理页默认就是这个）
 
   function catNames() {
     var arr = (S.categories && S.categories.length) ? S.categories.slice() : [];
@@ -1272,7 +1273,14 @@
   }
 
   function catOf(a) { return (a.category || NO_CAT); }
+  function isAll(cat) { return cat === ALL_CAT; }
+  function catLabel(cat) {
+    if (cat === ALL_CAT) return '全部分类';
+    if (cat === NO_CAT) return '未分类';
+    return cat || '未分类';
+  }
   function catCount(cat) {
+    if (cat === ALL_CAT) return S.accounts.length;
     var n = 0;
     for (var i = 0; i < S.accounts.length; i++) if (catOf(S.accounts[i]) === cat) n++;
     return n;
@@ -1281,7 +1289,7 @@
     var n = 0;
     for (var i = 0; i < S.accounts.length; i++) {
       var a = S.accounts[i];
-      if (catOf(a) !== cat) continue;
+      if (cat !== ALL_CAT && catOf(a) !== cat) continue;
       n += um[(a.secUserId || a.name)] || 0;
     }
     return n;
@@ -1291,7 +1299,7 @@
     var kw = (MGR.kw || '').trim().toLowerCase(), out = [];
     for (var i = 0; i < S.accounts.length; i++) {
       var a = S.accounts[i];
-      if (catOf(a) !== cat) continue;
+      if (cat !== ALL_CAT && catOf(a) !== cat) continue;
       if (kw && String(a.name || a.secUserId || '').toLowerCase().indexOf(kw) < 0) continue;
       out.push(a);
     }
@@ -1384,95 +1392,163 @@
 
   function renderManage() {
     var um = unreadByAccount();
-    var cats = catNames();
-    if (!MGR.cat) {
-      var hasNone = false;
-      for (var q = 0; q < S.accounts.length; q++) if (!S.accounts[q].category) { hasNone = true; break; }
-      MGR.cat = hasNone ? NO_CAT : (cats[0] || NO_CAT);
-      if (MGR.cat === NO_CAT && !cats.length) MGR.cat = NO_CAT;
-    }
+    if (!MGR.cat) MGR.cat = ALL_CAT;            // ★ 进来默认就是「全部分类」
     var cat = MGR.cat;
-    var h = '<div class="dyh-back" data-act="home">← 返回</div>';
-    h += '<div class="dyh-tip">按分类查看你的关注、给账号归类、看每个号还有几条没看，还能直接取关</div>';
+    var i, h = '<div class="dyh-back" data-act="home">← 返回</div>';
 
-    /* ---- 从 GitHub 拉分类（电脑端整理好的分类一键灌进来）---- */
-    h += '<div class="dyh-card" style="padding:10px 12px;margin-bottom:10px">' +
-      '<div class="dyh-row"><b>☁️ 从 GitHub 拉分类</b><span></span></div>' +
-      '<div class="dyh-tip" style="margin:2px 0 8px">电脑端整理好的分类清单存在 GitHub 的 <b>categories.json</b>（只有几十 KB，' +
-      '不像 unread.json 有 3.9MB 手机拉不动）。拉下来会按账号对上号并覆盖本机分类。</div>' +
-      (S.lastCatSync ? '<div class="dyh-tip" style="margin:0 0 8px">上次同步：' + esc(fmtTime(S.lastCatSync)) + '</div>' : '') +
-      '<button class="dyh-btn primary" data-act="cat-pull">☁️ 拉取并覆盖分类</button> ' +
-      '<button class="dyh-btn" data-act="cat-merge">🔀 只补空缺（不覆盖已有）</button>' +
-      '</div>';
+    /* ---- 分类选择器：点这一行弹出下拉，选一个就切过去 ---- */
+    h += '<div class="dyh-sel" data-act="mgr-drop"><b>' + esc(catLabel(cat)) + '</b>' +
+      '<span class="dyh-caret">' + (MGR.drop ? '▴' : '▾') + '</span>' +
+      '<em>' + catCount(cat) + ' 个 · <b>' + catUnread(cat, um) + '</b> 未读</em></div>';
+
+    if (MGR.drop) {
+      var opts = [{ key: ALL_CAT, name: '全部分类' }], cs = catNames();
+      for (i = 0; i < cs.length; i++) opts.push({ key: cs[i], name: cs[i] });
+      opts.push({ key: NO_CAT, name: '未分类' });
+      h += '<div class="dyh-drop">';
+      for (i = 0; i < opts.length; i++) {
+        var k = opts[i].key;
+        h += '<div class="dyh-drop-i' + (cat === k ? ' on' : '') + '" data-act="mgr-pick" data-cat="' + esc(k) + '">' +
+          '<span>' + esc(opts[i].name) + '</span><em>' + catCount(k) + ' 个 · ' + catUnread(k, um) + ' 未读</em></div>';
+      }
+      h += '<div class="dyh-drop-a">' +
+        '<span class="dyh-mini" data-act="mgr-newcat">＋ 新建分类</span>' +
+        (cat !== ALL_CAT && cat !== NO_CAT
+          ? '<span class="dyh-mini" data-act="mgr-rename" data-cat="' + esc(cat) + '">改名</span>' +
+            '<span class="dyh-mini dg" data-act="mgr-del-cat" data-cat="' + esc(cat) + '">删分类</span>' +
+            '<span class="dyh-mini dg" data-act="mgr-uf-cat" data-cat="' + esc(cat) + '">整类取关</span>'
+          : '') +
+        '</div>';
+      // 就地展开的输入框（不用弹窗 —— 有些手机浏览器会禁 prompt）
+      if (MGR.adding) {
+        h += '<input id="dyh-newcat" class="dyh-input" placeholder="新分类名，比如「搞笑」">' +
+          '<div style="display:flex;gap:8px;margin-bottom:6px">' +
+          '<span class="dyh-mini on" style="flex:1;text-align:center;display:block" data-act="mgr-newcat-ok">＋ 加进来</span>' +
+          '<span class="dyh-mini" style="flex:1;text-align:center;display:block" data-act="mgr-cat-cancel">取消</span></div>';
+      }
+      if (MGR.editing === cat) {
+        h += '<input id="dyh-catname" class="dyh-input" value="' + esc(cat) + '" placeholder="分类名">' +
+          '<div style="display:flex;gap:8px;margin-bottom:6px">' +
+          '<span class="dyh-mini on" style="flex:1;text-align:center;display:block" data-act="mgr-cat-ok" data-cat="' + esc(cat) + '">保存</span>' +
+          '<span class="dyh-mini" style="flex:1;text-align:center;display:block" data-act="mgr-cat-cancel">取消</span></div>';
+      }
+      h += '</div>';
+    }
 
     /* ---- 搜索 ---- */
-    h += '<input id="dyh-mgr-kw" class="dyh-input" placeholder="搜昵称（留空看全部）" value="' + esc(MGR.kw || '') + '">';
-
-    /* ---- 分类列表 ---- */
-    h += '<div class="dyh-card" style="padding:8px 10px">';
-    var rows = cats.map(function (c) { return { name: c, key: c }; }).concat([{ name: '未分类', key: NO_CAT }]);
-    for (var i = 0; i < rows.length; i++) {
-      var nm = rows[i].name, key = rows[i].key;
-      var cnt = catCount(key), un = catUnread(key, um);
-      h += '<div class="dyh-cat' + (cat === key ? ' sel' : '') + '">' +
-        '<div class="dyh-cat-l"><b>' + esc(nm) + '</b><span>' + cnt + ' 个' +
-        (un ? ' · <b style="color:#fe2c55">' + un + ' 未读</b>' : ' · 无未读') + '</span></div>' +
-        '<div class="dyh-cat-r">' +
-        '<span class="dyh-mini" data-act="mgr-pick" data-cat="' + esc(key) + '">' + (cat === key ? '当前' : '查看') + '</span>' +
-        (key === NO_CAT ? '' :
-          '<span class="dyh-mini" data-act="mgr-uf-cat" data-cat="' + esc(key) + '">取关</span>' +
-          '<span class="dyh-mini" data-act="mgr-rename" data-cat="' + esc(key) + '">改名</span>' +
-          '<span class="dyh-mini dg" data-act="mgr-del-cat" data-cat="' + esc(key) + '">删</span>') +
-        '</div></div>';
-      // 改名输入框（就地展开，不用弹窗 —— 有些手机浏览器会禁 prompt）
-      if (MGR.editing === key) {
-        h += '<div style="padding:0 0 12px"><input id="dyh-catname" class="dyh-input" value="' + esc(nm) + '" placeholder="分类名">' +
-          '<div style="display:flex;gap:8px">' +
-          '<span class="dyh-mini on" style="flex:1;text-align:center;display:block" data-act="mgr-cat-ok" data-cat="' + esc(key) + '">保存</span>' +
-          '<span class="dyh-mini" style="flex:1;text-align:center;display:block" data-act="mgr-cat-cancel">取消</span></div></div>';
-      }
-    }
-    h += '</div>';
-
-    /* ---- 新建分类 ---- */
-    if (MGR.adding) {
-      h += '<input id="dyh-newcat" class="dyh-input" placeholder="新分类名，比如「搞笑」">' +
-        '<div style="display:flex;gap:8px;margin-bottom:8px">' +
-        '<span class="dyh-mini on" style="flex:1;text-align:center;display:block" data-act="mgr-newcat-ok">＋ 加进来</span>' +
-        '<span class="dyh-mini" style="flex:1;text-align:center;display:block" data-act="mgr-cat-cancel">取消</span></div>';
-    } else {
-      h += '<span class="dyh-mini" data-act="mgr-newcat" style="margin-bottom:12px">＋ 新建分类</span>';
-    }
+    h += '<input id="dyh-mgr-kw" class="dyh-input" placeholder="搜公众号名称（留空看全部）" value="' + esc(MGR.kw || '') + '">';
 
     h += '<div id="dyh-mgr-list">' + mgrListHtml(cat, um) + '</div>';
+
+    /* ---- 从 GitHub 拉分类：折叠在最后，平时不占地方 ---- */
+    if (MGR.sync) {
+      h += '<div class="dyh-card" style="padding:10px 12px;margin:14px 0 0">' +
+        '<div class="dyh-row"><b>☁️ 从 GitHub 拉分类</b><span></span></div>' +
+        '<div class="dyh-tip" style="margin:2px 0 8px">电脑端整理好的分类清单存在 GitHub 的 <b>categories.json</b>' +
+        '（只有几十 KB，不像 unread.json 有 3.9MB 手机拉不动）。拉下来会按账号对上号并覆盖本机分类。</div>' +
+        (S.lastCatSync ? '<div class="dyh-tip" style="margin:0 0 8px">上次同步：' + esc(fmtTime(S.lastCatSync)) + '</div>' : '') +
+        '<button class="dyh-btn primary" data-act="cat-pull">☁️ 拉取并覆盖分类</button>' +
+        '<button class="dyh-btn" data-act="cat-merge">🔀 只补空缺（不覆盖已有）</button>' +
+        '<button class="dyh-btn gray" data-act="mgr-sync-close">收起</button></div>';
+    } else {
+      h += '<div style="margin:14px 0 0"><span class="dyh-mini" data-act="mgr-sync">☁️ 同步电脑端的分类</span></div>';
+    }
     return h;
   }
 
-  /* 某个分类下的账号列表（搜索框输入时只重渲这一块，输入框不会丢焦点） */
+  /* 某个分类下的公众号列表（★ 名称 / 未读数 / 设分类 / 取关 四个并排一行）
+     搜索框输入时只重渲这一块，输入框不会丢焦点。 */
   function mgrListHtml(cat, um) {
     var mem = catMembers(cat, um);
     var kwOn = (MGR.kw || '').trim() ? 1 : 0;
     var shown = mem.length;
-    var tip = cat === NO_CAT ? '未分类' : cat;
-    var h = '<div class="dyh-tip" style="margin:13px 0 4px"><b>' + esc(tip) + '</b>' +
-      (kwOn ? ' · 搜到 ' +shown + ' 个（该分类共 ' + catCount(cat) + ' 个）' : ' · ' + catCount(cat) + ' 个') +
-      (kwOn ? '' : ' · 点「分类」改名，点 ✕ 取关') + '</div>';
+    var h = '<div class="dyh-tip" style="margin:10px 0 4px"><b>' + esc(catLabel(cat)) + '</b> · ' +
+      (kwOn ? '搜到 ' + shown + ' 个（本类共 ' + catCount(cat) + ' 个）' : shown + ' 个公众号') +
+      ' · <span class="dyh-hl">' + catUnread(cat, um) + '</span> 条未读' +
+      (kwOn ? '' : ' · 点名称看它的未读视频') + '</div>';
     var n = Math.min(shown, 300);
     for (var i = 0; i < n; i++) {
       var a = mem[i];
       var un = um[(a.secUserId || a.name)] || 0;
-      h += '<div class="dyh-acc"><div class="dyh-acc-t">' + esc(a.name || a.secUserId) +
-        (un ? '<span class="dyh-urn">' + un + ' 未读</span>' : '<span class="dyh-urn ok">已看完</span>') + '</div>' +
-        '<div class="dyh-acc-m">' +
-        '<span class="dyh-mini" data-act="setcat" data-sec="' + esc(a.secUserId) + '">' +
-        esc(a.category || '设分类') + '</span>' +
-        '<span class="dyh-mini" data-act="open-home" data-sec="' + esc(a.secUserId) + '">主页</span>' +
-        '<span class="dyh-mini dg" data-act="unfollow-one" data-sec="' + esc(a.secUserId) + '" data-name="' + esc(a.name) + '">✕ 取关</span>' +
-        '</div></div>';
+      h += '<div class="dyh-acc2">' +
+        '<span class="dyh-nm" data-act="acc-videos" data-sec="' + esc(a.secUserId) + '" data-name="' + esc(a.name || '') + '">' +
+        esc(a.name || a.secUserId) + '</span>' +
+        '<span class="dyh-urn2' + (un ? '' : ' ok') + '">' + (un ? un + ' 未读' : '已看完') + '</span>' +
+        '<span class="dyh-mini" data-act="setcat" data-sec="' + esc(a.secUserId) + '">' + esc(a.category || '设分类') + '</span>' +
+        '<span class="dyh-mini dg" data-act="unfollow-one" data-sec="' + esc(a.secUserId) + '" data-name="' + esc(a.name || '') + '">取关</span>' +
+        '</div>';
     }
-    if (!shown) h += '<div class="dyh-tip">这个分类下还没有账号' + (kwOn ? '（换个关键词试试）' : '') + '。</div>';
-    else if (shown > 300) h += '<div class="dyh-tip">先显示 300 个（本分类 ' + shown + ' 个），用上面搜索框过滤。</div>';
+    if (!shown) h += '<div class="dyh-tip">这个分类下还没有公众号' + (kwOn ? '（换个关键词试试）' : '') + '。</div>';
+    else if (shown > 300) h += '<div class="dyh-tip">先显示 300 个（本类共 ' + shown + ' 个），用上面搜索框过滤。</div>';
     return h;
+  }
+
+  /* ================= 某个公众号的「未读视频列表」 =================
+     点进来只看这一个号的未读；点任意一条 → 唤起抖音 App 看（没唤起就退回网页版），
+     并当场记成已看（未读数立刻 -1，不用等下一轮抓取）。 */
+  function unreadVideosOf(sec, acc) {
+    var readMap = {}, out = [], i;
+    for (i = 0; i < S.readIds.length; i++) readMap[S.readIds[i]] = 1;
+    var name = acc ? (acc.name || '') : '';
+    for (i = 0; i < S.videos.length; i++) {
+      var v = S.videos[i];
+      if (readMap[v.awemeId]) continue;
+      // 优先按 secUid 认（对方改名也不怕）；老数据只有昵称的，退回比昵称
+      var ok = sec ? (v.secUid === sec || (!v.secUid && name && v.account === name))
+        : (!!name && v.account === name);
+      if (ok) out.push(v);
+    }
+    out.sort(function (a, b) { return (b.publishedAt || 0) - (a.publishedAt || 0); });
+    return out;
+  }
+
+  function renderAccVideos() {
+    var sec = MGR.acc || '', acc = null, i;
+    for (i = 0; i < S.accounts.length; i++) if (S.accounts[i].secUserId === sec) { acc = S.accounts[i]; break; }
+    var name = acc ? (acc.name || sec) : sec;
+    var vids = unreadVideosOf(sec, acc);
+    var h = '<div class="dyh-back" data-act="manage">← 返回</div>';
+    h += '<div class="dyh-card">' +
+      '<div class="dyh-row"><b>公众号</b><span>' + esc(name) + '</span></div>' +
+      '<div class="dyh-row"><b>未读视频</b><span class="dyh-hl">' + vids.length + ' 条</span></div>' +
+      (acc && acc.category ? '<div class="dyh-row"><b>分类</b><span>' + esc(acc.category) + '</span></div>' : '') +
+      '</div>';
+    h += '<div class="dyh-tip">点任意一条 → 直接唤起<b>抖音 App</b> 观看（没装 / 没唤起会自动退回网页版），' +
+      '打开的同时记成已看，未读数当场减一。</div>';
+    for (i = 0; i < vids.length; i++) {
+      var v = vids[i];
+      h += '<div class="dyh-vid" data-act="play" data-id="' + esc(v.awemeId) + '" data-url="' + esc(v.url) + '">' +
+        '<div class="dyh-vid-t">' + esc(v.title || '（无标题）') + '</div>' +
+        '<div class="dyh-vid-m"><span>' + esc(v.publishTime || '') + '</span>' +
+        '<span class="dyh-mini go">▶ 用抖音看</span>' +
+        '<span class="dyh-mini" data-act="read-one" data-id="' + esc(v.awemeId) + '">已看</span></div></div>';
+    }
+    if (!vids.length) h += '<div class="dyh-tip">这个号现在没有未读视频。</div>';
+    return h;
+  }
+
+  /* 唤起抖音 App 打开视频详情页
+     做法：塞一个隐藏 iframe 指向 snssdk1128:// 的详情页；1.4 秒后看页面有没有被切到后台，
+     没被切走说明 App 没起来 → 用 window.open 打开网页版兜底（不让用户卡在空白页）。 */
+  function openInApp(awemeId, url) {
+    var moved = false, ifr = null;
+    function onHide() { moved = true; }
+    try { document.addEventListener('visibilitychange', onHide); } catch (e) { }
+    try {
+      ifr = document.createElement('iframe');
+      ifr.style.display = 'none';
+      ifr.src = 'snssdk1128://aweme/detail/' + encodeURIComponent(awemeId);
+      document.body.appendChild(ifr);
+    } catch (e) { }
+    setTimeout(function () {
+      try { document.removeEventListener('visibilitychange', onHide); } catch (e) { }
+      try { if (ifr && ifr.parentNode) ifr.parentNode.removeChild(ifr); } catch (e) { }
+      if (!moved && !document.hidden) {
+        var w = null;
+        try { w = window.open(url, '_blank'); } catch (e) { }
+        if (!w) { try { window.location.href = url; } catch (e2) { } }
+      }
+    }, 1400);
   }
 
   function renderSearch() {
@@ -1490,14 +1566,7 @@
     h += '<label class="dyh-lb">仓库名</label><input id="dyh-repo" class="dyh-input" value="' + esc(S.cfg.repo) + '">';
     h += '<label class="dyh-lb">分支</label><input id="dyh-branch" class="dyh-input" value="' + esc(S.cfg.branch) + '">';
     h += '<label class="dyh-lb">Token</label><input id="dyh-token" class="dyh-input" type="password" value="' + esc(S.cfg.token) + '" placeholder="ghp_xxx">';
-    h += '<label class="dyh-lb">助手界面大小（点了立刻生效，不用重开）</label><div style="display:flex;gap:8px;margin:4px 0 2px">' +
-      '<button class="dyh-btn' + (S.cfg.uiScale === 's' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="s">小</button>' +
-      '<button class="dyh-btn' + (S.cfg.uiScale === 'm' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="m">中</button>' +
-      '<button class="dyh-btn' + (S.cfg.uiScale === 'l' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="l">更大</button>' +
-      '<button class="dyh-btn' + (S.cfg.uiScale === 'xl' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="ui-size" data-size="xl">满屏</button>' +
-      '</div>' +
-      '<div class="dyh-tip" style="margin-top:2px">默认<b>满屏</b> = 宽高都铺满整块手机屏（点开助手就是整屏，不再只有 96%×93%）。' +
-      '⤢ 每点一下在小 → 中 → 更大 → 满屏之间轮着换，设完这一行会立刻按新档位重排。</div>';
+    h += '<div class="dyh-tip" style="margin-top:2px">助手面板已固定<b>铺满整块手机屏</b>（切换大小的功能按你的要求取消了）。</div>';
     var md = S.cfg.scanMode === 'post' ? 'post' : 'auto';
     h += '<label class="dyh-lb">抓取方式</label><div style="display:flex;gap:8px;margin:6px 0 4px">' +
       '<button class="dyh-btn' + (md === 'auto' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="auto">智能（默认，推荐）</button>' +
@@ -1539,66 +1608,89 @@
       'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.28);user-select:none}' +
       '.dyh-panel{position:fixed;left:0;right:0;bottom:0;top:0;z-index:2147483645;background:rgba(0,0,0,.55);' +
       'display:none;align-items:center;justify-content:center}' +
-      /* 默认「更大」：宽 96% / 高 93%，四周只留一点点边，几乎就是铺满手机屏（10-02 按用户要求放大）
-         ★ 关键尺寸一律 !important：抖音自己后插入的样式表压不掉我们（否则面板会缩回老样子） */
-      '.dyh-box{background:#fff!important;width:96%!important;max-width:980px;height:93%!important;max-height:920px;overflow:hidden;' +
-      'border-radius:14px;padding:20px 20px calc(24px + env(safe-area-inset-bottom));font-size:24px!important;color:#1d2129;' +
+      /* 面板固定铺满整屏（切换大小的功能已取消）+ 浅黄底色（10-02 23:40 按用户要求）
+         ★ 关键样式一律 !important：抖音自己后插入的样式表压不掉我们（否则会被顶回白底/小窗） */
+      '.dyh-box{background:#fffbe6!important;width:100%!important;max-width:none;height:100%!important;max-height:none;' +
+      'overflow:hidden;border-radius:0;padding:12px 12px calc(12px + env(safe-area-inset-bottom));' +
+      'font-size:24px!important;color:#1d2129;' +
       'display:flex!important;flex-direction:column;box-sizing:border-box;line-height:1.65}' +
-      '.dyh-box.sz-s{width:74%!important;max-width:540px;height:70%!important;max-height:560px;font-size:22px!important}' +
-      '.dyh-box.sz-m{width:88%!important;max-width:720px;height:85%!important;max-height:720px;font-size:23px!important}' +
-      '.dyh-box.sz-l{width:96%!important;max-width:980px;height:93%!important;max-height:920px;font-size:24px!important}' +
-      /* 满屏（默认）：宽高都 100%、去掉圆角和外层留白，点开助手就是整块手机屏 */
-      '.dyh-box.sz-xl{width:100%!important;max-width:none;height:100%!important;max-height:none;border-radius:0;' +
-      'font-size:24px!important;padding:12px 12px calc(12px + env(safe-area-inset-bottom))!important}' +
+      '.dyh-box.sz-full{background:#fffbe6!important;border-radius:0;font-size:24px!important;' +
+      'padding:12px 12px calc(12px + env(safe-area-inset-bottom))!important}' +
+      '.dyh-box.sz-s,.dyh-box.sz-m,.dyh-box.sz-l,.dyh-box.sz-xl{background:#fffbe6!important}' +
       '.dyh-box h3{margin:0 0 17px!important;font-size:28px!important;display:flex!important;align-items:center;flex:0 0 auto}' +
       '.dyh-box h3 span{margin-left:auto;font-size:40px!important;color:#c9cdd4;padding:0 8px}' +
       '.dyh-ver{font-size:16px!important;color:#c9cdd4;font-weight:400;margin-left:9px!important}' +
-      '.dyh-zbtn{font-size:30px!important;color:#4e5969;background:#f2f3f5;border-radius:8px;' +
+      '.dyh-zbtn{font-size:30px!important;color:#4e5969;background:#fff4cf;border-radius:8px;' +
       'padding:4px 14px;margin-left:auto!important}' +
       '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
-      '.dyh-btn{display:block;width:100%;margin:11px 0;padding:19px 20px;border:1px solid #e5e6eb;border-radius:10px;' +
-      'background:#fff;font-size:24px!important;color:#1d2129;text-align:left}' +
+      '.dyh-btn{display:block;width:100%;margin:11px 0;padding:19px 20px;border:1px solid #ecdfb4;border-radius:10px;' +
+      'background:#fffdf3;font-size:24px!important;color:#1d2129;text-align:left}' +
       '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
-      '.dyh-btn.gray{color:#86909c}' +
-      '.dyh-card{background:#f7f8fa;border-radius:10px;padding:15px 17px;margin-bottom:13px}' +
-      '.dyh-row{display:flex;align-items:center;padding:16px 0;border-bottom:1px solid #f0f0f0;font-size:24px!important}' +
+      '.dyh-btn.gray{color:#8a6d1f}' +
+      '.dyh-card{background:#fff4cf;border-radius:10px;padding:15px 17px;margin-bottom:13px}' +
+      '.dyh-row{display:flex;align-items:center;padding:16px 0;border-bottom:1px solid #f2e4b8;font-size:24px!important}' +
       '.dyh-row:last-child{border-bottom:0}' +
       '.dyh-row b{font-weight:500;color:#4e5969}' +
       '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
       '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
-      '.dyh-item{padding:16px 0;border-bottom:1px solid #f2f3f5}' +
+      '.dyh-item{padding:16px 0;border-bottom:1px solid #f2e4b8}' +
       '.dyh-item-t{font-size:24px!important;line-height:1.5;color:#1d2129}' +
-      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:9px;font-size:19px;color:#86909c}' +
+      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:9px;font-size:19px;color:#8a6d1f}' +
       '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:9px 17px}' +
-      '.dyh-tip{font-size:19px!important;color:#86909c;line-height:1.75;margin:11px 0}' +
+      '.dyh-tip{font-size:19px!important;color:#8a6d1f;line-height:1.75;margin:11px 0}' +
       '.dyh-back{font-size:20px;color:#fe2c55;margin-bottom:13px}' +
-      /* ---- 管理分类 / 账号行 ---- */
-      '.dyh-cat{display:flex;align-items:center;gap:10px;padding:14px 6px;border-bottom:1px solid #f0f0f0}' +
-      '.dyh-cat.sel{background:#fff1f3;border-radius:8px;margin:2px -6px;padding-left:12px;padding-right:6px}' +
+      /* ---- 分类下拉选择器 ---- */
+      '.dyh-sel{display:flex;align-items:center;gap:8px;background:#fff4cf;border:1px solid #ecdfb4;' +
+      'border-radius:10px;padding:14px 16px;margin:6px 0 10px}' +
+      '.dyh-sel b{font-size:25px;font-weight:600;color:#1d2129}' +
+      '.dyh-sel .dyh-caret{font-size:20px;color:#8a6d1f}' +
+      '.dyh-sel em{margin-left:auto;font-size:18px;font-style:normal;color:#8a6d1f;white-space:nowrap}' +
+      '.dyh-sel em b{color:#fe2c55;font-weight:700}' +
+      '.dyh-drop{background:#fffdf3;border:1px solid #ecdfb4;border-radius:10px;padding:6px 8px;margin:0 0 10px}' +
+      '.dyh-drop-i{display:flex;align-items:center;gap:10px;padding:13px 10px;border-bottom:1px solid #f2e4b8;font-size:23px}' +
+      '.dyh-drop-i.on{background:#ffeaa8;border-radius:8px;font-weight:600}' +
+      '.dyh-drop-i em{margin-left:auto;font-size:17px;font-style:normal;color:#8a6d1f;white-space:nowrap}' +
+      '.dyh-drop-a{display:flex;gap:8px;flex-wrap:wrap;padding:10px 6px 6px;border-top:1px solid #f2e4b8}' +
+      /* ---- 公众号行：名称 / 未读数 / 设分类 / 取关 四个并排 ---- */
+      '.dyh-acc2{display:flex;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid #f2e4b8}' +
+      '.dyh-nm{flex:1 1 auto;min-width:0;font-size:23px;color:#1d2129;line-height:1.35;' +
+      'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.dyh-urn2{flex:0 0 auto;font-size:18px;font-weight:700;color:#fe2c55;white-space:nowrap}' +
+      '.dyh-urn2.ok{color:#b3a66a;font-weight:400}' +
+      '.dyh-acc2 .dyh-mini{flex:0 0 auto;padding:7px 10px;font-size:17px}' +
+      /* ---- 某个公众号的未读视频列表 ---- */
+      '.dyh-vid{padding:14px 0;border-bottom:1px solid #f2e4b8}' +
+      '.dyh-vid-t{font-size:23px;line-height:1.5;color:#1d2129;word-break:break-all}' +
+      '.dyh-vid-m{display:flex;align-items:center;gap:10px;margin-top:9px;font-size:19px;color:#8a6d1f}' +
+      '.dyh-vid-m span:first-child{margin-right:auto}' +
+      '.dyh-mini.go{background:#fe2c55;border-color:#fe2c55;color:#fff;font-weight:600}' +
+      /* ---- 老的分类行 / 账号行（保留样式，防止旧页面残留） ---- */
+      '.dyh-cat{display:flex;align-items:center;gap:10px;padding:14px 6px;border-bottom:1px solid #f2e4b8}' +
+      '.dyh-cat.sel{background:#ffeaa8;border-radius:8px;margin:2px -6px;padding-left:12px;padding-right:6px}' +
       '.dyh-cat-l{display:flex;align-items:baseline;gap:9px;min-width:0}' +
       '.dyh-cat-l b{font-size:23px;font-weight:600}' +
-      '.dyh-cat-l span{font-size:17px;color:#86909c}' +
+      '.dyh-cat-l span{font-size:17px;color:#8a6d1f}' +
       '.dyh-cat-r{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}' +
-      '.dyh-mini{display:inline-block;padding:8px 13px;border:1px solid #e5e6eb;border-radius:8px;background:#f7f8fa;' +
+      '.dyh-mini{display:inline-block;padding:8px 13px;border:1px solid #ecdfb4;border-radius:8px;background:#fff4cf;' +
       'color:#4e5969;font-size:17px;text-decoration:none;white-space:nowrap}' +
       '.dyh-mini.dg{background:#fff0f1;border-color:#ffd9dc;color:#fe2c55}' +
       '.dyh-mini.on{background:#fe2c55;border-color:#fe2c55;color:#fff;font-weight:600}' +
-      '.dyh-acc{padding:13px 0;border-bottom:1px solid #f2f3f5}' +
+      '.dyh-acc{padding:13px 0;border-bottom:1px solid #f2e4b8}' +
       '.dyh-acc-t{font-size:23px;color:#1d2129;line-height:1.45;word-break:break-all}' +
       '.dyh-urn{color:#fe2c55;font-weight:700;font-size:18px;margin-left:9px}' +
-      '.dyh-urn.ok{color:#c9cdd4;font-weight:400;margin-left:9px}' +
+      '.dyh-urn.ok{color:#b3a66a;font-weight:400;margin-left:9px}' +
       '.dyh-acc-m{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}' +
-      '.dyh-input{width:100%;box-sizing:border-box;padding:15px 16px;border:1px solid #e5e6eb;border-radius:8px;' +
-      'font-size:20px;margin:4px 0 13px}' +
-      '.dyh-lb{font-size:18px;color:#86909c;display:block;margin-top:11px}' +
-      '.dyh-prog{background:#f2f3f5;border-radius:8px;padding:16px 18px;margin:12px 0;font-size:19px;line-height:1.75}' +
+      '.dyh-input{width:100%;box-sizing:border-box;padding:15px 16px;border:1px solid #ecdfb4;border-radius:8px;' +
+      'background:#fffdf3;font-size:20px;margin:4px 0 13px}' +
+      '.dyh-lb{font-size:18px;color:#8a6d1f;display:block;margin-top:11px}' +
+      '.dyh-prog{background:#fff4cf;border-radius:8px;padding:16px 18px;margin:12px 0;font-size:19px;line-height:1.75}' +
       /* ---- 抓取进度条 ---- */
-      '.dyh-pwrap{background:#fff;border:1px solid #e5e6eb;border-radius:12px;padding:16px 18px;margin:12px 0}' +
+      '.dyh-pwrap{background:#fffdf3;border:1px solid #ecdfb4;border-radius:12px;padding:16px 18px;margin:12px 0}' +
       '.dyh-ptop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}' +
       '.dyh-pnum{font-size:36px;font-weight:700;color:#fe2c55;line-height:1.1}' +
       '.dyh-pnum small{font-size:20px;font-weight:600}' +
       '.dyh-pcnt{font-size:19px;color:#4e5969;margin-left:auto}' +
-      '.dyh-pbar{position:relative;height:22px;background:#eceef1;border-radius:11px;overflow:hidden;margin:12px 0 10px}' +
+      '.dyh-pbar{position:relative;height:22px;background:#f3e7c0;border-radius:11px;overflow:hidden;margin:12px 0 10px}' +
       '.dyh-pin{height:100%;width:0;border-radius:11px;transition:width .35s ease;' +
       'background:linear-gradient(90deg,#fe2c55,#ff7d00);' +
       'background-size:28px 28px;' +
@@ -1621,9 +1713,8 @@
 
     panel = document.createElement('div');
     panel.className = 'dyh-panel';
-    // 结构：h3 只放标题/版本号/⤢缩放/关闭，正文单独 #dyh-body（h3 不能包裹 body，否则内容区会缩成一行）
+    // 结构：h3 只放标题/版本号/关闭，正文单独 #dyh-body（h3 不能包裹 body，否则内容区会缩成一行）
     panel.innerHTML = '<div class="dyh-box"><h3>抖音关注助手<span class="dyh-ver" title="' + esc(VER) + '">' + VER_SHORT + '</span>' +
-      '<span class="dyh-zbtn" data-act="cycle-size" title="点一下换界面大小">⤢</span>' +
       '<span data-act="close">×</span></h3><div id="dyh-body"></div></div>';
     panel.addEventListener('click', function (e) {
       if (e.target === panel) { panel.style.display = 'none'; return; }
@@ -1650,21 +1741,17 @@
     window.addEventListener('orientationchange', function () { setTimeout(reSize, 300); });
   }
 
-  /* 界面大小四档：s=小(74%×70%) / m=中(88%×85%) / l=更大(96%×93%) / xl=满屏(100%×100%，默认)
+  /* 面板固定「满屏」：宽高都铺满整块手机屏（2026-10-02 23:40：按用户要求取消了切换大小的功能）。
      ★ 双保险：class 用百分比（!important 防抖音样式覆盖）+ inline style 直接写算好的 px
        （inline 优先级最高，即使 CSS 类没命中、或页面样式再怎么压，尺寸也不会退回去） */
   function applyBoxSize() {
     if (!panel) return;
     var box = panel.querySelector('.dyh-box');
     if (!box) return;
-    var s = (S.cfg && S.cfg.uiScale) || 'xl';
-    if (s !== 's' && s !== 'm' && s !== 'l') s = 'xl';
-    box.className = 'dyh-box sz-' + s;
+    box.className = 'dyh-box sz-full';
     var W = window.innerWidth || 390, H = window.innerHeight || 844;
-    var pct = s === 's' ? [74, 70] : (s === 'm' ? [88, 85] : (s === 'l' ? [96, 93] : [100, 100]));
-    var cap = s === 's' ? [540, 560] : (s === 'm' ? [720, 720] : (s === 'l' ? [980, 920] : [99999, 99999]));
-    box.style.width = Math.min(Math.round(W * pct[0] / 100), cap[0]) + 'px';
-    box.style.height = Math.min(Math.round(H * pct[1] / 100), cap[1]) + 'px';
+    box.style.width = Math.round(W) + 'px';
+    box.style.height = Math.round(H) + 'px';
     box.style.maxWidth = 'none'; box.style.maxHeight = 'none';
   }
 
@@ -1674,6 +1761,7 @@
     applyBoxSize();   // 每次打开都重算一次（视口可能变了，也防止尺寸被页面样式顶回去）
     if (view === 'home') bodyEl.innerHTML = renderHome();
     else if (view === 'manage') bodyEl.innerHTML = renderManage();
+    else if (view === 'accv') bodyEl.innerHTML = renderAccVideos();
     else if (view === 'search') bodyEl.innerHTML = renderSearch();
     else if (view === 'settings') bodyEl.innerHTML = renderSettings();
     else bodyEl.innerHTML = renderHome();
@@ -1864,29 +1952,6 @@
     if (act === 'stop-scan') { stopScan(); return; }
     if (act === 'clear-job') { S.scanJob = null; save(); toast('断点已清除，下次会全部重抓'); open('home'); return; }
 
-    // 标题栏 ⤢：小 → 中 → 更大 → 小 …… 点了立刻变，并报出实际像素，方便确认到底生效没有
-    if (act === 'cycle-size') {
-      var order = ['s', 'm', 'l', 'xl'];
-      var names = { s: '小', m: '中', l: '更大', xl: '满屏' };
-      var ci2b = order.indexOf(S.cfg.uiScale);
-      var nx = order[(ci2b < 0 ? 3 : ci2b + 1) % 4];
-      S.cfg.uiScale = nx; save(); applyBoxSize();
-      var bx = panel.querySelector('.dyh-box');
-      var px = bx ? Math.round(bx.getBoundingClientRect().width) + '×' + Math.round(bx.getBoundingClientRect().height) + 'px' : '';
-      toast('界面：' + names[nx] + '（' + px + '）');
-      return;
-    }
-
-    if (act === 'ui-size') {
-      var sz = el.getAttribute('data-size');
-      if (sz === 's' || sz === 'm' || sz === 'l' || sz === 'xl') {
-        S.cfg.uiScale = sz; save(); applyBoxSize();
-        toast('界面已改成「' + (sz === 's' ? '小' : sz === 'm' ? '中' : sz === 'l' ? '更大' : '满屏') + '」');
-      }
-      open('settings');   // 重新渲染，让选中态亮起来
-      return;
-    }
-
     if (act === 'push') {
       setBody('<div class="dyh-back" data-act="home">← 返回</div><div class="dyh-prog" id="dyh-prog">正在推送到 GitHub…</div>');
       var payload = buildPayload();
@@ -1966,16 +2031,41 @@
 
     if (act === 'uf-stop') { UF_CANCEL = true; toast('已停手，剩下几个保持原样'); return; }
 
+    /* ---------- 看某个公众号的未读视频 ---------- */
+    if (act === 'acc-videos') {
+      MGR.acc = el.getAttribute('data-sec') || '';
+      if (!MGR.cat) MGR.cat = ALL_CAT;
+      open('accv'); return;
+    }
+    if (act === 'play') {
+      var pid = el.getAttribute('data-id');
+      var purl = el.getAttribute('data-url') || ('https://www.douyin.com/video/' + pid);
+      openInApp(pid, purl);
+      if (pid && S.readIds.indexOf(pid) < 0) { S.readIds.push(pid); save(); }
+      toast('正在用抖音打开…（已记成已看）');
+      open('accv'); return;
+    }
+    if (act === 'read-one') {
+      var rid = el.getAttribute('data-id');
+      if (rid && S.readIds.indexOf(rid) < 0) { S.readIds.push(rid); save(); }
+      toast('已标记已看'); open('accv'); return;
+    }
+
     /* ---------- 管理分类 ---------- */
     if (act === 'cat-pull') { pullCats('cover'); return; }
     if (act === 'cat-merge') { pullCats('merge'); return; }
 
+    /* 点当前分类那一行 → 展开/收起分类下拉 */
+    if (act === 'mgr-drop') { MGR.drop = !MGR.drop; MGR.adding = false; MGR.editing = ''; open('manage'); return; }
+    if (act === 'mgr-sync') { MGR.sync = true; open('manage'); return; }
+    if (act === 'mgr-sync-close') { MGR.sync = false; open('manage'); return; }
+
     if (act === 'mgr-pick') {
-      MGR.cat = el.getAttribute('data-cat'); MGR.adding = false; MGR.editing = '';
+      MGR.cat = el.getAttribute('data-cat'); MGR.drop = false; MGR.adding = false; MGR.editing = '';
       open('manage'); return;
     }
-    if (act === 'mgr-newcat') { MGR.adding = true; MGR.editing = ''; open('manage'); return; }
-    if (act === 'mgr-rename') { MGR.editing = el.getAttribute('data-cat'); MGR.adding = false; open('manage'); return; }
+    if (act === 'mgr-newcat') { MGR.adding = true; MGR.editing = ''; MGR.drop = true; open('manage'); return; }
+    if (act === 'mgr-rename') { MGR.editing = el.getAttribute('data-cat'); MGR.adding = false; MGR.drop = true; open('manage'); return; }
     if (act === 'mgr-cat-cancel') { MGR.adding = false; MGR.editing = ''; open('manage'); return; }
     if (act === 'mgr-cat-ok') {
       var oldName = el.getAttribute('data-cat');
@@ -2117,8 +2207,13 @@
     unread: unreadVideos,
     renderHome: renderHome,
     renderManage: renderManage,
+    renderAccVideos: renderAccVideos,
     mgrListHtml: mgrListHtml,
     catNames: catNames,
+    catLabel: catLabel,
+    mgr: function () { return MGR; },
+    unreadVideosOf: unreadVideosOf,
+    openInApp: openInApp,
     unreadByAccount: unreadByAccount,
     applyCatFile: applyCatFile,
     pullCats: pullCats,
