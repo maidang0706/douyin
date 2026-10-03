@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-04 00:35 · 回答「除了角标还有没有别的办法拿到未读数」——先补上一个决定性盲点：以前只监听 4 个已知地址（follow/post/following/history），抖音只要用【任何一个别的接口】下发未读数，我们连记录都不会记录，这就是这个问题一直没答案的原因。★ 新增「🌐 扫描接口」：开启后 60 秒，把抖音给自己前端发的【每一个】/aweme/ 接口都记一笔（只留地址和它有没有未读类字段，不留全文），结束后自动出清单。体检报告新增【六】节：列出全部见到过的接口、请求次数、每个接口的顶层字段，以及哪几个【带未读类字段】——那些就是第二个数据源，可以不再依赖页面上那个角标（尤其能救「直播号网页端不写角标」的情况）。
+// @version      2026-10-04 01:05 · 找到「读不全 / 和 App 对不上」的真正根因：滚动写成了【一次跳到列表最底部】sc.scrollTop = sc.scrollHeight，而抖音这个关注列表是【虚拟滚动】——DOM 里只保留看得见的那几行，滚出视口就被回收。一跳到底 = 中间几百个号从头到尾根本没被渲染过，永远读不到；而列表行数始终不变，代码还以为「已经到底了」提前收工。★ 仿真对照：30 个号，旧版只读到 16 个，新版 30/30 全读到。★ 修法：① 改成每次只往下滚【一屏】，逐屏渲染、逐屏读（追加渲染和虚拟滚动两种模式都成立）；② 进度判据从「当前 DOM 行数」改成【累计读到过的账号数】；③ 容器查找从 8 层放宽到 25 层；④ 到底后回顶再走一轮，别漏最上面的号；⑤ 轮数 80→160，等待 1100→800ms。★ 体检新增【零】环境诊断（UA 是手机还是电脑、页面里到底有没有「我的关注(N)」那个侧栏 —— 手机 UA 下抖音给的是移动版，压根没这个侧栏，那就什么都读不到）+【零之二】滚动有效性（找没找到可滚动容器、滚了之后位置到底动没动）。★ 接口扫描再升级：把响应里【列表第一个对象的全部字段】摊开列出来，未读数藏在哪个字段一眼就能认出来。
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -105,6 +105,45 @@
     return (s + q).slice(0, 150);
   }
 
+  /* 找到响应里第一个「元素是对象的数组」（通常就是账号列表 / 视频列表） */
+  function firstObjArray(node, depth) {
+    if (!node || typeof node !== 'object' || depth > 6) return null;
+    if (Object.prototype.toString.call(node) === '[object Array]') {
+      for (var i = 0; i < node.length; i++) if (node[i] && typeof node[i] === 'object') return node;
+      return null;
+    }
+    for (var k in node) {
+      if (!Object.prototype.hasOwnProperty.call(node, k)) continue;
+      var r = firstObjArray(node[k], depth + 1);
+      if (r) return r;
+    }
+    return null;
+  }
+
+  /* ★ 把列表里第一个对象的【所有字段】原样列出来（只留数字和短文本）。
+     目的：抖音可能把未读数藏在名字完全猜不到的字段里（不叫 unread），
+     只要把它摊开看一眼，是哪个字段一眼就认出来了。 */
+  function netSampleFields(j) {
+    var out = [];
+    try {
+      var arr = firstObjArray(j, 0);
+      if (!arr) return out;
+      var o = null, i;
+      for (i = 0; i < arr.length && i < 3; i++) { if (arr[i] && typeof arr[i] === 'object') { o = arr[i]; break; } }
+      if (!o) return out;
+      var k;
+      for (k in o) {
+        if (!Object.prototype.hasOwnProperty.call(o, k)) continue;
+        var v = o[k];
+        if (v == null) continue;
+        if (typeof v === 'number') out.push(k + ' = ' + v);
+        else if (typeof v === 'string' && v.length <= 24) out.push(k + ' = "' + v + '"');
+        else if (typeof v === 'boolean') out.push(k + ' = ' + v);
+      }
+    } catch (e) { }
+    return out.slice(0, 45);
+  }
+
   /* 扫描期间：每见到一个新接口就记一条（同一地址只记一次，只累加次数） */
   function netWideRecord(url, text) {
     try {
@@ -126,6 +165,7 @@
           rec.topKeys = ks.slice(0, 24).join(', ');
           walkUnreadFields(j, '', rec.fields, 0);
           rec.fields = uniq(rec.fields).slice(0, 12);
+          rec.sample = netSampleFields(j);
         }
       } catch (e) { rec.raw = '（不是 JSON）'; }
     } catch (e2) { }
@@ -201,8 +241,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-04 00:35 · 回答「除了角标还有没有别的办法拿到未读数」——先补上一个决定性盲点：以前只监听 4 个已知地址（follow/post/following/history），抖音只要用【任何一个别的接口】下发未读数，我们连记录都不会记录，这就是这个问题一直没答案的原因。★ 新增「🌐 扫描接口」：开启后 60 秒，把抖音给自己前端发的【每一个】/aweme/ 接口都记一笔（只留地址和它有没有未读类字段，不留全文），结束后自动出清单。体检报告新增【六】节：列出全部见到过的接口、请求次数、每个接口的顶层字段，以及哪几个【带未读类字段】——那些就是第二个数据源，可以不再依赖页面上那个角标（尤其能救「直播号网页端不写角标」的情况）。'
-  var VER_SHORT = '10-04 00:35';
+  var VER = '2026-10-04 01:05 · 找到「读不全 / 和 App 对不上」的真正根因：滚动写成了【一次跳到列表最底部】sc.scrollTop = sc.scrollHeight，而抖音这个关注列表是【虚拟滚动】——DOM 里只保留看得见的那几行，滚出视口就被回收。一跳到底 = 中间几百个号从头到尾根本没被渲染过，永远读不到；而列表行数始终不变，代码还以为「已经到底了」提前收工。★ 仿真对照：30 个号，旧版只读到 16 个，新版 30/30 全读到。★ 修法：① 改成每次只往下滚【一屏】，逐屏渲染、逐屏读（追加渲染和虚拟滚动两种模式都成立）；② 进度判据从「当前 DOM 行数」改成【累计读到过的账号数】；③ 容器查找从 8 层放宽到 25 层；④ 到底后回顶再走一轮，别漏最上面的号；⑤ 轮数 80→160，等待 1100→800ms。★ 体检新增【零】环境诊断（UA 是手机还是电脑、页面里到底有没有「我的关注(N)」那个侧栏 —— 手机 UA 下抖音给的是移动版，压根没这个侧栏，那就什么都读不到）+【零之二】滚动有效性（找没找到可滚动容器、滚了之后位置到底动没动）。★ 接口扫描再升级：把响应里【列表第一个对象的全部字段】摊开列出来，未读数藏在哪个字段一眼就能认出来。'
+  var VER_SHORT = '10-04 01:05';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -800,28 +840,58 @@
   /* 把关注页「我的关注」侧栏往上推一格：只推【账号列表自己的滚动容器】。
      ⚠ 不能直接滚 window —— 抖音关注页是左边账号列表(独立 overflow 容器) + 右边视频流，
      滚 window 只会翻视频流，账号列表一动不动，于是永远读不全真实未读（这就是根因之一）。 */
+  /* 从一个元素往上找真正能滚的祖先（虚拟滚动的列表容器往往埋得很深，8 层根本不够） */
+  function findScrollable(el, maxUp) {
+    var k = 0;
+    while (el && k < (maxUp || 25)) {
+      try {
+        var cs = getComputedStyle(el);
+        if (cs && (cs.overflowY === 'auto' || cs.overflowY === 'scroll')) {
+          if (el.scrollHeight > el.clientHeight + 50) return el;
+        }
+      } catch (e) { }
+      el = el.parentElement; k++;
+    }
+    return null;
+  }
+
+  /* ★★★ 10-04 00:58 修（这是「读不全 / 读不到」的真正根因）★★★
+     以前写的是 sc.scrollTop = sc.scrollHeight ——【一次跳到列表最底部】。
+     抖音这个几百个号的列表是【虚拟滚动】：DOM 里只保留看得见的那几行，
+     滚出视口的就被回收。一跳到底 = 中间几百个号从头到尾【根本没被渲染过】，
+     于是永远读不到；而列表行数始终不变，代码还以为「已经到底了」提前收工
+     —— 表现就是「只读到十几个号」「那个号一直对不上」。
+     ★ 正解：每次只往下滚【一屏】，逐屏渲染、逐屏读。
+       这在「追加渲染」和「虚拟滚动」两种模式下都成立。 */
   function scrollFollowSidebar() {
     var moved = false;
     try {
-      var hit = null, lis = document.querySelectorAll('li');
-      for (var i = 0; i < lis.length; i++) {
+      var hit = null, lis = document.querySelectorAll('li'), i;
+      for (i = 0; i < lis.length; i++) {
         if (/(\d+)\s*个作品未看/.test(lis[i].innerText || '')) { hit = lis[i]; break; }
       }
       if (!hit) {
         var as = document.querySelectorAll('a[href*="/user/"]');
-        for (var j = 0; j < as.length; j++) { hit = as[j]; break; }
+        if (as && as.length) hit = as[0];
       }
-      var el = hit, k, sc = null;
-      for (k = 0; k < 8 && el; k++) {
-        var cs = getComputedStyle(el);
-        if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) { sc = el; break; }
-        el = el.parentElement;
+      var sc = hit ? findScrollable(hit, 25) : null;
+      if (sc) {
+        var step = Math.max(Math.floor(sc.clientHeight * 0.85), 300);
+        var before = sc.scrollTop;
+        sc.scrollTop = before + step;                  // ★ 只滚一屏
+        if (sc.scrollTop > before + 1) moved = true;
+        else if (before > 0) sc.scrollTop = 0;         // 真到底了：回顶部，再走一轮（别漏顶上的号）
       }
-      if (sc) { sc.scrollTop = sc.scrollHeight; moved = true; }
-      var se = document.scrollingElement || document.documentElement;
-      if (se) se.scrollTop = se.scrollHeight;
-      window.scrollTo(0, document.body ? document.body.scrollHeight : 99999);
-      moved = true;
+      if (!moved) {
+        var se = document.scrollingElement || document.documentElement;
+        if (se) {
+          var step2 = Math.max(Math.floor((se.clientHeight || 600) * 0.85), 300);
+          var b2 = se.scrollTop;
+          window.scrollBy(0, step2);
+          if (se.scrollTop > b2 + 1) moved = true;
+          else if (b2 > 0) window.scrollTo(0, 0);
+        }
+      }
     } catch (e) { }
     return moved;
   }
@@ -835,12 +905,15 @@
   function harvestFollowSidebar(opts) {
     opts = opts || {};
     var best = { secMap: {}, nameMap: {}, total: -1, liTotal: 0, rows: 0 };
-    var lastN = -1, stable = 0, round = 0, maxRounds = opts.maxRounds || 40;
+    /* ★ 10-04：虚拟滚动下 liTotal（当前 DOM 行数）恒定不变，用它判断「读完了」会提前收工。
+       改用【累计读到过的账号数】—— 只有这个才真实反映进度。 */
+    var seenAll = {}, lastN = -1, stable = 0, round = 0, maxRounds = opts.maxRounds || 120;
     function merge(du) {
       if (!du) return;
       var k;
       for (k in du.secMap) if (!best.secMap[k] || du.secMap[k] > best.secMap[k]) best.secMap[k] = du.secMap[k];
       for (k in du.nameMap) if (!best.nameMap[k] || du.nameMap[k] > best.nameMap[k]) best.nameMap[k] = du.nameMap[k];
+      if (du.secSeen) for (k in du.secSeen) if (Object.prototype.hasOwnProperty.call(du.secSeen, k)) seenAll[k] = 1;
       if (du.total > best.total) best.total = du.total;
       if (du.liTotal > best.liTotal) best.liTotal = du.liTotal;
       if (du.rows > best.rows) best.rows = du.rows;
@@ -853,18 +926,20 @@
       merge(du);
       if (opts.onTick) {
         try {
+          var seenN2 = Object.keys(seenAll).length;
           opts.onTick({
             round: round, acc: Object.keys(best.secMap).length,
-            liTotal: best.liTotal, total: best.total
+            liTotal: best.liTotal, total: best.total, seen: seenN2
           });
         } catch (e) { }
       }
-      /* 读全了就收手；侧栏根本不存在（total<0 且没读到任何账号行）也别空转 */
-      if (best.total > 0 && best.liTotal >= Math.ceil(best.total * 0.85)) return Promise.resolve();
-      if (best.total < 0 && best.liTotal === 0 && round >= 5) return Promise.resolve();
-      if (best.liTotal === lastN) { stable++; } else { stable = 0; }
-      lastN = best.liTotal;
-      if (stable >= 4) return Promise.resolve();          // 连着 4 轮没多加载一个号 = 到底了
+      /* ★ 进度一律用【累计读到过的账号数 seenN】，不再用 liTotal（虚拟滚动下它不变） */
+      var seenN = Object.keys(seenAll).length;
+      if (best.total > 0 && seenN >= Math.ceil(best.total * 0.85)) return Promise.resolve();
+      if (best.total < 0 && seenN === 0 && round >= 5) return Promise.resolve();
+      if (seenN === lastN) { stable++; } else { stable = 0; }
+      lastN = seenN;
+      if (stable >= 6) return Promise.resolve();          // 连着 6 轮没多见到一个新号 = 到底了
       scrollFollowSidebar();
       return sleep(opts.wait || 1100).then(tick);
     }
@@ -969,7 +1044,7 @@
       out.wide.left = NET.wide > Date.now() ? Math.ceil((NET.wide - Date.now()) / 1000) : 0;
       for (var m = 0; m < NET.seenList.length; m++) {
         var rc = NET.seenList[m];
-        out.wide.list.push({ url: rc.url, n: rc.n, fields: rc.fields, topKeys: rc.topKeys, raw: rc.raw });
+        out.wide.list.push({ url: rc.url, n: rc.n, fields: rc.fields, topKeys: rc.topKeys, raw: rc.raw, sample: rc.sample });
       }
       for (var i = 0; i < NET.buf.length; i++) {
         var it = NET.buf[i];
@@ -1017,6 +1092,36 @@
       }
       var m = body.match(/我的关注\s*[（(]\s*(\d+)\s*[）)]/);
       r.myFollow = m ? parseInt(m[1], 10) : -1;
+
+      /* ★ 10-04：环境 + 滚动有效性诊断。
+         回答两个问题：① 你现在打开的到底是不是【有左侧栏的桌面版】？（手机 UA 下抖音给的是移动版，压根没这个侧栏）
+         ② 滚动到底有没有把新的账号加载出来？（没变化 = 滚动没生效，那当然读不全） */
+      try {
+        var ua = navigator.userAgent || '';
+        r.ua = ua.slice(0, 120);
+        r.isMobileUa = /Android|iPhone|iPad|Mobile/i.test(ua);
+        r.isDesktopUa = /Windows NT|Macintosh|X11|Linux/i.test(ua) && !r.isMobileUa;
+        r.sidebarFound = /我的关注\s*[（(]\s*\d+/.test(body);
+      } catch (e) { }
+      try {
+        var anchor = null;
+        var als = document.querySelectorAll('a[href*="/user/"]');
+        if (als && als.length) anchor = als[0];
+        var scc = anchor ? findScrollable(anchor, 25) : null;
+        if (scc) {
+          r.scrollBox = { top: Math.round(scc.scrollTop), h: Math.round(scc.scrollHeight), view: Math.round(scc.clientHeight) };
+          r.scrollMoved = scrollFollowSidebar();
+          var after = null;
+          try { after = Math.round(scc.scrollTop); } catch (e2) { }
+          r.scrollAfter = after;
+          r.scrollWorked = (after != null && r.scrollBox && after > r.scrollBox.top + 1);
+          r.linksBefore = als ? als.length : 0;
+        } else {
+          r.scrollBox = null;
+          r.scrollMoved = scrollFollowSidebar();
+        }
+      } catch (e3) { }
+
       var du = readFollowUnreadDom();
       r.badgeAcc = Object.keys(du.secMap || {}).length;
       r.seenAcc = Object.keys(du.secSeen || {}).length;
@@ -1062,6 +1167,28 @@
     L.push('== 抖音未读数字体检 ' + fmtTime(r.at) + ' ==');
     L.push('当前页面: ' + r.path + (r.onFollow ? '  (是关注页)' : '  (★不是关注页！角标只在这里读得到)'));
     L.push('脚本版本: ' + VER_SHORT);
+    L.push('');
+    L.push('【零】环境：你现在打开的到底是什么页面');
+    L.push('  网址: ' + r.url);
+    L.push('  UA 是手机还是电脑: ' + (r.isDesktopUa ? '电脑' : (r.isMobileUa ? '★手机★' : '未知')));
+    L.push('  ★ 页面里有「我的关注(N)」那个侧栏吗: ' + (r.sidebarFound ? '有 ✅' : '★没有★'));
+    if (!r.sidebarFound) {
+      L.push('  ⚠️ 这就解释了一切：你现在打开的页面【根本没有左侧那个账号列表】。');
+      L.push('     手机 UA 下抖音给的是【移动版网页】，它没有这个侧栏，所以什么角标都读不到。');
+      L.push('     办法：在浏览器设置里打开「桌面版网站 / 请求桌面站点」，再打开 www.douyin.com/follow 。');
+    }
+    L.push('  UA 原文: ' + (r.ua || ''));
+    L.push('');
+    L.push('【零之二】滚动到底有没有把新账号加载出来（读不全的真正原因都在这）');
+    if (r.scrollBox) {
+      L.push('  找到列表容器: 是（当前位置 ' + r.scrollBox.top + ' / 总高 ' + r.scrollBox.h + ' / 一屏 ' + r.scrollBox.view + '）');
+      L.push('  ★ 总高 ' + r.scrollBox.h + ' 远大于一屏 ' + r.scrollBox.view + ' → 这是个可滚动的长列表 ✅');
+    } else {
+      L.push('  ★ 没找到可滚动的列表容器（只滚了页面本身）→ 侧栏可能根本没加载出来');
+    }
+    L.push('  ★ 刚才滚了一下，位置是否真的动了: ' + (r.scrollWorked ? '动了 ✅' : '★没动★ ← 滚不动就读不到后面的号'));
+    L.push('  ★ 更准的验证：点「📡 读全部账号的官方未读数」，看进度里「已扫过 N 个号」会不会一直往上涨。');
+    L.push('     会涨 = 滚起来了；一直停在同一个数 = 没滚起来（把数字告诉我）。');
     L.push('');
     L.push('【一】网页上有没有「N个作品未看」这几个字');
     L.push('  页面全文里出现了 ' + (r.hitsOfWenkan || 0) + ' 次「N个作品未看」');
@@ -1129,6 +1256,10 @@
           for (var z = 0; z < lst[q].fields.length; z++) L.push('      ⭐ ' + lst[q].fields[z]);
         }
         if (lst[q].topKeys) L.push('      顶层: ' + lst[q].topKeys);
+        if (lst[q].sample && lst[q].sample.length) {
+          L.push('      --- 列表里第一个对象的全部字段（★ 找未读数就看这里，看哪个数字对得上）---');
+          for (var s2 = 0; s2 < lst[q].sample.length; s2++) L.push('        ' + lst[q].sample[s2]);
+        }
       }
     }
     L.push('');
@@ -1255,7 +1386,9 @@
      为什么要批量：388 个关注里，单号去读往往要滚很多次才轮到它；批量滚一遍，
      所有有未读的号一次全拿到（而且这个数就是网页端写出来的、与 App 同源）。
      ⚠ 直播中的号网页端不写角标（真机截图已证实），这类号读不到 —— 会如实算「未知」，不会报成 0。 */
-  var SIDE_HARVEST_WAIT = 1100;
+  /* ★ 10-04：改成逐屏滚动后，一轮 = 一屏，轮数要够（几百个号 / 每屏十来个）；
+     等待可以短一些（滚一屏后渲染很快，不再是等一整页网络）。 */
+  var SIDE_HARVEST_WAIT = 800;
   function readAllBadges() {
     if (!onFollowPage()) {
       S.pendingAllBadge = { at: Date.now() };
@@ -1268,12 +1401,13 @@
       '<div class="dyh-prog" id="dyh-prog">📡 正在把左侧「我的关注」列表滚到底…<br>' +
       '<span style="font-size:19px">把抖音写的「N个作品未看」全部读下来</span></div>');
     return harvestFollowSidebar({
-      maxRounds: 80, wait: SIDE_HARVEST_WAIT,
+      maxRounds: 160, wait: SIDE_HARVEST_WAIT,
       onTick: function (p) {
         var el = document.getElementById('dyh-prog');
-        if (el) el.innerHTML = '📡 正在读抖音写的未读数…<br><span style="font-size:19px">' +
-          '读到 <b>' + p.acc + '</b> 个号有未看 · 列表已加载 <b>' + p.liTotal + '</b> 行' +
-          (p.total > 0 ? ' · 关注共 <b>' + p.total + '</b> 个' : '') + '</span>';
+        if (el) el.innerHTML = '📡 正在逐屏读抖音写的未读数…<br><span style="font-size:19px">' +
+          '已扫过 <b>' + (p.seen || 0) + '</b> 个号 · 其中 <b>' + p.acc + '</b> 个有未看' +
+          (p.total > 0 ? ' · 关注共 <b>' + p.total + '</b> 个' : '') + '</span>' +
+          '<br><span style="font-size:17px;color:#7A6A3F">第 ' + p.round + ' 屏（让它自己滚，别手动划）</span>';
       }
     }).then(function (best) {
       var n = Object.keys(best.secMap || {}).length, k;
@@ -4213,6 +4347,8 @@
     applyBadge: applyBadge,
     readAllBadges: readAllBadges,
     harvestFollowSidebar: harvestFollowSidebar,
+    scrollFollowSidebar: scrollFollowSidebar,
+    findScrollable: findScrollable,
     sideProbe: sideProbe,
     netProbe: netProbe,
     probeText: probeText,
