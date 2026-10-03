@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 12:00 · ① 取消「取关」功能（单个取关 + 整类取关按钮、批量取关逻辑全部移除，需取关请在抖音 App 里操作）；② 面板配色从浅黄改为米花色（#F5EFE0 等），并新增 Via 夜间模式/反色自动侦测：检测到整页被反转时首页与设置页会直接提示「这是被反色了，不是没生效」，关掉 Via 夜间模式即可看到米花色
+// @version      2026-10-03 12:29 · ① 首页「📥 刷新我的关注列表」与「📡 抓最新未读视频」两个按钮位置互换（刷新上移、抓未读下移，抓未读仍是高亮主按钮）；② 继承 12:00：已取消取关功能、配色改米花色、新增 Via 夜间模式反色自动侦测
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -131,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 12:00 · ① 取消「取关」功能：账号行「取关」按钮、分类下拉「整类取关」按钮、批量取关 doUnfollowList 全部删除，菜单与处理器清理干净（关注功能保留）。日常取关建议直接在抖音 App 里点「关注 → 批量管理」；② 面板配色由浅黄改为米花色（面板 #F5EFE0 / 卡片 #ECE2CB / 按钮 #FBF7EE / 描边 #D9CCA6 / 分割线 #E5DAC0），正文仍为深色易读；③ 新增 detectNightMode()：扫描 html/body 的 filter、所有样式表与系统深色偏好，一旦发现整页被反色/压暗，首页与设置页直接给出红色提示——这下能分清「脚本没生效」还是「被 Via 夜间模式反转」，之前一直"改不成功"基本就是后者';
-  var VER_SHORT = '10-03 12:00';
+  var VER = '2026-10-03 12:29 · ① 首页「📥 刷新我的关注列表」与「📡 抓最新未读视频」两个按钮位置互换：刷新上移到第一行、抓未读下移到第二行（抓未读仍是高亮 primary 主按钮，只是位置靠后）；② 继承 12:00：取消取关功能、配色改米花色、新增 Via 夜间模式反色自动侦测';
+  var VER_SHORT = '10-03 12:29';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1717,8 +1717,8 @@
     h += '<div class="dyh-row"><b>上次抓取</b><span>' + (S.lastScanAt ? fmtTime(S.lastScanAt) : '从未') + '</span></div>';
     h += '<div class="dyh-row"><b>已看记录</b><span>' + S.readIds.length + ' 条</span></div>';
     h += '</div>';
-    h += '<button class="dyh-btn primary" data-act="scan">📡 抓最新未读视频（去关注页·不失败）</button>';
     h += '<button class="dyh-btn" data-act="refresh">📥 刷新我的关注列表</button>';
+    h += '<button class="dyh-btn primary" data-act="scan">📡 抓最新未读视频（去关注页·不失败）</button>';
     h += '<button class="dyh-btn" data-act="manage">📺 未读视频查看</button>';
     h += '<button class="dyh-btn" data-act="search">🔎 搜索并关注新账号</button>';
     h += '<button class="dyh-btn" data-act="push">☁️ 推到 GitHub（手机端 HTML 可看）</button>';
