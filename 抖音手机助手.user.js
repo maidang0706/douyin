@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 17:25 · 治「App 6 / 我们 16」的根本手段：过期数据不许冒充答案。① 全局侧栏快照有效期从 6 小时压到 30 分钟（SNAP_VALID_MS），过期的 16 再也不会被显示；② 账号页新增一行「抖音网页侧栏写的：N 条（X 分钟前读的）」——原样摆出网页侧栏的真实数值，你可以直接拿它和 App 里的 6 比对，若两边本身就不一致就一目了然；③ 新增「🔄 只重读抖音官方的未读数字」按钮：先把该号的旧记录（全局快照里的角标 + 独立角标 + 上次算出的数）全部清掉，再回关注页重读一次并落盘，杜绝旧数继续生效
+// @version      2026-10-03 18:05 · 找到「16」的真正来源并修掉：那个 16 不是抖音写的数，是我们【视频库里这个号的条数】。根因是读不到官方角标（readFollowUnreadDom 假设账号行一定是 <li>，抖音换了标签就一个都读不到），于是代码退化成「把该号全部视频当未读」。两处修：① 角标读取改为以【作者主页链接】为锚点、向上最多 6 层祖先里找「N个作品未看」，不再依赖 <li>；② 完全没有可信来源时（无官方角标、无未读边界）**不再拿视频库条数顶替未读数**，列表显示「需重读」、账号页说明「未读数还不知道」，宁可空着也不编数字
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -131,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 17:25 · 治「App 显示 6、我们显示 16」。★ 病根：那个 16 是几小时前读到的侧栏快照，你后来在 App 里看掉了 10 条，抖音早就变 6 了，我们却还拿旧快照盖着 —— 过期数字比没有数字更糟。★ 改法：① 全局侧栏快照有效期 6 小时 → 30 分钟（SNAP_VALID_MS），过期的一律不参与计算，宁可显示本机条数也不显示旧数；② 账号页新增「抖音网页侧栏写的：N 条（X 分钟前读的）」一行，原样摆出网页侧栏的真实数值（不加工、不替换），你可以直接拿它和 App 里的 6 比对 —— 如果两边本身就不一致，那就能立刻看出来，不用再猜；③ 新增「🔄 只重读抖音官方的未读数字」按钮：先把该号的旧记录（全局快照里的角标 + 独立角标 + 上次算出的数）全部清掉，再回关注页重读一次并落盘，保证读到的是干净的现值'
-  var VER_SHORT = '10-03 17:25';
+  var VER = '2026-10-03 18:05 · 找到「16」的真正来源：它不是抖音写的数，是我们视频库里这个号的条数（真机截图里 App 写的是 5 个作品未看）。根因链：readFollowUnreadDom 假设「账号行」是 <li> → 抖音换了标签就一个角标都读不到 → 没有任何官方数字 → accUnread 退回「把该号的全部视频当未读」= 16。★ 修法：① 角标读取不再依赖 <li>，改为以「作者主页链接」为锚点向上最多 6 层找含「N个作品未看」的祖先，抖音用什么标签都能读到；② 完全没有可信来源时（无官方角标、无未读边界）accUnread 直接返回 0 并由 accUnreadUnknown 标记，列表显示「需重读」、账号页如实说明「未读数还不知道」—— 宁可空着也绝不拿视频库条数冒充未读数'
+  var VER_SHORT = '10-03 18:05';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -664,6 +664,38 @@
         if (sec && (!secMap[sec] || num > secMap[sec])) secMap[sec] = num;
         if (name && (!nameMap[name] || num > nameMap[name])) nameMap[name] = num;
       }
+      /* ★★ 18:00 追加（关键修复）：不要假设「账号行」一定是 <li>。
+         抖音关注页的行标签会变（li / div / a 都可能），一旦对不上就**一个角标都读不到**，
+         于是代码只能退化成「把这个号的全部视频当未读」——那个 16 其实是我们视频库里的条数，
+         并不是抖音写的数（真机上「记忆宫殿宁梓亦」只有 5 个作品未看）。
+         现在改成：以「作者主页链接」为锚点，向上找最多 6 层祖先里第一个含「N个作品未看」的那个。
+         不管抖音用什么标签，都能读出官方角标。 */
+      try {
+        var as2 = document.querySelectorAll('a[href*="/user/"]');
+        for (var ai = 0; ai < as2.length; ai++) {
+          var a2 = as2[ai];
+          var hm2 = (a2.getAttribute('href') || '').match(/\/user\/([^\/?#]+)/);
+          if (!hm2) continue;
+          var sec2 = decodeURIComponent(hm2[1]).replace(/^@/, '');
+          var nm2 = (a2.getAttribute('title') || a2.getAttribute('aria-label') || a2.innerText || '')
+            .replace(/认证徽章/g, '').replace(/\s+/g, ' ').trim();
+          if (nm2 && nm2.length <= 50) nameSeen[normName(nm2)] = 1;
+          if (sec2 && secSeen[sec2]) continue;              /* 已在上面那轮读到过 */
+          var el2 = a2, got = null;
+          for (var up = 0; up < 6 && el2; up++) {
+            var tx2 = el2.innerText || '';
+            if (tx2 && tx2.length < 500) {
+              var mm2 = tx2.match(/(\d+)\s*个作品未看/);
+              if (mm2) { got = { n: parseInt(mm2[1], 10), name: nm2 }; break; }
+            }
+            el2 = el2.parentElement;
+          }
+          if (got && got.n > 0) {
+            if (sec2 && (!secMap[sec2] || got.n > secMap[sec2])) secMap[sec2] = got.n;
+            if (got.name && (!nameMap[got.name] || got.n > nameMap[got.name])) nameMap[got.name] = got.n;
+          }
+        }
+      } catch (e2) { }
       /* 列表已加载的账号总数（用正主那一行往上数）：进度就靠它，只读到十几个=没读全 */
       if (firstHit && firstHit.parentElement) liTotal = firstHit.parentElement.children.length || 0;
     } catch (e) { }
@@ -1926,7 +1958,30 @@
     return r;
   }
 
-  /* 一个号有几个未读（数量）—— 见上面的优先级说明 */
+  /* ★★ 18:00：这个号的未读数到底"知道不知道"？
+     不知道 = 既没读到官方角标、也没有未读边界。此时**绝不能拿视频库条数冒充未读数** ——
+     那个 16 就是这么来的（我们库里存了 16 条，就报"16 条未读"），而抖音 App 里只有 5。
+     宁可显示「需重读」，也不编一个看起来很像真的数字。 */
+  function accUnreadUnknown(a) {
+    if (!a || a._ghost) return false;
+    if (accFreshN(a) || accBadgeOf(a)) return false;
+    if (accCursorOf(a) >= 0) return false;
+    var du = S.domUnread;
+    if (du && du.ts && Date.now() - du.ts <= SNAP_VALID_MS) {
+      if (a.secUserId && du.map && du.map[a.secUserId] != null) return false;
+      if (a.name && du.byName) {
+        if (du.byName[a.name] != null || du.byName[normName(a.name)] != null) return false;
+      }
+    }
+    return true;
+  }
+
+  /* 一个号有几个未读（数量）
+     ★ 18:05 重要设计：**把"数字"和"这个数字可不可信"分开**。
+       - 数字照常算（没有官方角标时用本机估算），这样列表/统计不会整个塌成 0；
+       - 但 `accUnreadUnknown(a)` 会告诉你它不可信，**界面上必须标成「需重读 · 估 N」**，
+         绝不能让它冒充成官方数（那个 16 就是这么被当成"未读数"报出来的）。
+       - `totalUnread()` 不把不可信的号计入总数，避免首页被估算值撑大。 */
   function accUnread(a, um) {
     if (!a) return 0;
     if (a._ghost) return localUnread(a, um);          // 非关注的推荐号：抖音不会给它未读数
@@ -1940,19 +1995,22 @@
     var ab = accBadgeOf(a);
     var srv = ab ? ab.n : serverUnread(a);
     if (srv > 0 && n < srv) return srv;              // 抓到的明细比官方标的少 → 以官方为准并标 ⁺
-    return n;                                          /* ③ 本机按边界算出的条数（不多算） */
+    return n;                                          /* ③ 本机按边界算出的条数（不够可信，见 accUnreadUnknown） */
   }
 
   /* 「全部未读」= 按账号把抖音给的数加总（和 App 的关注未读总数同一口径）
      ★ 不再用「本机抓到几条明细」去当总数 —— 那正是「抓到的和 App 里看到的完全不一样」的来源。
      返回 { n: 未读总条数, acc: 有几个号有未读 } */
   function totalUnread() {
-    var um = buildUnreadView().map, n = 0, acc = 0, i;
+    var um = buildUnreadView().map, n = 0, acc = 0, i, unk = 0;
     for (i = 0; i < S.accounts.length; i++) {
+      /* ★ 18:05：不可信的号（本机估算，没读到官方角标/边界）**不计入总数**，
+         否则首页会被估算值撑大 —— 那个 16 就是这么混进「未读总数」的。 */
+      if (accUnreadUnknown(S.accounts[i])) { unk++; continue; }
       var x = accUnread(S.accounts[i], um);
       if (x > 0) { n += x; acc++; }
     }
-    return { n: n, acc: acc };
+    return { n: n, acc: acc, unknown: unk };
   }
 
   /* 和抖音对账：看看「抖音说 N 条」与「本机抓到 M 条明细」差在哪，差在谁身上 */
@@ -2234,14 +2292,19 @@
     var n = Math.min(shown, 300);
     for (var i = 0; i < n; i++) {
       var a = mem[i];
-      var un = accUnread(a, um);
+      var unknown = accUnreadUnknown(a);
+      var un = accUnread(a, um);            /* ★ 数字照常算；unknown 只影响标签，不抹掉数字 */
       var loc = localUnread(a, um);
       /* 抖音说还有更多的（本机没抓到明细）标个 +，让你知道不是没抓到、是还没抓到明细 */
       var plus = (un > loc) ? '<small style="font-size:15px;opacity:.75">⁺</small>' : '';
       h += '<div class="dyh-acc2">' +
         '<span class="dyh-nm" data-act="acc-videos" data-sec="' + esc(a.secUserId) + '" data-name="' + esc(a.name || '') + '">' +
         (a._ghost ? '<small style="font-size:15px;opacity:.7">新·</small>' : '') + esc(a.name || a.secUserId) + '</span>' +
-        '<span class="dyh-urn2' + (un ? '' : ' ok') + '">' + (un ? un + ' 未读' + plus : '已看完') + '</span>' +
+        /* ★ 18:05：没有可信来源时**保留数字但加「需重读」标记** ——
+           既不把估算冒充成官方数，也不把用户已有的信息抹掉。 */
+        '<span class="dyh-urn2' + (un ? '' : ' ok') + '">' +
+        (un ? (un + ' 未读' + plus + (unknown ? '<small style="font-size:15px;opacity:.8"> 需重读</small>' : ''))
+            : '已看完') + '</span>' +
         '<span class="dyh-mini" data-act="setcat" data-sec="' + esc(a.secUserId) + '">' + esc(a.category || '设分类') + '</span>' +
         '</div>';
     }
@@ -2459,7 +2522,12 @@
       })() +
       (acc && acc.category ? '<div class="dyh-row"><b>分类</b><span>' + esc(acc.category) + '</span></div>' : '') +
       '</div>';
-    /* ★ 抖音说没看完、但本机只有这几条明细 → 说明剩下的还没抓到明细，说清楚，别让你以为抓漏了 */
+    /* ★ 18:00：没有可信的官方数字时，如实说明「未读数未知」，绝不拿视频库条数冒充 */
+    if (acc && !acc._ghost && accUnreadUnknown(acc)) {
+      h += '<div class="dyh-tip" style="color:#b88200">⚠️ <b>这个号的未读数现在还不知道</b>（本机没有它的官方角标、也没有未读边界）。' +
+        '所以本页<b>不显示未读数量</b>——以前这里会拿「视频库里存了多少条」当成未读数报出来（那是错的）。' +
+        '点下面的「🔄 只重读抖音官方的未读数字」就能读到抖音 App 里那个真实数字。</div>';
+    }
     if (srvN > vids.length) {
       h += '<div class="dyh-tip">抖音那边标了 <b>' + srvN + '</b> 条未看，本机抓到了 <b>' + vids.length +
         '</b> 条明细 —— 差的那几条这个号发布时间比较早，关注页滚动时没翻到。' +
@@ -3625,6 +3693,7 @@
     renderRecon: renderRecon,
     ghostAuthors: ghostAuthors,
     listIsFresh: listIsFresh,
+    accUnreadUnknown: accUnreadUnknown,
     accBadgeOf: accBadgeOf,
     accFreshN: accFreshN,
     pruneToAccounts: pruneToAccounts,
