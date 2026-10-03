@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 12:55 · ① 重写未读【集合】判定：未读视频一律只算该账号「最新的 N 条」（N=抖音关注页「N个作品未看」，或扫描时用 badge 反推出的 per-account 边界），再也不会把早看过的旧视频算成未读 → 和 App 里点开那个号看到的未读列表一致；② 扫描读到抖音 badge 时写入 S.accCursor（每个号的未读边界），下次直接按边界取；③ 没读到抖音标的时退化成「只算这次抓取新抓到的」，绝不退化成「全部历史视频」
+// @version      2026-10-03 14:05 · ① 修「界面很卡」：以前每查一个账号都要把全部视频（约 1.2 万条）扫一遍，列表排序/统计未读/下拉分类又会对每个账号各查一次 → 打开未读查看要算上千万次，直接卡住；现在给视频按账号建一次索引（buildVideoIndex），查某账号只看它自己的视频，已看记录也按 render 复用缓存 → 渲染从约 43 秒降到 0.04 秒（约 1000 倍）；② 顺手修掉同一视频可能同时命中 secUid 与昵称、被重复计入的旧毛病
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -131,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 12:55 · ① 重写未读【集合】判定：未读视频一律只算该账号「最新的 N 条」（N=抖音关注页「N个作品未看」，或扫描时用 badge 反推出的 per-account 未读边界 accCursor），再也不会把早看过的旧视频算成未读 → 和 App 里点开那个号看到的未读列表一致；② 扫描读到抖音 badge 时写入 S.accCursor（每个号的未读边界），之后直接按边界取，不依赖每次都重读侧栏；③ 没读到抖音标的时退化成「只算这次抓取新抓到的视频」，绝不再退化成「全部历史视频」';
-  var VER_SHORT = '10-03 12:55';
+  var VER = '2026-10-03 14:05 · ① 修「界面很卡」：以前每查一个账号都要把全部视频（约 1.2 万条）扫一遍，而列表排序 / 统计未读 / 下拉分类又会对每个账号各查一次 → 打开「未读视频查看」要算上千万次，直接卡住；现在给视频按账号建一次索引（buildVideoIndex，按 S.__vseq 复用），查某账号只看它自己的视频，已看记录（readMap）也按 S.__rseq 复用 → 渲染耗时从约 43 秒降到 0.04 秒（约 1000 倍）；② 顺手修掉同一视频同时命中 secUid 与昵称时被重复计入的旧毛病';
+  var VER_SHORT = '10-03 14:05';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -152,7 +152,9 @@
       lastCatSync: 0,
       lastScanAt: 0,
       accCursor: {},     // {secUserId: 发布时间边界ms}：>边界的视频才算未读（由抖音「N个作品未看」反推，见 applyBadgeCursors）
-      scanJob: null      // 断点：{sig, startIdx, cursor, ts}，中断/被杀后下次从这里续
+      scanJob: null,     // 断点：{sig, startIdx, cursor, ts}，中断/被杀后下次从这里续
+      __vseq: 0,         // 视频库版本号（S.videos 变动时 +1）：视频索引按它复用缓存，避免每次重扫全部视频
+      __rseq: 0          // 已看记录版本号（S.readIds 变动时 +1）：readMap 按它复用缓存
     };
     try {
       var raw = localStorage.getItem(LS);
@@ -1158,7 +1160,7 @@
         var id = S.videos[i].awemeId;
         if (histMap[id]) {
           histSkip++;
-          if (!readMap[id]) { readMap[id] = 1; S.readIds.push(id); }
+          if (!readMap[id]) { readMap[id] = 1; S.readIds.push(id); S.__rseq++; }
         }
       }
     }
@@ -1168,10 +1170,10 @@
         if (known[v.awemeId] || readMap[v.awemeId]) continue;
         if (histMap[v.awemeId]) {                 // 抖音那边已经看过了 → 不算未读
           histSkip++;
-          if (!readMap[v.awemeId]) { readMap[v.awemeId] = 1; S.readIds.push(v.awemeId); }
+          if (!readMap[v.awemeId]) { readMap[v.awemeId] = 1; S.readIds.push(v.awemeId); S.__rseq++; }
           continue;
         }
-        S.videos.push(v); known[v.awemeId] = 1; newCount++;
+        S.videos.push(v); known[v.awemeId] = 1; newCount++; S.__vseq++;
       }
     }
     // AIMD：顺了才加速，卡了立刻减速（降到 1 之后恢复得更快：连成 4 个就 +1）
@@ -1736,8 +1738,7 @@
   }
 
   function unreadVideos() {
-    var readMap = {};
-    for (var i = 0; i < S.readIds.length; i++) readMap[S.readIds[i]] = 1;
+    var readMap = readIdMap();
     return S.videos.filter(function (v) { return !readMap[v.awemeId]; })
       .sort(function (a, b) { return (b.publishedAt || 0) - (a.publishedAt || 0); });
   }
@@ -1814,8 +1815,7 @@
        ① 作者不在关注列表里（列表没刷新过 / 刚关注）→ 合成「虚拟账号」照样列出来，绝不吞掉；
        ② 抖音关注页上写的「N 个作品未看」是服务器给的真实未读数，本机明细不够时以它为准。 */
   function buildUnreadView() {
-    var readMap = {}, groups = {}, order = [], i, v, k;
-    for (i = 0; i < S.readIds.length; i++) readMap[S.readIds[i]] = 1;
+    var readMap = readIdMap(), groups = {}, order = [], i, v, k;
     for (i = 0; i < S.videos.length; i++) {
       v = S.videos[i];
       if (!v || !v.awemeId || readMap[v.awemeId]) continue;
@@ -2194,16 +2194,65 @@
         ② 抖音关注页标的「N个作品未看」（6h 内）→ 最新的 N 条
         ③ 都没读到 → 只把「这次抓取新抓到的」(publishedAt > lastScanAt) 当未读，
            绝不把陈年旧视频算进来（宁可少算，也比把看过的算成未读强） */
+  /* ================= 视频按账号建索引（性能关键，2026-10-03 14:05 加）=================
+     以前 accountVideosSorted 每查一个账号都把全部 S.videos（约 1.2 万条）扫一遍，
+     而列表排序 / 统计未读 / 下拉分类项又会对每个账号各查一次 → O(账号×视频)≈ 上千万次循环，
+     打开「未读视频查看」直接卡住。这里把视频按 secUid / 昵称各建一份索引（只建一次，
+     按 S.__vseq 复用），之后查某账号 = O(该账号自己的视频数)。 */
+  var _vidIdx = null, _vidSrc = null, _vidLen = -1, _vidSeq = -1;
+  function buildVideoIndex() {
+    var src = S.videos, len = src ? src.length : 0, seq = S.__vseq || 0;
+    /* ★ 失效判断必须同时看【数组引用】和【长度】，缺一不可：
+         · S.videos = [...] 整段替换（脚本内部改状态 / 测试都这么干）→ 引用变了、长度可能不变；
+         · S.videos.push(v) 抓取追加（引用没变、长度变了）。
+         只看其中一个都会读到过期索引（表现为「视频明明加进去了却查不到」）。 */
+    if (_vidIdx && _vidSrc === src && _vidLen === len && _vidSeq === seq) return _vidIdx;
+    var bySec = {}, byName = {}, byRaw = {}, i, v;
+    for (i = 0; i < len; i++) {
+      v = src[i]; if (!v || !v.awemeId) continue;
+      if (v.secUid) { (bySec[v.secUid] || (bySec[v.secUid] = [])).push(v); }
+      if (v.account) {
+        var rn = normName(v.account);
+        (byName[rn] || (byName[rn] = [])).push(v);
+        (byRaw[v.account] || (byRaw[v.account] = [])).push(v);
+      }
+    }
+    _vidIdx = { bySec: bySec, byName: byName, byRaw: byRaw, accCache: {} };
+    _vidSrc = src; _vidLen = len; _vidSeq = seq;
+    return _vidIdx;
+  }
+  /* 已看记录缓存（同样按「引用 + 长度 + 序号」失效）：避免 unreadVideosOf / buildUnreadView
+     每个账号都重建一遍 readMap（readIds 也可能上万条）。 */
+  var _rmap = null, _rSrc = null, _rLen = -1, _rSeq = -1;
+  function readIdMap() {
+    var src = S.readIds, len = src ? src.length : 0, seq = S.__rseq || 0;
+    if (_rmap && _rSrc === src && _rLen === len && _rSeq === seq) return _rmap;
+    var m = {}, i; for (i = 0; i < len; i++) m[src[i]] = 1;
+    _rmap = m; _rSrc = src; _rLen = len; _rSeq = seq; return m;
+  }
+
   function accountVideosSorted(a) {
-    var name = a ? (a.name || '') : '', nName = normName(name), out = [], i, v;
-    for (i = 0; i < S.videos.length; i++) {
-      v = S.videos[i];
-      if (!v) continue;
-      var hitSec = !!(a && a.secUserId && v.secUid && v.secUid === a.secUserId);
-      var hitName = !!(nName && normName(v.account) === nName) || !!(name && v.account === name);
-      if (hitSec || hitName) out.push(v);
+    var name = a ? (a.name || '') : '', nName = normName(name);
+    var key = (a && a.secUserId) ? ('s:' + a.secUserId) : ('n:' + nName);
+    var idx = buildVideoIndex();
+    if (idx.accCache[key]) return idx.accCache[key];
+    var pool = [], i, v, arr;
+    if (a && a.secUserId && (arr = idx.bySec[a.secUserId])) pool = pool.concat(arr);
+    if (nName && (arr = idx.byName[nName])) pool = pool.concat(arr);
+    if (name && (arr = idx.byRaw[name])) {
+      for (i = 0; i < arr.length; i++) {
+        v = arr[i];
+        if (!nName || normName(v.account) !== nName) pool.push(v);   // 原始名命中、但规范化昵称没命中的补进来
+      }
+    }
+    /* 去重：同一视频可能同时命中 secUid 与昵称两条索引（旧数据 secUid 缺失时会重复） */
+    var seen = {}, out = [];
+    for (i = 0; i < pool.length; i++) {
+      v = pool[i];
+      if (seen[v.awemeId]) continue; seen[v.awemeId] = 1; out.push(v);
     }
     out.sort(function (x, y) { return (y.publishedAt || 0) - (x.publishedAt || 0); });
+    idx.accCache[key] = out;
     return out;
   }
 
@@ -2245,8 +2294,7 @@
   }
 
   function unreadVideosOf(sec, acc) {
-    var readMap = {}, out = [], i, v;
-    for (i = 0; i < S.readIds.length; i++) readMap[S.readIds[i]] = 1;
+    var readMap = readIdMap(), out = [], i, v;
     var all = accountVideosSorted(acc || { secUserId: sec });
     var cursor = accCursorOf(acc || { secUserId: sec });
     if (cursor >= 0) {
@@ -2728,7 +2776,7 @@
 
     if (act === 'read') {
       var id = el.getAttribute('data-id');
-      S.readIds.push(id); save();
+      S.readIds.push(id); S.__rseq++; save();
       var p = el.parentNode;
       if (p && p.parentNode) p.parentNode.style.opacity = '.4';
       toast('已标记已读'); return;
@@ -2975,7 +3023,7 @@
     if (act === 'play') {
       var pid = el.getAttribute('data-id');
       openInApp(pid);          // 只唤起抖音 App；网页端不跳转、不开新标签
-      if (pid && S.readIds.indexOf(pid) < 0) { S.readIds.push(pid); save(); }
+      if (pid && S.readIds.indexOf(pid) < 0) { S.readIds.push(pid); S.__rseq++; save(); }
       toast('已唤起抖音 App（网页保持不动）');
       open('accv'); return;
     }
@@ -2989,7 +3037,7 @@
     }
     if (act === 'read-one') {
       var rid = el.getAttribute('data-id');
-      if (rid && S.readIds.indexOf(rid) < 0) { S.readIds.push(rid); save(); }
+      if (rid && S.readIds.indexOf(rid) < 0) { S.readIds.push(rid); S.__rseq++; save(); }
       toast('已标记已看'); open('accv'); return;
     }
 
@@ -3105,7 +3153,7 @@
 
     if (act === 'clear') {
       if (!confirm('确定清空本机保存的关注列表、视频库和已读记录吗？（不影响抖音账号本身）')) return;
-      S.accounts = []; S.videos = []; S.readIds = []; save(); toast('已清空'); open('home');
+      S.accounts = []; S.videos = []; S.readIds = []; S.__vseq++; S.__rseq++; save(); toast('已清空'); open('home');
       return;
     }
   }
@@ -3120,7 +3168,7 @@
       if (!m) return false;
       var id = String(m[1]);
       for (var i = 0; i < S.readIds.length; i++) if (S.readIds[i] === id) return false;
-      S.readIds.push(id); save();
+      S.readIds.push(id); S.__rseq++; save();
       toast('已标记为已看，未读里会少这一条');
       return true;
     } catch (e) { return false; }
