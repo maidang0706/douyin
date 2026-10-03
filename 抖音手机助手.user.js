@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 12:29 · ① 首页「📥 刷新我的关注列表」与「📡 抓最新未读视频」两个按钮位置互换（刷新上移、抓未读下移，抓未读仍是高亮主按钮）；② 继承 12:00：已取消取关功能、配色改米花色、新增 Via 夜间模式反色自动侦测
+// @version      2026-10-03 12:55 · ① 重写未读【集合】判定：未读视频一律只算该账号「最新的 N 条」（N=抖音关注页「N个作品未看」，或扫描时用 badge 反推出的 per-account 边界），再也不会把早看过的旧视频算成未读 → 和 App 里点开那个号看到的未读列表一致；② 扫描读到抖音 badge 时写入 S.accCursor（每个号的未读边界），下次直接按边界取；③ 没读到抖音标的时退化成「只算这次抓取新抓到的」，绝不退化成「全部历史视频」
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -131,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 12:29 · ① 首页「📥 刷新我的关注列表」与「📡 抓最新未读视频」两个按钮位置互换：刷新上移到第一行、抓未读下移到第二行（抓未读仍是高亮 primary 主按钮，只是位置靠后）；② 继承 12:00：取消取关功能、配色改米花色、新增 Via 夜间模式反色自动侦测';
-  var VER_SHORT = '10-03 12:29';
+  var VER = '2026-10-03 12:55 · ① 重写未读【集合】判定：未读视频一律只算该账号「最新的 N 条」（N=抖音关注页「N个作品未看」，或扫描时用 badge 反推出的 per-account 未读边界 accCursor），再也不会把早看过的旧视频算成未读 → 和 App 里点开那个号看到的未读列表一致；② 扫描读到抖音 badge 时写入 S.accCursor（每个号的未读边界），之后直接按边界取，不依赖每次都重读侧栏；③ 没读到抖音标的时退化成「只算这次抓取新抓到的视频」，绝不再退化成「全部历史视频」';
+  var VER_SHORT = '10-03 12:55';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -151,6 +151,7 @@
       lastExport: 0,
       lastCatSync: 0,
       lastScanAt: 0,
+      accCursor: {},     // {secUserId: 发布时间边界ms}：>边界的视频才算未读（由抖音「N个作品未看」反推，见 applyBadgeCursors）
       scanJob: null      // 断点：{sig, startIdx, cursor, ts}，中断/被杀后下次从这里续
     };
     try {
@@ -177,6 +178,8 @@
       /* 旧断点必须扔掉：它是按「派出去了几个账号」记的（那些没跑完的被当成已处理），
          留着的话下次一点抓取就只补「剩下几个账号」—— 前面几百个永远不抓，未读还是 0。 */
       if (o.scanJob) o.scanJob = null;
+      /* 2026-10-03 12:55：新增 per-account 未读边界（accCursor），老数据补一个空对象 */
+      if (!o.accCursor) o.accCursor = {};
       /* ★ 一次性迁移（2026-10-02 22:50）：分类改成用户自己建的（能新建/改名/删除）。
          老数据没有 categories 字段，但账号上早就挂着分类了 —— 全并进来，一个都不丢；
          一个分类都没用过的老用户，补上默认那几个。 */
@@ -1633,6 +1636,10 @@
             };
             save();
           }
+          /* ★★ 用这一轮读到的「N个作品未看」反推每个号的未读边界：
+             没这一步，未读集合就只能退化成「全部抓到的视频」，旧视频全被算成未读 → 和 App 对不上。 */
+          applyBadgeCursors(side);
+          save();
         });
       });
     }
@@ -1859,20 +1866,35 @@
     return 0;
   }
 
-  /* ★★ 一个号有几个未读：★以抖音自己给的数为准★★
-     ★★ 2026-10-03 11:40 重要修正 —— 你对照 App 说「完全不一样」，根子就在这行 ★★
-     以前写的是 max(本机明细, 抖音数) → 只要本机明细里混进一条早看过的旧视频，
-     这个号就永远至少有一条未读，攒得越多、数越大，而 App 那边早就是 0。
-     现在反过来：抖音侧栏写了「N 个作品未看」就是 N（服务器算的，跟 App 同源）；
-     抖音说 0（没写这个标记）才退回用本机明细。
-     本机明细现在只负责一件事：点开这个号时【能给你看哪些视频】。 */
+  /* 抖音在关注页标的「N个作品未看」：和 serverUnread 的区别是——它【能区分「明确标 0」和「没读到」】。
+     返回：>=0 的数字（含 0，表示抖音这一轮确实读到了、且这个号标的就是这个数）；-1 表示
+     没读到 / 过期（这时不能拿 0 去压数，要交给边界或 lastScanAt 兜底）。 */
+  function douyinBadge(a) {
+    var du = S.domUnread;
+    if (!du || !du.ts || Date.now() - du.ts > 6 * 3600000) return -1;
+    if (!a) return -1;
+    if (a.secUserId && du.map && du.map[a.secUserId] != null) return du.map[a.secUserId];
+    if (a.name) {
+      if (du.byName && du.byName[a.name] != null) return du.byName[a.name];
+      var nn = normName(a.name);
+      if (du.byName && du.byName[nn] != null) return du.byName[nn];
+    }
+    return -1;   // 这一轮读到了侧栏，但这个号没出现在「N个作品未看」里 → 抖音就是标 0
+  }
+
+  /* 一个号有几个未读：
+     优先用抖音「N个作品未看」标的数（和 App 同源），抓到的明细不够时以它为准并标 ⁺；
+     否则用本机按边界算出来的未读条数（最新 N 条 / 这次新抓到的）。
+     ★ 2026-10-03 12:55：未读【集合】的算法已改到 unreadVideosOf（只算最新 N 条），
+     这里只负责【数量】——抖音标的更多就报抖音的数（让界面标 ⁺），否则报实际能列的条数。 */
   function accUnread(a, um) {
     if (!a) return 0;
     if (a._ghost) return localUnread(a, um);          // 非关注的推荐号：抖音不会给它未读数
+    var vids = unreadVideosOf(a.secUserId, a);
+    var n = vids.length;
     var srv = serverUnread(a);
-    if (srv > 0) return srv;
-    var local = localUnread(a, um);
-    return local > 0 ? local : 0;
+    if (srv > 0 && n < srv) return srv;              // 抓到的明细比抖音标的少 → 以抖音为准并标 ⁺
+    return n;
   }
 
   /* 「全部未读」= 按账号把抖音给的数加总（和 App 的关注未读总数同一口径）
@@ -2160,22 +2182,111 @@
 
   /* ================= 某个公众号的「未读视频列表」 =================
      点进来只看这一个号的未读；点任意一条 → 唤起抖音 App 看（没唤起就退回网页版），
-     并当场记成已看（未读数立刻 -1，不用等下一轮抓取）。 */
-  function unreadVideosOf(sec, acc) {
-    var readMap = {}, out = [], i, v;
-    for (i = 0; i < S.readIds.length; i++) readMap[S.readIds[i]] = 1;
-    var name = acc ? (acc.name || '') : '';
-    var nName = normName(name);
+     并当场记成已看（未读数立刻 -1，不用等下一轮抓取）。
+
+     ★★ 2026-10-03 12:55 重写（这是「抓到的视频对、但未读集合和 App 对不上」的根子）★★
+     以前这里把【该账号抓到的全部视频】都当未读（只按本机已读记录过滤），
+     只有当「抓到数 > 抖音标的 N」时才截断到最新的 N 条。一旦某个账号没匹配上抖音的
+     「N个作品未看」（侧栏没读到 / 超过 6 小时），srvN=0，就【把该账号所有历史视频全算成未读】——
+     包括你早看过的旧视频，于是和 App 完全对不上。
+     现在：未读集合一律 = 该账号【最新的 N 条】，N 按下面的优先级取：
+        ① 扫描时已由抖音 badge 反推出的 per-account 边界（accCursor）→ 边界之后才是未读
+        ② 抖音关注页标的「N个作品未看」（6h 内）→ 最新的 N 条
+        ③ 都没读到 → 只把「这次抓取新抓到的」(publishedAt > lastScanAt) 当未读，
+           绝不把陈年旧视频算进来（宁可少算，也比把看过的算成未读强） */
+  function accountVideosSorted(a) {
+    var name = a ? (a.name || '') : '', nName = normName(name), out = [], i, v;
     for (i = 0; i < S.videos.length; i++) {
       v = S.videos[i];
-      if (!v || readMap[v.awemeId]) continue;
-      /* ★ 两边都认（10-03 03:10）：以前只认 secUid，视频只有昵称时（老数据）一条都不显示 */
-      var hitSec = !!(sec && v.secUid && v.secUid === sec);
+      if (!v) continue;
+      var hitSec = !!(a && a.secUserId && v.secUid && v.secUid === a.secUserId);
       var hitName = !!(nName && normName(v.account) === nName) || !!(name && v.account === name);
       if (hitSec || hitName) out.push(v);
     }
-    out.sort(function (a, b) { return (b.publishedAt || 0) - (a.publishedAt || 0); });
+    out.sort(function (x, y) { return (y.publishedAt || 0) - (x.publishedAt || 0); });
     return out;
+  }
+
+  /* per-account 未读边界：扫描时由抖音 badge 反推写入（见 applyBadgeCursors）。
+     返回 -1 表示「还没定过边界」（退化到下面的 ②③ 规则）。 */
+  function accCursorOf(a) {
+    if (!a) return -1;
+    if (a.secUserId && S.accCursor && S.accCursor[a.secUserId] != null) return S.accCursor[a.secUserId];
+    return -1;
+  }
+
+  /* ★★ 扫描读到抖音「N个作品未看」后，用它反推每个号的未读边界 ★★
+     抖音的未读 = 「上次看过之后、最新发布的 N 条」。所以从抓到的视频里取【最新的 N 条】当未读，
+     边界就划在那第 N 条的下一条的发布时间之下。这样未读集合和 App 里点开那个号看到的完全一致，
+     再也不会混入你早看过的旧视频。 */
+  function applyBadgeCursors(side) {
+    if (!side) return;
+    var secMap = side.secMap || {}, nameMap = side.nameMap || {}, i, a;
+    for (i = 0; i < S.accounts.length; i++) {
+      a = S.accounts[i];
+      if (!a || !a.secUserId) continue;
+      var badge = 0;
+      if (secMap[a.secUserId]) badge = secMap[a.secUserId];
+      else if (a.name) {
+        if (nameMap[a.name]) badge = nameMap[a.name];
+        else if (nameMap[normName(a.name)]) badge = nameMap[normName(a.name)];
+      }
+      var vids = accountVideosSorted(a);
+      if (badge <= 0) {
+        S.accCursor[a.secUserId] = Date.now();        // 抖音说都看完了 → 一条未读都没有
+      } else if (vids.length > badge) {
+        /* 最新的 badge 条为未读：边界划在第 (badge) 条（0-based 第 badge 个 = 第 badge+1 条）的发布时间，
+           这样 publishedAt > 边界 正好是前面最新的 badge 条，第 badge 条（更老的）被排除。 */
+        S.accCursor[a.secUserId] = (vids[badge].publishedAt || 0);
+      } else {
+        S.accCursor[a.secUserId] = -1;                // 抓到比抖音标的还少 → 全部抓到的都算未读（会标 ⁺）
+      }
+    }
+  }
+
+  function unreadVideosOf(sec, acc) {
+    var readMap = {}, out = [], i, v;
+    for (i = 0; i < S.readIds.length; i++) readMap[S.readIds[i]] = 1;
+    var all = accountVideosSorted(acc || { secUserId: sec });
+    var cursor = accCursorOf(acc || { secUserId: sec });
+    if (cursor >= 0) {
+      /* ① 扫描时已用抖音 badge 定过边界：只把边界之后的（即抖音认为未看的那些）算未读 */
+      for (i = 0; i < all.length; i++) {
+        v = all[i];
+        if (readMap[v.awemeId]) continue;
+        if ((v.publishedAt || 0) <= cursor) continue;
+        out.push(v);
+      }
+    } else {
+      var srv = douyinBadge(acc);
+      if (srv === 0) {
+        /* ②a 这一轮抖音明确标了 0 → 一条未读都没有（不能退化成「全部历史视频」） */
+      } else if (srv > 0) {
+        /* ②b 抖音标了 N 条未看 → 未读 = 最新的 N 条（和 App 里点开那个号看到的一致） */
+        for (i = 0; i < all.length; i++) {
+          v = all[i];
+          if (readMap[v.awemeId]) continue;
+          out.push(v);
+          if (out.length >= srv) break;
+        }
+      } else if (S.lastScanAt) {
+        /* ③ 没读到抖音标的（侧栏没这个号 / 过期）：只把「这次抓取新抓到的」当未读，绝不算陈年旧视频 */
+        for (i = 0; i < all.length; i++) {
+          v = all[i];
+          if (readMap[v.awemeId]) continue;
+          if ((v.publishedAt || 0) <= S.lastScanAt) continue;
+          out.push(v);
+        }
+      } else {
+        /* 兜底：从没抓过 / 没有 lastScanAt → 退化成「全部抓到的」（和旧版一致，极少触发） */
+        for (i = 0; i < all.length; i++) {
+          v = all[i];
+          if (readMap[v.awemeId]) continue;
+          out.push(v);
+        }
+      }
+    }
+    return out;   // accountVideosSorted 已按最新在前排序
   }
 
   function renderAccVideos() {
@@ -3056,6 +3167,9 @@
     catLabel: catLabel,
     mgr: function () { return MGR; },
     unreadVideosOf: unreadVideosOf,
+    accountVideosSorted: accountVideosSorted,
+    accCursorOf: accCursorOf,
+    applyBadgeCursors: applyBadgeCursors,
     openInApp: openInApp,
     unreadByAccount: unreadByAccount,
     buildUnreadView: buildUnreadView,
