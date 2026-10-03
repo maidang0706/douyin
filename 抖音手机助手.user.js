@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 16:28 · 修「按新方法查出来是 0 条、App 是 6 条」：15:40 那版用「网页已看记录算前缀」是错的路 —— 网页端已看记录 ≠ App 观看状态（App 看过的网页未必有，网页信息流自动播放过的反而混进去），于是前缀在第 1 条就停住 → N=0。现在 N 的唯一权威 = 抖音自己写在关注页侧栏的「N个作品未看」：① 不在关注页就先把浏览器带过去、落回来自动续跑（沿用 autoScan 机制）；② 在侧栏多滚几轮定位这个号并读它的官方数字（30 分钟内有效）；③ 区分「在侧栏里但没角标」= 官方 0 条 与「不在侧栏里」= 还没读到（-1，此时不写边界、不拿估算冒充，页面如实提示）；④ 清单 = 该号最新的 N 条，若本机已看记录误剔掉了就用更老的补齐，保证列出条数 = N；本机估算只留在对账块里当参考
+// @version      2026-10-03 17:25 · 治「App 6 / 我们 16」的根本手段：过期数据不许冒充答案。① 全局侧栏快照有效期从 6 小时压到 30 分钟（SNAP_VALID_MS），过期的 16 再也不会被显示；② 账号页新增一行「抖音网页侧栏写的：N 条（X 分钟前读的）」——原样摆出网页侧栏的真实数值，你可以直接拿它和 App 里的 6 比对，若两边本身就不一致就一目了然；③ 新增「🔄 只重读抖音官方的未读数字」按钮：先把该号的旧记录（全局快照里的角标 + 独立角标 + 上次算出的数）全部清掉，再回关注页重读一次并落盘，杜绝旧数继续生效
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -131,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 16:28 · 修「按 16:05 的方法查这个号是 0 条、而抖音 App 是 6 条」。★ 病根：15:40 那版「用网页端已看记录算未读前缀」这条路本身不可靠 —— 【网页端已看记录 ≠ App 的观看状态】：你在 App 里看过的视频网页历史里未必有，而网页信息流里自动播放过的反而混进了历史，于是「从最新往回数、碰到看过就停」在第 1 条就停住 → N=0。★ 改法：N 的唯一权威改成【抖音自己写在关注页侧栏的那个「N个作品未看」】—— ① 点按钮时若不在关注页，先把浏览器带过去，落回来自动续跑（沿用整轮抓那套 autoScan 机制，不用点第二次）；② 在侧栏多滚几轮定位这个号，读出它的官方数字（单独存 S.accBadge，30 分钟内有效，可压住几小时前的旧快照）；③ 区分「在侧栏里但没角标」= 官方明确 0 条，与「压根不在侧栏里」= 还没读到（-1，此时宁可不写边界、不拿估算冒充，页面如实提示"仅供参考"）；④ 未读清单 = 该号最新的 N 条，若本机已看记录误剔掉了就用更老的补齐，保证列出条数 = N；本机估算只留在「🔍 对账」块里当参考，不当答案';
-  var VER_SHORT = '10-03 16:28';
+  var VER = '2026-10-03 17:25 · 治「App 显示 6、我们显示 16」。★ 病根：那个 16 是几小时前读到的侧栏快照，你后来在 App 里看掉了 10 条，抖音早就变 6 了，我们却还拿旧快照盖着 —— 过期数字比没有数字更糟。★ 改法：① 全局侧栏快照有效期 6 小时 → 30 分钟（SNAP_VALID_MS），过期的一律不参与计算，宁可显示本机条数也不显示旧数；② 账号页新增「抖音网页侧栏写的：N 条（X 分钟前读的）」一行，原样摆出网页侧栏的真实数值（不加工、不替换），你可以直接拿它和 App 里的 6 比对 —— 如果两边本身就不一致，那就能立刻看出来，不用再猜；③ 新增「🔄 只重读抖音官方的未读数字」按钮：先把该号的旧记录（全局快照里的角标 + 独立角标 + 上次算出的数）全部清掉，再回关注页重读一次并落盘，保证读到的是干净的现值'
+  var VER_SHORT = '10-03 17:25';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -824,6 +824,11 @@
   var HIST_PATHS = ['https://www.douyin.com/aweme/v1/web/history/read/',
                     'https://www.douyin.com/aweme/v1/web/history/list/'];
   var HIST_MAX_PAGE = 6, HIST_DAYS = 120, HIST_BUDGET = 15000;
+  /* ★ 17:00：全局侧栏快照的有效期从 6 小时压到 30 分钟。
+     未读数字是「你看过几条就掉几条」的活数据 —— 6 小时前的数字必然是过期的，
+     而过期数字比没有数字更糟（用户看到的是"我明明看过却还显示 16"）。
+     宁可显示"需要重读"，也不显示一个几小时前的旧数。 */
+  var SNAP_VALID_MS = 30 * 60000;
   function histIdOf(it) {
     if (!it) return '';
     if (it.aweme_id != null) return String(it.aweme_id);
@@ -1719,7 +1724,7 @@
   function renderHome() {
     var unread = unreadVideos();
     var tu = totalUnread();
-    var du = S.domUnread, duFresh = !!(du && du.ts && Date.now() - du.ts <= 6 * 3600000);
+    var du = S.domUnread, duFresh = !!(du && du.ts && Date.now() - du.ts <= SNAP_VALID_MS);
     var h = '';
     /* 注：原先这里有一段「⚠️ 检测到系统/浏览器正处于夜间模式…」的整块红字提示，
        按用户要求已删除（2026-10-03 15:14）。detectNightMode() 本身保留，设置页的皮肤自检还在用。 */
@@ -1865,7 +1870,7 @@
      只认 6 小时内的（更久之前的是上一次抓的快照，不能拿来压现在的数）。 */
   function serverUnread(a) {
     var du = S.domUnread;
-    if (!du || !du.ts || Date.now() - du.ts > 6 * 3600000) return 0;
+    if (!du || !du.ts || Date.now() - du.ts > SNAP_VALID_MS) return 0;
     if (!a) return 0;
     if (a.secUserId && du.map && du.map[a.secUserId]) return du.map[a.secUserId];
     if (a.name && du.byName) {
@@ -1881,7 +1886,7 @@
      没读到 / 过期（这时不能拿 0 去压数，要交给边界或 lastScanAt 兜底）。 */
   function douyinBadge(a) {
     var du = S.domUnread;
-    if (!du || !du.ts || Date.now() - du.ts > 6 * 3600000) return -1;
+    if (!du || !du.ts || Date.now() - du.ts > SNAP_VALID_MS) return -1;
     if (!a) return -1;
     if (a.secUserId && du.map && du.map[a.secUserId] != null) return du.map[a.secUserId];
     if (a.name) {
@@ -1925,16 +1930,17 @@
   function accUnread(a, um) {
     if (!a) return 0;
     if (a._ghost) return localUnread(a, um);          // 非关注的推荐号：抖音不会给它未读数
-    /* ① 刚按抖音口径算出来的 N（最可信：用抖音自己的已看记录算，和 App 同源） */
+    /* ① 刚按官方角标算出来的 N（最可信：就是 App 里那个数） */
     var mu = accFreshN(a);
     if (mu) return mu.n;
     var vids = unreadVideosOf(a.secUserId, a);
     var n = vids.length;
-    /* ② 官方角标（先看这个号的独立快照，再退到全局快照） */
+    /* ② 官方角标（30 分钟内）：先看这个号的独立记录，再退到全局快照（有效期也已压到 30 分钟，
+          17:00 起过期快照彻底不参与 —— 宁可显示本机条数，也不显示几小时前的旧数） */
     var ab = accBadgeOf(a);
     var srv = ab ? ab.n : serverUnread(a);
     if (srv > 0 && n < srv) return srv;              // 抓到的明细比官方标的少 → 以官方为准并标 ⁺
-    return n;                                          /* ③ ④ 本机按边界算出的条数（不多算） */
+    return n;                                          /* ③ 本机按边界算出的条数（不多算） */
   }
 
   /* 「全部未读」= 按账号把抖音给的数加总（和 App 的关注未读总数同一口径）
@@ -1953,7 +1959,7 @@
   function reconUnread() {
     var um = buildUnreadView().map, rows = [], i;
     var du = S.domUnread || null;
-    var duFresh = !!(du && du.ts && Date.now() - du.ts <= 6 * 3600000);
+    var duFresh = !!(du && du.ts && Date.now() - du.ts <= SNAP_VALID_MS);
     var duN = 0, duAcc = 0;
     if (duFresh) { for (var k in du.map) { duN += du.map[k]; duAcc++; } }
     for (i = 0; i < S.accounts.length; i++) {
@@ -2442,6 +2448,15 @@
       '<div class="dyh-row"><b>未读视频</b><span class="dyh-hl">' + totalN + ' 条</span></div>' +
       (srvN ? '<div class="dyh-row"><b>其中抖音标记</b><span>' + srvN + ' 条未看</span></div>' : '') +
       '<div class="dyh-row"><b>本机抓到明细</b><span>' + vids.length + ' 条</span></div>' +
+      /* ★ 17:00：把「抖音网页侧栏写的那个数」原样摆出来（不加工、不替换），
+         这样你一眼就能拿它和 App 里的数比 —— 如果两边不一样，说明网页和 App 本身就不一致。 */
+      (function () {
+        var du = S.domUnread || null;
+        if (!du || !du.ts || !acc || !acc.secUserId || !du.map || du.map[acc.secUserId] == null) return '';
+        var mins = Math.round((Date.now() - du.ts) / 60000);
+        return '<div class="dyh-row"><b>抖音网页侧栏写的</b><span>' + du.map[acc.secUserId] +
+          ' 条（' + (mins < 1 ? '刚刚' : mins + ' 分钟前') + '读的）</span></div>';
+      })() +
       (acc && acc.category ? '<div class="dyh-row"><b>分类</b><span>' + esc(acc.category) + '</span></div>' : '') +
       '</div>';
     /* ★ 抖音说没看完、但本机只有这几条明细 → 说明剩下的还没抓到明细，说清楚，别让你以为抓漏了 */
@@ -2500,6 +2515,9 @@
        抓这一个号的「N个作品未看」数量 + 对应的未读视频清单（只发几次请求，不用跑整轮、不用跳关注页）。 */
     h += '<button class="dyh-btn primary" data-act="acc-scan" data-sec="' + esc(sec) + '" data-name="' + esc(name) + '">' +
       '📡 抓这个号的未读（数量 + 清单）</button>';
+    /* ★ 17:00：即使当前就在关注页、也强制重读一次官方数字（清掉旧快照，不再拿旧数糊弄你） */
+    h += '<button class="dyh-btn" data-act="acc-badge" data-sec="' + esc(sec) + '" data-name="' + esc(name) + '">' +
+      '🔄 只重读抖音官方的未读数字</button>';
     h += '<div class="dyh-tip" style="margin:0 0 10px">只抓<b>这一个号</b>：读它的作品 + 读你的<b>抖音已看记录</b>，' +
       '算出抖音 App 里那个「N个作品未看」的<b>数量</b>，并列出对应的<b>未读视频</b>。' +
       '结果直接写进本机数据，<b>整个面板（未读列表、分类、首页未读总数）都会按它更新</b>。</div>';
@@ -2565,6 +2583,60 @@
       list.sort(function (a, b) { return (b.publishedAt || 0) - (a.publishedAt || 0); });   // 最新在前
       list.hasMore = hasMore; list.pages = page;      // 附带信息（挂在数组上，供调用方显示）
       return list;
+    });
+  }
+
+  /* ★ 17:00：只重读这个号的官方未读数字，不抓作品。
+     关键动作 = **先把所有旧快照对这个号的记录清掉**（否则刚读到的真数会被旧数盖住，
+     或者旧数继续被当成"有效值"显示）。清完再读，读到就是干净的。 */
+  function readAccBadgeOnly(sec, name) {
+    var acc = null, i;
+    for (i = 0; i < S.accounts.length; i++) if (S.accounts[i].secUserId === sec) { acc = S.accounts[i]; break; }
+    if (!acc && name) acc = { secUserId: sec, name: name, category: '', _ghost: 1 };
+    if (!acc || !acc.secUserId) { toast('这个号没有 secUid，读不了'); return Promise.resolve(-1); }
+    var who = acc.name || sec;
+    if (!onFollowPage()) {
+      S.pendingAccBadge = { sec: sec, name: who, at: Date.now() };
+      save();
+      toast('官方数字只能在抖音「关注」页读到，正在带你去…');
+      setTimeout(function () { try { location.href = '/follow'; } catch (e) { location.reload(); } }, 600);
+      return Promise.resolve(-1);
+    }
+    /* ★ 先把这个号相关的旧记录全清掉：全局快照里它的角标 + 它的独立记录 + 上次算出的数 */
+    var du = S.domUnread;
+    if (du && du.map && du.map[acc.secUserId] != null) { delete du.map[acc.secUserId]; du.ts = 0; }
+    if (du && du.byName && acc.name) { delete du.byName[acc.name]; delete du.byName[normName(acc.name)]; }
+    delete S.accBadge[acc.secUserId];
+    delete S.accUnreadN[acc.secUserId];
+    save();
+
+    setBody('<div class="dyh-back" data-act="accv">← 返回</div>' +
+      '<div class="dyh-prog" id="dyh-prog">🔎 正在读抖音官方的未读数字…<br>' +
+      '<span style="font-size:19px">「' + esc(who) + '」旁边写的「N个作品未看」</span></div>');
+    return new Promise(function (res) {
+      var badge = -1, inSidebar = false, round = 0;
+      (function tick() {
+        var side = readFollowUnreadDom();
+        if (side.secMap && side.secMap[acc.secUserId] != null) badge = side.secMap[acc.secUserId];
+        else if (side.nameMap) {
+          if (side.nameMap[acc.name] != null) badge = side.nameMap[acc.name];
+          else if (side.nameMap[normName(acc.name)] != null) badge = side.nameMap[normName(acc.name)];
+        }
+        if (badge < 0 && side.secSeen && side.secSeen[acc.secUserId]) inSidebar = true;
+        if (badge < 0 && inSidebar) badge = 0;
+        if (badge < 0 && round < 12) { round++; scrollFollowSidebar(); return setTimeout(tick, 350); }
+        if (badge >= 0) {
+          S.accBadge[acc.secUserId] = { n: badge, at: Date.now() };
+          S.accUnreadN[acc.secUserId] = {
+            n: badge, at: Date.now(), source: 'badge', noBoundary: false,
+            got: (function () { var c = 0, v; for (v = 0; v < S.videos.length; v++) if (S.videos[v].secUid === acc.secUserId) c++; return c; })()
+          };
+          save();
+        }
+        open('accv');
+        toast(badge >= 0 ? ('抖音官方写的是：' + badge + ' 条未看') : '还是没读到（这个号在侧栏里没露出来）');
+        res(badge);
+      })();
     });
   }
 
@@ -3308,6 +3380,11 @@
       scanOneAccount(el.getAttribute('data-sec') || '', el.getAttribute('data-name') || '');
       return;
     }
+    /* ★ 17:00：只重读官方数字（先清掉旧快照再读一次），不抓作品 */
+    if (act === 'acc-badge') {
+      readAccBadgeOnly(el.getAttribute('data-sec') || '', el.getAttribute('data-name') || '');
+      return;
+    }
     if (act === 'play') {
       var pid = el.getAttribute('data-id');
       openInApp(pid);          // 只唤起抖音 App；网页端不跳转、不开新标签
@@ -3500,6 +3577,22 @@
         }
       } else if (S.pendingAccScan) { S.pendingAccScan = null; save(); }
     } catch (e) { }
+    /* ★ 17:00：单号「只重读官方数字」被带到 /follow 之后自动续跑 */
+    try {
+      if (S.pendingAccBadge && Date.now() - S.pendingAccBadge.at < 180000) {
+        var pb = S.pendingAccBadge; S.pendingAccBadge = null; save();
+        if (onFollowPage()) {
+          setTimeout(function () {
+            try {
+              MGR.acc = pb.sec; MGR.accName = pb.name;
+              if (!MGR.cat) MGR.cat = ALL_CAT;
+              open('accv');
+              readAccBadgeOnly(pb.sec, pb.name);
+            } catch (e) { }
+          }, 1500);
+        }
+      } else if (S.pendingAccBadge) { S.pendingAccBadge = null; save(); }
+    } catch (e) { }
     console.log('[抖音关注助手] 已加载。右下角 🎯 按钮打开面板。');
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
@@ -3536,6 +3629,7 @@
     accFreshN: accFreshN,
     pruneToAccounts: pruneToAccounts,
     scanOneAccount: scanOneAccount,
+    readAccBadgeOnly: readAccBadgeOnly,
     fetchAccountWorks: fetchAccountWorks,
     catMembers: catMembers,
     catUnread: catUnread,
