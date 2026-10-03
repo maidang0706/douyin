@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 11:35 · ① 未读数改成以抖音关注页自己标的「N个作品未看」为准（和 App 同一口径）：之前用 max(本机明细, 抖音数)，本机里混进早看过的旧视频就虚高，跟 App 完全对不上；现在抖音标了 N 就是 N，抖音标 0 才退回本机明细；② 新增「📊 和抖音里的数对一下账」页，把抖音标的数和本机抓到的明细摆一起、列出差在谁身上；③ 首页未读总数、结果页对账行都走抖音口径；全部分类视图把抓到但不在列表里的号也计入（不丢内容），首页总数仍只数真正关注的号
-// @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、批量取关、搜索并关注新账号、数据推 GitHub。全程不需要电脑。
+// @version      2026-10-03 12:00 · ① 取消「取关」功能（单个取关 + 整类取关按钮、批量取关逻辑全部移除，需取关请在抖音 App 里操作）；② 面板配色从浅黄改为米花色（#F5EFE0 等），并新增 Via 夜间模式/反色自动侦测：检测到整页被反转时首页与设置页会直接提示「这是被反色了，不是没生效」，关掉 Via 夜间模式即可看到米花色
+// @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
 // @run-at       document-start
@@ -13,7 +13,7 @@
    --------------------------------------------------------------------------
    原理：本脚本运行在 www.douyin.com 页面里，和抖音「同源」。
      - fetch 自动带上你真实登录 cookie，无需签名、无 CORS、无风控拦截；
-     - 取关/关注用「同源 iframe 打开对方主页 → 点真实关注按钮」实现；
+     - 关注用「同源 iframe 打开对方主页 → 点真实关注按钮」实现；（取关功能已取消，需取关请在抖音 App 里操作）
      - 数据存手机 localStorage，可一键推到 GitHub（手机端 HTML 直接看）。
    这也是为什么它能做到「完全不用电脑」：抖音只在乎是不是真人在真浏览器里操作，
    而这里每一步都是你自己手机上的真实浏览器行为。
@@ -131,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 11:35 · ① 未读数改成以抖音关注页自己标的「N个作品未看」为准（和 App 同一口径）：之前用 max(本机明细, 抖音数)，本机里混进早看过的旧视频就虚高，跟 App 完全对不上；现在抖音标了 N 就是 N，抖音标 0 才退回本机明细；② 新增「📊 和抖音里的数对一下账」页，把抖音标的数和本机抓到的明细摆一起、列出差在谁身上；③ 首页未读总数、结果页对账行都走抖音口径；全部分类视图把抓到但不在列表里的号也计入（不丢内容），首页总数仍只数真正关注的号';
-  var VER_SHORT = '10-03 11:35';
+  var VER = '2026-10-03 12:00 · ① 取消「取关」功能：账号行「取关」按钮、分类下拉「整类取关」按钮、批量取关 doUnfollowList 全部删除，菜单与处理器清理干净（关注功能保留）。日常取关建议直接在抖音 App 里点「关注 → 批量管理」；② 面板配色由浅黄改为米花色（面板 #F5EFE0 / 卡片 #ECE2CB / 按钮 #FBF7EE / 描边 #D9CCA6 / 分割线 #E5DAC0），正文仍为深色易读；③ 新增 detectNightMode()：扫描 html/body 的 filter、所有样式表与系统深色偏好，一旦发现整页被反色/压暗，首页与设置页直接给出红色提示——这下能分清「脚本没生效」还是「被 Via 夜间模式反转」，之前一直"改不成功"基本就是后者';
+  var VER_SHORT = '10-03 12:00';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1695,6 +1695,15 @@
     var tu = totalUnread();
     var du = S.domUnread, duFresh = !!(du && du.ts && Date.now() - du.ts <= 6 * 3600000);
     var h = '';
+    /* 自动侦测 Via 夜间模式 / 系统深色把整页反色：被翻成深色时直接红字提示，
+       避免用户又以为"背景色没改成功" */
+    var nm0 = detectNightMode();
+    if (nm0.on) {
+      h += '<div class="dyh-card" style="background:#fff0f1;border-color:#ffd9dc">' +
+        '<div class="dyh-tip" style="color:#f53f3f;margin:0"><b>⚠️ 检测到「' + esc(nm0.why) + '」</b><br>' +
+        '这会把我们设的米花色整页翻成深色——所以你看到的是黑的。<b>这不是脚本没生效</b>。' +
+        '请到 <b>Via 设置 → 显示 / 夜间模式</b> 关掉「夜间模式 / 暗黑模式 / 网页反色」，刷新页面重开助手即可看到米花色。</div></div>';
+    }
     h += '<div class="dyh-card">';
     h += '<div class="dyh-row"><b>账号</b><span>' + (S.selfSecUid ? '已登录' : '未识别') + '</span></div>';
     h += '<div class="dyh-row"><b>关注公众号</b><span>' + S.accounts.length + ' 个</span></div>';
@@ -2079,9 +2088,8 @@
       h += '<div class="dyh-drop-a">' +
         '<span class="dyh-mini" data-act="mgr-newcat">＋ 新建分类</span>' +
         (cat !== ALL_CAT && cat !== NO_CAT
-          ? '<span class="dyh-mini" data-act="mgr-rename" data-cat="' + esc(cat) + '">改名</span>' +
-            '<span class="dyh-mini dg" data-act="mgr-del-cat" data-cat="' + esc(cat) + '">删分类</span>' +
-            '<span class="dyh-mini dg" data-act="mgr-uf-cat" data-cat="' + esc(cat) + '">整类取关</span>'
+          ?             '<span class="dyh-mini" data-act="mgr-rename" data-cat="' + esc(cat) + '">改名</span>' +
+            '<span class="dyh-mini dg" data-act="mgr-del-cat" data-cat="' + esc(cat) + '">删分类</span>'
           : '') +
         '</div>';
       // 就地展开的输入框（不用弹窗 —— 有些手机浏览器会禁 prompt）
@@ -2143,7 +2151,6 @@
         (a._ghost ? '<small style="font-size:15px;opacity:.7">新·</small>' : '') + esc(a.name || a.secUserId) + '</span>' +
         '<span class="dyh-urn2' + (un ? '' : ' ok') + '">' + (un ? un + ' 未读' + plus : '已看完') + '</span>' +
         '<span class="dyh-mini" data-act="setcat" data-sec="' + esc(a.secUserId) + '">' + esc(a.category || '设分类') + '</span>' +
-        '<span class="dyh-mini dg" data-act="unfollow-one" data-sec="' + esc(a.secUserId) + '" data-name="' + esc(a.name || '') + '">取关</span>' +
         '</div>';
     }
     if (!shown) h += '<div class="dyh-tip">这个分类下还没有公众号' + (kwOn ? '（换个关键词试试）' : '') + '。</div>';
@@ -2194,7 +2201,7 @@
     if (srvN > 0 && vids.length > srvN) vids = vids.slice(0, srvN);
     var h = '<div class="dyh-back" data-act="manage">← 返回</div>';
     h += '<div class="dyh-card">' +
-      '<div class="dyh-row"><b>公众号</b><span>' + esc(name) + (acc && acc._ghost ? ' <em style="font-style:normal;color:#8a6d1f">（非关注·不计未读）</em>' : '') + '</span></div>' +
+      '<div class="dyh-row"><b>公众号</b><span>' + esc(name) + (acc && acc._ghost ? ' <em style="font-style:normal;color:#7A6A3F">（非关注·不计未读）</em>' : '') + '</span></div>' +
       '<div class="dyh-row"><b>未读视频</b><span class="dyh-hl">' + totalN + ' 条</span></div>' +
       (srvN ? '<div class="dyh-row"><b>其中抖音标记</b><span>' + srvN + ' 条未看</span></div>' : '') +
       '<div class="dyh-row"><b>本机抓到明细</b><span>' + vids.length + ' 条</span></div>' +
@@ -2336,16 +2343,19 @@
   }
 
   /* ----------------------------- 面板骨架 ----------------------------- */
-  /* 浅黄配色集中定义（10-03 00:20：用户说第一版太淡看着还是白的，整体加深一档）
-     面板 #fff2be / 卡片·小标签 #ffe9a3 / 按钮·输入框 #fff8d0 / 描边 #e5cd7d / 分割线 #efdc9c
+  /* 米花色（奶油色）配色集中定义（10-03 12:00：用户要求从浅黄改成米花色。
+     之前一直"改不成功"的真正根因：Via 的夜间模式 / 网页反色 把整页颜色反转，脚本层设的浅色被翻成深色，
+     所以看着像黑的——这不是没生效。配色见下：面板 #F5EFE0 / 卡片·小标签 #ECE2CB / 按钮·输入框 #FBF7EE /
+     描边 #D9CCA6 / 分割线 #E5DAC0 / 次要文字 #7A6A3F；正文主色仍是深色，易读）
      ★ BG_PANEL 这个常量下面 CSS 和 inline 两处都要用，改色只改这里 */
-  var BG_PANEL = '#fff2be';
+  var BG_PANEL = '#F5EFE0';
   var fab = null, panel = null, bodyEl = null, skinEl = null;
 
   function ensureUI() {
     if (fab) return;
     var st = document.createElement('style');
     st.textContent =
+      ':root,html{color-scheme:light!important}' +
       '.dyh-fab{position:fixed;right:16px;bottom:calc(28px + env(safe-area-inset-bottom));z-index:2147483640;' +
       'width:74px;height:74px;border-radius:50%;background:#fe2c55;color:#fff;font-size:38px;line-height:74px;' +
       'text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.28);user-select:none}' +
@@ -2363,77 +2373,77 @@
       '.dyh-box h3{margin:0 0 17px!important;font-size:28px!important;display:flex!important;align-items:center;flex:0 0 auto}' +
       '.dyh-box h3 span{margin-left:auto;font-size:40px!important;color:#c9cdd4;padding:0 8px}' +
       '.dyh-ver{font-size:16px!important;color:#c9cdd4;font-weight:400;margin-left:9px!important}' +
-      '.dyh-zbtn{font-size:30px!important;color:#4e5969;background:#ffe9a3;border-radius:8px;' +
+      '.dyh-zbtn{font-size:30px!important;color:#4e5969;background:#ECE2CB;border-radius:8px;' +
       'padding:4px 14px;margin-left:auto!important}' +
       '#dyh-body{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}' +
-      '.dyh-btn{display:block;width:100%;margin:11px 0;padding:19px 20px;border:1px solid #e5cd7d;border-radius:10px;' +
-      'background:#fff8d0;font-size:24px!important;color:#1d2129;text-align:left}' +
+      '.dyh-btn{display:block;width:100%;margin:11px 0;padding:19px 20px;border:1px solid #D9CCA6;border-radius:10px;' +
+      'background:#FBF7EE;font-size:24px!important;color:#1d2129;text-align:left}' +
       '.dyh-btn.primary{background:#fe2c55;color:#fff;border-color:#fe2c55;font-weight:600}' +
-      '.dyh-btn.gray{color:#8a6d1f}' +
-      '.dyh-card{background:#ffe9a3;border-radius:10px;padding:15px 17px;margin-bottom:13px}' +
-      '.dyh-row{display:flex;align-items:center;padding:16px 0;border-bottom:1px solid #efdc9c;font-size:24px!important}' +
+      '.dyh-btn.gray{color:#7A6A3F}' +
+      '.dyh-card{background:#ECE2CB;border-radius:10px;padding:15px 17px;margin-bottom:13px}' +
+      '.dyh-row{display:flex;align-items:center;padding:16px 0;border-bottom:1px solid #E5DAC0;font-size:24px!important}' +
       '.dyh-row:last-child{border-bottom:0}' +
       '.dyh-row b{font-weight:500;color:#4e5969}' +
       '.dyh-row span,.dyh-row a{margin-left:auto;color:#1d2129;text-decoration:none}' +
       '.dyh-hl{color:#fe2c55!important;font-weight:600}' +
-      '.dyh-item{padding:16px 0;border-bottom:1px solid #efdc9c}' +
+      '.dyh-item{padding:16px 0;border-bottom:1px solid #E5DAC0}' +
       '.dyh-item-t{font-size:24px!important;line-height:1.5;color:#1d2129}' +
-      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:9px;font-size:19px;color:#8a6d1f}' +
+      '.dyh-item-m{display:flex;gap:12px;align-items:center;margin-top:9px;font-size:19px;color:#7A6A3F}' +
       '.dyh-item-m a{margin-left:auto;color:#fe2c55;text-decoration:none;padding:9px 17px}' +
-      '.dyh-tip{font-size:19px!important;color:#8a6d1f;line-height:1.75;margin:11px 0}' +
+      '.dyh-tip{font-size:19px!important;color:#7A6A3F;line-height:1.75;margin:11px 0}' +
       '.dyh-back{font-size:20px;color:#fe2c55;margin-bottom:13px}' +
       /* ---- 分类下拉选择器 ---- */
-      '.dyh-sel{display:flex;align-items:center;gap:8px;background:#ffe9a3;border:1px solid #e5cd7d;' +
+      '.dyh-sel{display:flex;align-items:center;gap:8px;background:#ECE2CB;border:1px solid #D9CCA6;' +
       'border-radius:10px;padding:14px 16px;margin:6px 0 10px}' +
       '.dyh-sel b{font-size:25px;font-weight:600;color:#1d2129}' +
-      '.dyh-sel .dyh-caret{font-size:20px;color:#8a6d1f}' +
-      '.dyh-sel em{margin-left:auto;font-size:18px;font-style:normal;color:#8a6d1f;white-space:nowrap}' +
+      '.dyh-sel .dyh-caret{font-size:20px;color:#7A6A3F}' +
+      '.dyh-sel em{margin-left:auto;font-size:18px;font-style:normal;color:#7A6A3F;white-space:nowrap}' +
       '.dyh-sel em b{color:#fe2c55;font-weight:700}' +
-      '.dyh-drop{background:#fff8d0;border:1px solid #e5cd7d;border-radius:10px;padding:6px 8px;margin:0 0 10px}' +
-      '.dyh-drop-i{display:flex;align-items:center;gap:10px;padding:13px 10px;border-bottom:1px solid #efdc9c;font-size:23px}' +
-      '.dyh-drop-i.on{background:#ffe58f;border-radius:8px;font-weight:600}' +
-      '.dyh-drop-i em{margin-left:auto;font-size:17px;font-style:normal;color:#8a6d1f;white-space:nowrap}' +
-      '.dyh-drop-a{display:flex;gap:8px;flex-wrap:wrap;padding:10px 6px 6px;border-top:1px solid #efdc9c}' +
+      '.dyh-drop{background:#FBF7EE;border:1px solid #D9CCA6;border-radius:10px;padding:6px 8px;margin:0 0 10px}' +
+      '.dyh-drop-i{display:flex;align-items:center;gap:10px;padding:13px 10px;border-bottom:1px solid #E5DAC0;font-size:23px}' +
+      '.dyh-drop-i.on{background:#E3D4AC;border-radius:8px;font-weight:600}' +
+      '.dyh-drop-i em{margin-left:auto;font-size:17px;font-style:normal;color:#7A6A3F;white-space:nowrap}' +
+      '.dyh-drop-a{display:flex;gap:8px;flex-wrap:wrap;padding:10px 6px 6px;border-top:1px solid #E5DAC0}' +
       /* ---- 公众号行：名称 / 未读数 / 设分类 / 取关 四个并排 ---- */
-      '.dyh-acc2{display:flex;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid #efdc9c}' +
+      '.dyh-acc2{display:flex;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid #E5DAC0}' +
       '.dyh-nm{flex:1 1 auto;min-width:0;font-size:23px;color:#1d2129;line-height:1.35;' +
       'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '.dyh-urn2{flex:0 0 auto;font-size:18px;font-weight:700;color:#fe2c55;white-space:nowrap}' +
       '.dyh-urn2.ok{color:#b3a66a;font-weight:400}' +
       '.dyh-acc2 .dyh-mini{flex:0 0 auto;padding:7px 10px;font-size:17px}' +
       /* ---- 某个公众号的未读视频列表 ---- */
-      '.dyh-vid{padding:14px 0;border-bottom:1px solid #efdc9c}' +
+      '.dyh-vid{padding:14px 0;border-bottom:1px solid #E5DAC0}' +
       '.dyh-vid-t{font-size:23px;line-height:1.5;color:#1d2129;word-break:break-all}' +
-      '.dyh-vid-m{display:flex;align-items:center;gap:10px;margin-top:9px;font-size:19px;color:#8a6d1f}' +
+      '.dyh-vid-m{display:flex;align-items:center;gap:10px;margin-top:9px;font-size:19px;color:#7A6A3F}' +
       '.dyh-vid-m span:first-child{margin-right:auto}' +
       '.dyh-mini.go{background:#fe2c55;border-color:#fe2c55;color:#fff;font-weight:600}' +
       /* ---- 老的分类行 / 账号行（保留样式，防止旧页面残留） ---- */
-      '.dyh-cat{display:flex;align-items:center;gap:10px;padding:14px 6px;border-bottom:1px solid #efdc9c}' +
-      '.dyh-cat.sel{background:#ffe58f;border-radius:8px;margin:2px -6px;padding-left:12px;padding-right:6px}' +
+      '.dyh-cat{display:flex;align-items:center;gap:10px;padding:14px 6px;border-bottom:1px solid #E5DAC0}' +
+      '.dyh-cat.sel{background:#E3D4AC;border-radius:8px;margin:2px -6px;padding-left:12px;padding-right:6px}' +
       '.dyh-cat-l{display:flex;align-items:baseline;gap:9px;min-width:0}' +
       '.dyh-cat-l b{font-size:23px;font-weight:600}' +
-      '.dyh-cat-l span{font-size:17px;color:#8a6d1f}' +
+      '.dyh-cat-l span{font-size:17px;color:#7A6A3F}' +
       '.dyh-cat-r{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}' +
-      '.dyh-mini{display:inline-block;padding:8px 13px;border:1px solid #e5cd7d;border-radius:8px;background:#ffe9a3;' +
+      '.dyh-mini{display:inline-block;padding:8px 13px;border:1px solid #D9CCA6;border-radius:8px;background:#ECE2CB;' +
       'color:#4e5969;font-size:17px;text-decoration:none;white-space:nowrap}' +
       '.dyh-mini.dg{background:#fff0f1;border-color:#ffd9dc;color:#fe2c55}' +
       '.dyh-mini.on{background:#fe2c55;border-color:#fe2c55;color:#fff;font-weight:600}' +
-      '.dyh-acc{padding:13px 0;border-bottom:1px solid #efdc9c}' +
+      '.dyh-acc{padding:13px 0;border-bottom:1px solid #E5DAC0}' +
       '.dyh-acc-t{font-size:23px;color:#1d2129;line-height:1.45;word-break:break-all}' +
       '.dyh-urn{color:#fe2c55;font-weight:700;font-size:18px;margin-left:9px}' +
       '.dyh-urn.ok{color:#b3a66a;font-weight:400;margin-left:9px}' +
       '.dyh-acc-m{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}' +
-      '.dyh-input{width:100%;box-sizing:border-box;padding:15px 16px;border:1px solid #e5cd7d;border-radius:8px;' +
-      'background:#fff8d0;font-size:20px;margin:4px 0 13px}' +
-      '.dyh-lb{font-size:18px;color:#8a6d1f;display:block;margin-top:11px}' +
-      '.dyh-prog{background:#ffe9a3;border-radius:8px;padding:16px 18px;margin:12px 0;font-size:19px;line-height:1.75}' +
+      '.dyh-input{width:100%;box-sizing:border-box;padding:15px 16px;border:1px solid #D9CCA6;border-radius:8px;' +
+      'background:#FBF7EE;font-size:20px;margin:4px 0 13px}' +
+      '.dyh-lb{font-size:18px;color:#7A6A3F;display:block;margin-top:11px}' +
+      '.dyh-prog{background:#ECE2CB;border-radius:8px;padding:16px 18px;margin:12px 0;font-size:19px;line-height:1.75}' +
       /* ---- 抓取进度条 ---- */
-      '.dyh-pwrap{background:#fff8d0;border:1px solid #e5cd7d;border-radius:12px;padding:16px 18px;margin:12px 0}' +
+      '.dyh-pwrap{background:#FBF7EE;border:1px solid #D9CCA6;border-radius:12px;padding:16px 18px;margin:12px 0}' +
       '.dyh-ptop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}' +
       '.dyh-pnum{font-size:36px;font-weight:700;color:#fe2c55;line-height:1.1}' +
       '.dyh-pnum small{font-size:20px;font-weight:600}' +
       '.dyh-pcnt{font-size:19px;color:#4e5969;margin-left:auto}' +
-      '.dyh-pbar{position:relative;height:22px;background:#edd68f;border-radius:11px;overflow:hidden;margin:12px 0 10px}' +
+      '.dyh-pbar{position:relative;height:22px;background:#E3D4AC;border-radius:11px;overflow:hidden;margin:12px 0 10px}' +
       '.dyh-pin{height:100%;width:0;border-radius:11px;transition:width .35s ease;' +
       'background:linear-gradient(90deg,#fe2c55,#ff7d00);' +
       'background-size:28px 28px;' +
@@ -2529,6 +2539,36 @@
       try { skinEl.parentNode.appendChild(skinEl); } catch (e2) { }   // 挪到最后：谁最后谁说话
     }
   }
+  /* 检测是不是被 Via 夜间模式 / 系统深色 / 网页反色 把整页颜色反转了
+     （脚本层设的浅色会被它翻成深色，这就解释了"为什么一直改不成功"） */
+  function detectNightMode() {
+    try {
+      var de = document.documentElement, b = document.body;
+      var dcs = (window.getComputedStyle ? getComputedStyle(de) : de.style) || de.style;
+      var bcs = (window.getComputedStyle ? getComputedStyle(b) : b.style) || b.style;
+      var df = dcs.filter || '', bf = bcs.filter || '';
+      if (/invert|brightness\s*\(\s*0|hue-rotate/.test(df + ' ' + bf))
+        return { on: true, why: '页面被加了 filter 反色 / 压暗滤镜（Via 夜间模式常见做法）' };
+      var sheets = document.styleSheets || [];
+      for (var s = 0; s < sheets.length; s++) {
+        var rules; try { rules = sheets[s].cssRules; } catch (e) { continue; }
+        if (!rules) continue;
+        for (var r = 0; r < rules.length; r++) {
+          var rl = rules[r], sel = (rl.selectorText || '').toLowerCase();
+          if (sel === 'html' || sel === ':root' || sel === 'body' || sel.indexOf('html') >= 0) {
+            var txt = (rl.cssText || '').toLowerCase();
+            if (/filter\s*:\s*[^;]*(invert|hue-rotate|brightness\s*\(\s*0)|background[^:]*:\s*(#000|#000000|rgb\(0,\s*0,\s*0\))/.test(txt))
+              return { on: true, why: '检测到页面样式表把底色设成纯黑 / 加了反色滤镜' };
+          }
+        }
+      }
+    } catch (e) { }
+    try {
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        return { on: true, why: '系统 / 浏览器正处于「深色模式」偏好（Via 可能据此反色）' };
+    } catch (e) { }
+    return { on: false, why: '' };
+  }
   /* 皮肤自检：把浏览器【实际算出来的】底色报出来，一眼就能看出到底有没有生效 */
   function skinProbe() {
     if (!panel) return '（面板还没打开）';
@@ -2537,8 +2577,14 @@
     var cs = (window.getComputedStyle ? window.getComputedStyle(box) : null);
     var real = cs ? (cs.backgroundColor || cs.background || '') : '';
     var inline = box.style.backgroundColor || box.style.background || '';
+    var nm = detectNightMode();
+    var tip = nm.on
+      ? '<br>⚠️ <b style="color:#f53f3f">检测到「' + esc(nm.why) + '」</b>：这会把我们设的米花色整页翻成深色，' +
+        '所以你看到的是黑的。<b>这不是脚本没生效</b>，是被反转了。请到 <b>Via 设置 → 显示 / 夜间模式</b> 里关掉' +
+        '「夜间模式 / 暗黑模式 / 网页反色」，刷新页面重开助手即可看到米花色。'
+      : '';
     return '浏览器实际底色：<b>' + esc(real || '空') + '</b><br>内联写入值：<b>' + esc(inline || '空') + '</b>' +
-      '<br>期望值：<b>' + BG_PANEL + '</b>（rgb(255, 242, 190)）';
+      '<br>我们设的期望值：<b>' + BG_PANEL + '</b>（米花色 rgb(245, 239, 224)）' + tip;
   }
 
   function open(view) {
@@ -2557,45 +2603,8 @@
   // 内容现在由 #dyh-body 自己滚动，每次换页都要把滚动条拉回顶部
   function resetScroll() { if (bodyEl) bodyEl.scrollTop = 0; }
 
-  /* ==================== 批量取关（管理页用） ====================
-     一个一个来，中间隔 2.2 秒（抖音对连点很敏感，批量取关比抓未读更容易被盯）；
-     全程可以「🛑 停在这一个」—— 已经取掉的都保留，没到的一概不碰。
-     失败的列清单，让人知道是哪些、还能点「主页」自己补一下。 */
-  var UF_CANCEL = false;
-  function doUnfollowList(targets) {
-    if (!targets || !targets.length) return;
-    UF_CANCEL = false;
-    var doneN = 0, failList = [], n2 = targets.length;
-    setBody('<div class="dyh-back" data-act="home">← 返回</div>' +
-      '<div class="dyh-prog" id="dyh-prog">开始取关 0/' + n2 + '</div>' +
-      '<button class="dyh-btn gray" data-act="uf-stop">🛑 停在这一个（已经取掉的都保留）</button>');
-    function finish() {
-      save();
-      var h = '<div class="dyh-back" data-act="home">← 返回</div>' +
-        '<div class="dyh-card">' +
-        '<div class="dyh-row"><b>已取关</b><span class="dyh-hl">' + doneN + ' 个</span></div>' +
-        '<div class="dyh-row"><b>没成功</b><span>' + failList.length + ' 个</span></div></div>';
-      if (failList.length) {
-        h += '<div class="dyh-tip">这几个没取成（抖音没点头，多半是弹了验证页）：' + esc(failList.join('、')) +
-          ' —— 点每个号右边的「主页」，在新标签页里点一下「已关注」就行。</div>';
-      }
-      h += '<button class="dyh-btn" data-act="manage">← 回到管理</button>';
-      setBody(h);
-    }
-    function step(i3) {
-      if (UF_CANCEL || i3 >= n2) { finish(); return Promise.resolve(); }
-      var p = document.getElementById('dyh-prog');
-      if (p) p.innerHTML = '取关中 ' + (i3 + 1) + '/' + n2 + '：' + esc(targets[i3].name);
-      return setFollow(targets[i3].secUserId, false, targets[i3].name).then(function (r) {
-        if (r.ok || r.noop) {
-          doneN++;
-          S.accounts = S.accounts.filter(function (a) { return a.secUserId !== targets[i3].secUserId; });
-        } else failList.push(targets[i3].name);
-        return sleep(2200).then(function () { return step(i3 + 1); });
-      });
-    }
-    step(0);
-  }
+  /* 取关功能已于 2026-10-03 取消（用户要求）：单个取关、整类取关、批量取关逻辑全部移除。
+     需要取关请在抖音 App 里操作（关注 → 批量管理）。关注功能 setFollow 保留。 */
 
   function onAction(act, el) {
     var i;
@@ -2836,27 +2845,7 @@
       return;
     }
 
-    if (act === 'unfollow-one') {
-      var s1 = el.getAttribute('data-sec'), n1 = el.getAttribute('data-name');
-      if (!confirm('确定要在抖音里取关「' + n1 + '」吗？')) return;
-      toast('正在取关…', 8000);
-      setFollow(s1, false, n1).then(function (r) {
-        if (r.ok || r.noop) {
-          S.accounts = S.accounts.filter(function (a) { return a.secUserId !== s1; }); save();
-          toast('✅ 已取关 ' + n1); open('manage');
-          return;
-        }
-        setBody('<div class="dyh-back" data-act="manage">← 返回</div>' +
-          '<div class="dyh-tip" style="color:#f53f3f">取关「' + esc(n1) + '」失败：' + esc(r.error || r.state || '未知原因') + '</div>' +
-          '<button class="dyh-btn primary" data-act="open-home" data-sec="' + esc(s1) + '">🌐 打开 TA 的主页手动取关</button>' +
-          '<div class="dyh-tip">在新标签页里点一下「已关注」按钮即可。手动操作走的是真实页面，不会被验证码拦。</div>');
-      });
-      return;
-    }
-
-    if (act === 'uf-stop') { UF_CANCEL = true; toast('已停手，剩下几个保持原样'); return; }
-
-    /* 重刷浅黄皮肤：把样式表挪到 head 末尾 + 用 inline !important 重写底色 */
+    /* 重刷米黄皮肤：把样式表挪到 head 末尾 + 用 inline !important 重写底色 */
     if (act === 'reskin') {
       ensureUI();
       applySkin(panel ? panel.querySelector('.dyh-box') : null);
@@ -2941,17 +2930,6 @@
       if (MGR.cat === del) MGR.cat = '';
       save(); toast('已删除「' + del + '」'); open('manage'); return;
     }
-    if (act === 'mgr-uf-cat') {
-      var catk = el.getAttribute('data-cat');
-      var tg = S.accounts.filter(function (a) { return catOf(a) === catk; });
-      if (!tg.length) { toast('这个分类下没有账号'); return; }
-      var mins = Math.max(1, Math.round(tg.length * 2.6 / 60));
-      if (!confirm('把「' + (catk === NO_CAT ? '未分类' : catk) + '」下的 ' + tg.length + ' 个账号全取关？\n' +
-        '这会真的取消抖音关注，不可撤销。\n一个一个来，每个约 3 秒，大概 ' + mins + ' 分钟。')) return;
-      doUnfollowList(tg);
-      return;
-    }
-
     if (act === 'setcat') {
       var sec2 = el.getAttribute('data-sec');
       var cur = '';
