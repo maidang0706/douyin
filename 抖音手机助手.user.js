@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 15:40 · 单号抓取改成【和抖音 App 同口径】：读该号作品 + 读你的抖音已看记录，从最新往回数、碰到第一个「看过」就停 —— 前面那一段的长度就是抖音里那个「N个作品未看」的**数量**，那一段就是**未读视频清单**（不再是把最新作品全当未读）；结果写进 S.accUnreadN 与未读边界，未读列表/分类/首页未读总数全部按它更新；找不到已看边界时如实提示「可能偏大」
+// @version      2026-10-03 16:05 · 修「App 显示 6 个未看、我们显示 16 条且只抓到 15 条」：病根是 accUnread 里「侧栏角标 > 本机条数」就无条件采用，而角标存在 6 小时有效的全局快照里 —— 你在 App 里看掉 10 条后它还停在 16，于是旧角标盖住了新算出的数。现在数字按可信度分层：① 单号刚按抖音已看记录算出的 N（2h 内、找到边界）② 该号刚读到的官方角标（30min 内，新增 S.accBadge 独立时间戳）③ 全局侧栏快照 ④ 本机按边界算的条数；单号抓取翻页 3→5 页并记录 hasMore；账号页新增「🔍 这个数字是怎么来的（对账）」块，把各来源的数值与时间全摊开，不一致时直接点破
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -131,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 15:40 · 单号抓取改成【和抖音 App 同口径】（15:14 那版是错的：它把最新作品全当未读，数量和清单都和 App 对不上）。现在：① 抓该号的作品（翻最多 3 页留余量）；② 读抖音侧的「已看记录」并上本机已看记录；③ 从最新往回数，碰到第一个「看过」的为止 —— 前面那一段的**长度 = 抖音里那个「N个作品未看」的数值**，那一段就是**未读视频清单**（最新那条已看过则整个号为 0，和抖音一致）；④ 数量记进 S.accUnreadN、边界写进 S.accCursor，于是未读列表/分类统计/首页未读总数全部按它重算。已看记录只覆盖近 120 天，查不到边界时如实提示「可能偏大」，不假装很准';
-  var VER_SHORT = '10-03 15:40';
+  var VER = '2026-10-03 16:05 · 修「抖音 App 显示 6 个作品未看、我们却显示 16 条，而且只抓到 15 条」。★ 病根：accUnread 里只要「侧栏角标 > 本机条数」就无条件返回角标，而角标存在有效期 6 小时的全局快照 S.domUnread 里 —— 你在这 6 小时里用 App 看掉了 10 条，App 变成 6，我们却还拿 16 这个旧角标盖住新算出来的数（这也解释了为什么「未读 16」反而比「抓到 15」还大：16 根本不是我们抓出来的）。★ 修法：把数字按可信度分层，越新、越针对这个号、越同源的越优先 —— ① 单号刚按抖音已看记录算出的 N（2 小时内且找到了已看边界，用的是抖音自己的已看记录，和 App 同源）② 该号旁边刚读到的官方角标（30 分钟内，新状态 S.accBadge，带独立时间戳，不再被全局快照盖住）③ 全局侧栏快照（6 小时，可能过期）④ 本机按未读边界算出的条数（永远兜底，不会凭空多算）。noBoundary（没定位到已看边界、可能偏大）的一律不采信。★ 另外：单号抓取翻页 3→5 页并记录 hasMore；账号页新增「🔍 这个数字是怎么来的（对账）」块，把各来源的数值和时间全摊开，几个数不一致时直接点破并告诉你该怎么做';
+  var VER_SHORT = '10-03 16:05';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -156,7 +156,8 @@
       __vseq: 0,         // 视频库版本号（S.videos 变动时 +1）：视频索引按它复用缓存，避免每次重扫全部视频
       __rseq: 0,         // 已看记录版本号（S.readIds 变动时 +1）：readMap 按它复用缓存
       listAt: 0,         // 关注列表最后刷新的时间：刷新后未读视图以这份列表为准（见 listIsFresh / pruneToAccounts）
-      accUnreadN: {}     // {secUserId: {n, at, got, noBoundary}}：单独抓某个号时，按抖音口径算出的「N个作品未看」
+      accUnreadN: {},    // {secUserId: {n, at, got, noBoundary}}：单独抓某个号时，按抖音口径算出的「N个作品未看」
+      accBadge: {}       // {secUserId: {n, at}}：单独读到的【这个号的】官方角标（带独立时间戳，避免被几小时前的全局快照盖住）
     };
     try {
       var raw = localStorage.getItem(LS);
@@ -1884,19 +1885,47 @@
     return -1;   // 这一轮读到了侧栏，但这个号没出现在「N个作品未看」里 → 抖音就是标 0
   }
 
-  /* 一个号有几个未读：
-     优先用抖音「N个作品未看」标的数（和 App 同源），抓到的明细不够时以它为准并标 ⁺；
-     否则用本机按边界算出来的未读条数（最新 N 条 / 这次新抓到的）。
-     ★ 2026-10-03 12:55：未读【集合】的算法已改到 unreadVideosOf（只算最新 N 条），
-     这里只负责【数量】——抖音标的更多就报抖音的数（让界面标 ⁺），否则报实际能列的条数。 */
+  /* ============ 数字来源的优先级（16:05 重做，为解决「App 显示 6、我们显示 16」）============
+     ★ 病根：`accUnread` 里只要 `srv > n` 就直接返回侧栏角标。而侧栏角标存在全局快照
+       `S.domUnread` 里、有效期 6 小时 —— 你在这 6 小时里用 App 看过视频，App 变成 6 了，
+       我们却还在拿 16 这个旧角标盖住新算出来的数，于是「未读 16 条」而「只抓到 15 条」。
+     ★ 修法：把「数字」按可信度分层，越新、越针对这个号、越同源的越优先：
+       ① 单号刚算出的抖音口径数（S.accUnreadN，2 小时内、找到了已看边界）—— 用抖音自己的已看记录算的，和 App 同源；
+       ② 单号刚读到的官方角标（S.accBadge，30 分钟内）—— 就是这个号旁边写的「N个作品未看」；
+       ③ 全局侧栏快照（S.domUnread，6 小时内）—— 可能过期，只在没有更准来源时用；
+       ④ 本机按未读边界算出的条数（永远兜底，不会凭空多算）。 */
+
+  /* 单号官方角标（带独立时间戳）。超过 30 分钟就当没有 —— 你在 App 里看几条它就变了。 */
+  function accBadgeOf(a) {
+    if (!a || !a.secUserId || !S.accBadge) return null;
+    var r = S.accBadge[a.secUserId];
+    if (!r || r.at == null) return null;
+    if (Date.now() - r.at > 30 * 60000) return null;
+    return r;
+  }
+  /* 单号刚算出的抖音口径数；noBoundary（没定位到已看边界）的一律不采信 */
+  function accFreshN(a) {
+    if (!a || !a.secUserId || !S.accUnreadN) return null;
+    var r = S.accUnreadN[a.secUserId];
+    if (!r || r.noBoundary || r.n == null) return null;
+    if (Date.now() - r.at > 2 * 3600000) return null;
+    return r;
+  }
+
+  /* 一个号有几个未读（数量）—— 见上面的优先级说明 */
   function accUnread(a, um) {
     if (!a) return 0;
     if (a._ghost) return localUnread(a, um);          // 非关注的推荐号：抖音不会给它未读数
+    /* ① 刚按抖音口径算出来的 N（最可信：用抖音自己的已看记录算，和 App 同源） */
+    var mu = accFreshN(a);
+    if (mu) return mu.n;
     var vids = unreadVideosOf(a.secUserId, a);
     var n = vids.length;
-    var srv = serverUnread(a);
-    if (srv > 0 && n < srv) return srv;              // 抓到的明细比抖音标的少 → 以抖音为准并标 ⁺
-    return n;
+    /* ② 官方角标（先看这个号的独立快照，再退到全局快照） */
+    var ab = accBadgeOf(a);
+    var srv = ab ? ab.n : serverUnread(a);
+    if (srv > 0 && n < srv) return srv;              // 抓到的明细比官方标的少 → 以官方为准并标 ⁺
+    return n;                                          /* ③ ④ 本机按边界算出的条数（不多算） */
   }
 
   /* 「全部未读」= 按账号把抖音给的数加总（和 App 的关注未读总数同一口径）
@@ -2408,6 +2437,44 @@
         '所以现在按「抓到的 ' + mu.got + ' 条都算未读」来算，<b>这个数可能偏大</b>。' +
         '在抖音 App 里点开这个号看一条（或点下面的按钮重抓一次），边界就能定准。</div>';
     }
+    /* ★★ 数字对账（16:05 加）：把「这个未读数字到底是哪来的」摊开写出来。
+       以前 App 显示 6、我们显示 16 却看不出原因，就是因为几个来源悄悄互相盖住。 */
+    (function () {
+      var ab = acc ? accBadgeOf(acc) : null;
+      var du = S.domUnread || null;
+      var duAge = (du && du.ts) ? Math.round((Date.now() - du.ts) / 60000) : null;
+      var rows = [];
+      if (mu) rows.push(['按抖音已看记录算出', mu.n + ' 条',
+        mu.noBoundary ? '没找到已看边界，' + mu.got + ' 条全算（可能偏大）' : (fmtTime(mu.at) + ' 算的')]);
+      if (ab) rows.push(['抖音官方角标（刚读）', ab.n + ' 条', fmtTime(ab.at)]);
+      if (du && du.ts) {
+        var gs = serverUnread(acc);
+        rows.push(['侧栏角标（' + duAge + ' 分钟前读的）', gs + ' 条', '可能已过期']);
+      }
+      rows.push(['本机抓到该号作品', (mu ? mu.got : vids.length) + ' 条',
+        (mu && mu.hasMore) ? '还有更多没抓完' : '已抓到头']);
+      if (rows.length < 2) return;
+      var bh = '<div class="dyh-card" style="padding:8px 12px;margin:8px 0"><div class="dyh-tip" style="margin:0 0 4px">' +
+        '<b>🔍 这个数字是怎么来的（对账）</b></div>';
+      for (var i2 = 0; i2 < rows.length; i2++) {
+        bh += '<div class="dyh-row" style="font-size:19px"><b>' + rows[i2][0] + '</b><span>' +
+          rows[i2][1] + '<br><em style="font-style:normal;opacity:.7">' + rows[i2][2] + '</em></span></div>';
+      }
+      /* 几个来源不一致时直接点破，别让用户自己猜 */
+      var nums = [];
+      if (mu && !mu.noBoundary) nums.push(mu.n);
+      if (ab) nums.push(ab.n);
+      if (du && du.ts) nums.push(serverUnread(acc));
+      var mx = Math.max.apply(null, nums.concat([0]));
+      var mn = Math.min.apply(null, nums.concat([mx]));
+      if (nums.length >= 2 && mx !== mn) {
+        bh += '<div class="dyh-tip" style="color:#b88200;margin:4px 0 0">⚠️ 上面的数<b>不一致</b>（' +
+          mn + ' ~ ' + mx + '）。<b>取的是最上面那一条</b>（最新、最同源）。' +
+          '你在抖音 App 里看到的数如果不在里面，说明它比这些都新——' +
+          '回「关注」页点一次「📡 抓最新未读视频」，把角标重读一遍即可。</div>';
+      }
+      h += bh + '</div>';
+    })();
     /* ★ 2026-10-03 15:14 新增 / 15:40 按抖音口径重做：
        抓这一个号的「N个作品未看」数量 + 对应的未读视频清单（只发几次请求，不用跑整轮、不用跳关注页）。 */
     h += '<button class="dyh-btn primary" data-act="acc-scan" data-sec="' + esc(sec) + '" data-name="' + esc(name) + '">' +
@@ -2453,7 +2520,7 @@
      ⚠ 已看记录只覆盖近 120 天；若这个号的作品全部都比 120 天新且你没在抖音里看过，
        会找不到「已看边界」，此时 N 只能取到抓到的条数（可能偏多），页面会明确提示。 */
   function fetchAccountWorks(secUid, maxPages) {
-    var all = [], seen = {}, cursor = '0', page = 0, maxN = maxPages || 3;
+    var all = [], seen = {}, cursor = '0', page = 0, maxN = maxPages || 5, hasMore = false;
     function step() {
       if (page >= maxN) return Promise.resolve(all);
       page++;
@@ -2465,7 +2532,8 @@
             if (!v || !v.awemeId || seen[v.awemeId]) continue;
             seen[v.awemeId] = 1; all.push(v);
           }
-          if (!list.length || !j.has_more) return all;
+          hasMore = !!(j && j.has_more);
+          if (!list.length || !hasMore) return all;
           var nc = j.max_cursor;
           if (nc == null || String(nc) === String(cursor)) return all;
           cursor = String(nc);
@@ -2474,6 +2542,7 @@
     }
     return step().then(function (list) {
       list.sort(function (a, b) { return (b.publishedAt || 0) - (a.publishedAt || 0); });   // 最新在前
+      list.hasMore = hasMore; list.pages = page;      // 附带信息（挂在数组上，供调用方显示）
       return list;
     });
   }
@@ -2493,7 +2562,21 @@
     }
     prog('📡 正在抓「' + esc(who) + '」的作品…', '翻几页，留足余量');
     var works = [];
-    return fetchAccountWorks(acc.secUserId, 3)
+    /* ① 顺手把这个号旁边的官方角标读下来（如果人就在关注页上）—— 这是抖音自己写的数，最权威。
+          单独存进 S.accBadge 并带自己的时间戳，免得被几小时前的全局快照盖住。 */
+    if (onFollowPage()) {
+      try {
+        var side = readFollowUnreadDom();
+        var bn = -1;
+        if (side.secMap && side.secMap[acc.secUserId] != null) bn = side.secMap[acc.secUserId];
+        else if (side.nameMap) {
+          if (side.nameMap[acc.name] != null) bn = side.nameMap[acc.name];
+          else if (side.nameMap[normName(acc.name)] != null) bn = side.nameMap[normName(acc.name)];
+        }
+        if (bn >= 0) S.accBadge[acc.secUserId] = { n: bn, at: Date.now() };
+      } catch (e) { }
+    }
+    return fetchAccountWorks(acc.secUserId, 5)
       .then(function (list) {
         works = list || [];
         prog('👀 正在读你的抖音已看记录…', '用来判断这个号「N个作品未看」');
@@ -2532,7 +2615,10 @@
         if (!boundary) S.accCursor[acc.secUserId] = Date.now();   // 一个都没看 → 零未读
         else if (noBoundary) S.accCursor[acc.secUserId] = -1;     // 全抓到都未读（可能偏多，页面会提示）
         else S.accCursor[acc.secUserId] = boundary.publishedAt || 0;
-        S.accUnreadN[acc.secUserId] = { n: n, at: Date.now(), got: works.length, noBoundary: noBoundary };
+        S.accUnreadN[acc.secUserId] = {
+          n: n, at: Date.now(), got: works.length, noBoundary: noBoundary,
+          pages: works.pages || 0, hasMore: !!works.hasMore
+        };
 
         save();                       // 数据立刻落盘，全软件数据都更新了
         open('accv');                 // 重画这一页：数量 + 未读列表都按抖音口径显示
@@ -3386,6 +3472,8 @@
     renderRecon: renderRecon,
     ghostAuthors: ghostAuthors,
     listIsFresh: listIsFresh,
+    accBadgeOf: accBadgeOf,
+    accFreshN: accFreshN,
     pruneToAccounts: pruneToAccounts,
     scanOneAccount: scanOneAccount,
     fetchAccountWorks: fetchAccountWorks,
