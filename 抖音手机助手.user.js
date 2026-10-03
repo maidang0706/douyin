@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 14:05 · ① 修「界面很卡」：以前每查一个账号都要把全部视频（约 1.2 万条）扫一遍，列表排序/统计未读/下拉分类又会对每个账号各查一次 → 打开未读查看要算上千万次，直接卡住；现在给视频按账号建一次索引（buildVideoIndex），查某账号只看它自己的视频，已看记录也按 render 复用缓存 → 渲染从约 43 秒降到 0.04 秒（约 1000 倍）；② 顺手修掉同一视频可能同时命中 secUid 与昵称、被重复计入的旧毛病
+// @version      2026-10-03 15:14 · ① 刷新「我的关注列表」后，未读视频查看跟着新列表走：取关掉的号连同它以前的视频、未读边界一起清掉，列表刚刷过（24h 内）时只显示列表里的号，不再残留已取关的内容；② 未读视频查看页移除「☁️ 同步电脑端的分类」整块入口；③ 主界面移除「检测到系统/浏览器正处于夜间模式…」那段提示文字；④ 点公众号名称进去的页面新增「📡 单独抓这个号的未读视频」：只发 1 次请求，抓回的新视频并入本机并把该号未读边界划在这批里最老那条之下，抓完整个软件数据（列表/分类/首页未读总数）都更新
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -131,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 14:05 · ① 修「界面很卡」：以前每查一个账号都要把全部视频（约 1.2 万条）扫一遍，而列表排序 / 统计未读 / 下拉分类又会对每个账号各查一次 → 打开「未读视频查看」要算上千万次，直接卡住；现在给视频按账号建一次索引（buildVideoIndex，按 S.__vseq 复用），查某账号只看它自己的视频，已看记录（readMap）也按 S.__rseq 复用 → 渲染耗时从约 43 秒降到 0.04 秒（约 1000 倍）；② 顺手修掉同一视频同时命中 secUid 与昵称时被重复计入的旧毛病';
-  var VER_SHORT = '10-03 14:05';
+  var VER = '2026-10-03 15:14 · ① 刷新「我的关注列表」之后，未读视频查看跟着【新列表】走：取关掉的号连同它以前的视频和未读边界一起清掉；列表刚刷新过（24 小时内）时，未读视图只显示列表里的号，不再残留已取关的内容（没刷新过列表时，虚拟号仍保留，内容不会凭空消失）；② 未读视频查看页移除「☁️ 同步电脑端的分类」整块入口（applyCatFile / pullCats 函数保留，设置页与仿真仍可用）；③ 主界面移除「检测到系统/浏览器正处于夜间模式…」那段提示文字（detectNightMode 本身保留，设置页皮肤自检还在用）；④ 点公众号名称进去的页面新增「📡 单独抓这个号的未读视频」：只发 1 次请求（不必跑整轮、不必去关注页滚动），抓回的新视频并入本机并把该号未读边界划在这批里最老那条之下（这批当场就是未读，更老的仍算已看），已看/已有的不重复计入，抓完 save() 落盘 —— 列表、分类、首页未读总数全部跟着更新';
+  var VER_SHORT = '10-03 15:14';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -154,7 +154,8 @@
       accCursor: {},     // {secUserId: 发布时间边界ms}：>边界的视频才算未读（由抖音「N个作品未看」反推，见 applyBadgeCursors）
       scanJob: null,     // 断点：{sig, startIdx, cursor, ts}，中断/被杀后下次从这里续
       __vseq: 0,         // 视频库版本号（S.videos 变动时 +1）：视频索引按它复用缓存，避免每次重扫全部视频
-      __rseq: 0          // 已看记录版本号（S.readIds 变动时 +1）：readMap 按它复用缓存
+      __rseq: 0,         // 已看记录版本号（S.readIds 变动时 +1）：readMap 按它复用缓存
+      listAt: 0          // 关注列表最后刷新的时间：刷新后未读视图以这份列表为准（见 listIsFresh / pruneToAccounts）
     };
     try {
       var raw = localStorage.getItem(LS);
@@ -494,7 +495,14 @@
           a.category = oldCat[a.secUserId] || '';
           out.push(a);
         }
-        S.accounts = out; save();
+        S.accounts = out;
+        /* ★ 2026-10-03 15:14：刷新关注列表之后，「未读视频查看」必须跟着这份列表走。
+           取关掉的号，视频库里还留着它以前的视频 → 未读视图里会一直挂着它（显示成「新·」虚拟号），
+           和 App 里「我的关注」对不上。现在刷到列表就把【不在列表里的号】的视频与未读边界清掉，
+           并记下刷新时间：之后未读视图只认列表里的号（见 listIsFresh / ghostAuthors）。
+           ⚠ 只有真的读到非空列表才清空 —— 万一这次请求异常返回空，不能把已有数据全抹掉。 */
+        if (out.length) { pruneToAccounts(out); S.listAt = Date.now(); }
+        save();
         return out;
       });
     });
@@ -1704,15 +1712,8 @@
     var tu = totalUnread();
     var du = S.domUnread, duFresh = !!(du && du.ts && Date.now() - du.ts <= 6 * 3600000);
     var h = '';
-    /* 自动侦测 Via 夜间模式 / 系统深色把整页反色：被翻成深色时直接红字提示，
-       避免用户又以为"背景色没改成功" */
-    var nm0 = detectNightMode();
-    if (nm0.on) {
-      h += '<div class="dyh-card" style="background:#fff0f1;border-color:#ffd9dc">' +
-        '<div class="dyh-tip" style="color:#f53f3f;margin:0"><b>⚠️ 检测到「' + esc(nm0.why) + '」</b><br>' +
-        '这会把我们设的米花色整页翻成深色——所以你看到的是黑的。<b>这不是脚本没生效</b>。' +
-        '请到 <b>Via 设置 → 显示 / 夜间模式</b> 关掉「夜间模式 / 暗黑模式 / 网页反色」，刷新页面重开助手即可看到米花色。</div></div>';
-    }
+    /* 注：原先这里有一段「⚠️ 检测到系统/浏览器正处于夜间模式…」的整块红字提示，
+       按用户要求已删除（2026-10-03 15:14）。detectNightMode() 本身保留，设置页的皮肤自检还在用。 */
     h += '<div class="dyh-card">';
     h += '<div class="dyh-row"><b>账号</b><span>' + (S.selfSecUid ? '已登录' : '未识别') + '</span></div>';
     h += '<div class="dyh-row"><b>关注公众号</b><span>' + S.accounts.length + ' 个</span></div>';
@@ -1934,7 +1935,41 @@
 
   /* 抓到视频了、但这个作者不在你的关注列表里（列表没刷新 / 刚关注 / 列表是旧的）
      → 也给你列出来，不能让抓到的东西凭空消失。 */
+  /* ===================== 关注列表刷过之后，未读视图「以它为准」=====================
+     ★ 2026-10-03 15:14（用户要求）：点「📥 刷新我的关注列表」之后，未读视频查看里的
+       视频应该跟着【新的关注列表】变 —— 取关掉的号不该还留在里面。
+       ① listIsFresh()：刚刷新过（24 小时内）→ 未读视图只认列表里的号；
+       ② pruneToAccounts()：刷新时把「不在列表里的号」的视频和未读边界清掉。
+     ⚠ 两者都要「列表刚刷新过」才生效：平时没刷新过列表时，虚拟号仍要保留 ——
+       否则刚关注还没来得及刷新列表、或还没抓过的号，内容会凭空消失。 */
+  function listIsFresh() {
+    return !!(S.listAt && (Date.now() - S.listAt) < 24 * 3600000);
+  }
+  /* 把视频库、未读边界裁剪成「只留下这份关注列表里的号」 */
+  function pruneToAccounts(accs) {
+    var sec = {}, nm = {}, i, v, k;
+    for (i = 0; i < accs.length; i++) {
+      if (accs[i].secUserId) sec[accs[i].secUserId] = 1;
+      if (accs[i].name) nm[normName(accs[i].name)] = 1;
+    }
+    var kept = [];
+    for (i = 0; i < S.videos.length; i++) {
+      v = S.videos[i];
+      if (!v) continue;
+      if ((v.secUid && sec[v.secUid]) || (v.account && nm[normName(v.account)])) kept.push(v);
+    }
+    if (kept.length !== S.videos.length) { S.videos = kept; S.__vseq++; }
+    if (S.accCursor) {
+      for (k in S.accCursor) {
+        if (Object.prototype.hasOwnProperty.call(S.accCursor, k) && !sec[k]) delete S.accCursor[k];
+      }
+    }
+    return S.videos.length;
+  }
+
   function ghostAuthors(view) {
+    /* 刚刷新过关注列表 → 以列表为准，不再把「抓到但不在列表里」的号混进来（否则已取关的号一直挂着） */
+    if (listIsFresh()) return [];
     var have = {}, out = [], i, a;
     for (i = 0; i < S.accounts.length; i++) {
       a = S.accounts[i];
@@ -2135,19 +2170,9 @@
 
     h += '<div id="dyh-mgr-list">' + mgrListHtml(cat, um) + '</div>';
 
-    /* ---- 从 GitHub 拉分类：折叠在最后，平时不占地方 ---- */
-    if (MGR.sync) {
-      h += '<div class="dyh-card" style="padding:10px 12px;margin:14px 0 0">' +
-        '<div class="dyh-row"><b>☁️ 从 GitHub 拉分类</b><span></span></div>' +
-        '<div class="dyh-tip" style="margin:2px 0 8px">电脑端整理好的分类清单存在 GitHub 的 <b>categories.json</b>' +
-        '（只有几十 KB，不像 unread.json 有 3.9MB 手机拉不动）。拉下来会按账号对上号并覆盖本机分类。</div>' +
-        (S.lastCatSync ? '<div class="dyh-tip" style="margin:0 0 8px">上次同步：' + esc(fmtTime(S.lastCatSync)) + '</div>' : '') +
-        '<button class="dyh-btn primary" data-act="cat-pull">☁️ 拉取并覆盖分类</button>' +
-        '<button class="dyh-btn" data-act="cat-merge">🔀 只补空缺（不覆盖已有）</button>' +
-        '<button class="dyh-btn gray" data-act="mgr-sync-close">收起</button></div>';
-    } else {
-      h += '<div style="margin:14px 0 0"><span class="dyh-mini" data-act="mgr-sync">☁️ 同步电脑端的分类</span></div>';
-    }
+    /* 注：原先这里有「☁️ 同步电脑端的分类」入口 + 拉取卡片（pullCats），
+       按用户要求已从「未读视频查看」页整块删除（2026-10-03 15:14）。
+       applyCatFile / pullCats 两个函数保留（设置页仍可调，且仿真仍覆盖），只是本页不再提供入口。 */
     return h;
   }
 
@@ -2372,6 +2397,11 @@
         '</b> 条明细 —— 差的那几条这个号发布时间比较早，关注页滚动时没翻到。' +
         '再抓一轮（在「关注」页多往下滚一会）一般就补齐了。</div>';
     }
+    /* ★ 2026-10-03 15:14 新增：单独抓这一个号的未读视频（不用再跑整轮、也不用去关注页） */
+    h += '<button class="dyh-btn primary" data-act="acc-scan" data-sec="' + esc(sec) + '" data-name="' + esc(name) + '">' +
+      '📡 单独抓这个号的未读视频</button>';
+    h += '<div class="dyh-tip" style="margin:0 0 10px">只请求这一个号（<b>1 次</b>请求，比整轮抓快得多）。' +
+      '抓回来的新视频会直接并进本机数据，<b>整个面板（列表、分类、首页未读总数）都会跟着更新</b>。</div>';
     h += '<div class="dyh-tip">点任意一条 → 用<b>抖音 App</b> 观看，唤起后<b>网页端不跳转、不做任何动作</b>' +
       '（面板原样留在这）；打开的同时记成已看，未读数当场减一。</div>';
     /* 「唤起方式」开关：不同手机 / 不同浏览器对 scheme 和 intent 的放行程度不一样，
@@ -2394,6 +2424,59 @@
     }
     if (!vids.length) h += '<div class="dyh-tip">这个号现在没有未读视频。</div>';
     return h;
+  }
+
+  /* ================= 单独抓某一个号的未读视频（2026-10-03 15:14 新增）=================
+     在「未读视频查看 → 点公众号名称」进来的这一页，给一个只抓这一个号的按钮：
+       · 整轮抓要遍历几百个号、又得跳去关注页滚动；这里只发 1 次请求（fetchPosts），秒回；
+       · 抓回来的新视频并进 S.videos，并把该号的「未读边界」划在这批新视频里最老那条之下
+         → 这批新视频当场就是「未读」，更老的仍算已看（和 App 的口径一致）；
+       · 数据一改完就 save()，列表 / 分类 / 首页未读总数全部重算 —— 整个软件的数据都跟着更新。
+     ⚠ 已在本机「已看记录」里的、以及视频库里已有的，都不会重复计入。 */
+  function scanOneAccount(sec, name) {
+    var acc = null, i;
+    for (i = 0; i < S.accounts.length; i++) if (S.accounts[i].secUserId === sec) { acc = S.accounts[i]; break; }
+    if (!acc && name) acc = { secUserId: sec, name: name, category: '', _ghost: 1 };
+    if (!acc || !acc.secUserId) {
+      toast('这个号没有 secUid，抓不了（它不在你的关注列表里）');
+      return Promise.resolve(0);
+    }
+    var who = acc.name || sec;
+    setBody('<div class="dyh-back" data-act="manage">← 返回</div>' +
+      '<div class="dyh-prog" id="dyh-prog">📡 正在抓「' + esc(who) + '」的最新作品…<br>' +
+      '<span style="font-size:19px">1 次请求，稍等几秒</span></div>');
+    return fetchPosts(acc.secUserId, {}).then(function (list) {
+      var known = {}, readMap = readIdMap(), added = [], j, v, minAt = 0;
+      for (j = 0; j < S.videos.length; j++) known[S.videos[j].awemeId] = 1;
+      for (j = 0; j < (list || []).length; j++) {
+        v = list[j];
+        if (!v || !v.awemeId) continue;
+        if (!v.secUid) v.secUid = acc.secUserId;      // 作品接口偶尔不带 sec_uid，补上才能归到这个号
+        if (!v.account) v.account = who;
+        if (readMap[v.awemeId] || known[v.awemeId]) continue;   // 已看 / 已有 → 不重复算未读
+        known[v.awemeId] = 1;
+        S.videos.push(v); added.push(v);
+      }
+      if (added.length) {
+        S.__vseq++;                                    // 视频库变了 → 让索引重建
+        /* 作品接口本来就是「最新在前」，所以最后一条就是这批里最老的：
+           边界划在它下面 → 这批全部算未读，比它更老的都不算。 */
+        minAt = added[added.length - 1].publishedAt || 0;
+        if (minAt > 0) S.accCursor[acc.secUserId] = minAt - 1;
+      }
+      save();                                         // 数据立刻落盘，全软件数据都更新了
+      open('accv');                                   // 重画这一页（列表/分类/首页下次打开就是新数）
+      toast(added.length
+        ? ('抓到了：新增 ' + added.length + ' 条未读（已并入本机数据）')
+        : '没有新作品（最新 20 条本机都已经有了）');
+      return added.length;
+    }).catch(function (e) {
+      setBody('<div class="dyh-back" data-act="accv">← 返回</div>' +
+        '<div class="dyh-tip" style="color:#f53f3f">抓取失败：' + esc(e.message) + '</div>' +
+        '<div class="dyh-tip">多半是没登录抖音网页版，或刚被风控。回「关注」页跑一轮整轮抓通常更稳。</div>' +
+        '<button class="dyh-btn" data-act="accv">← 返回这个号</button>');
+      return 0;
+    });
   }
 
   /* 唤起抖音 App 打开视频详情页（10-03 00:50 重写）
@@ -3020,6 +3103,11 @@
       if (!MGR.cat) MGR.cat = ALL_CAT;
       open('accv'); return;
     }
+    /* ★ 单独抓这一个号的未读视频（只 1 次请求）；抓完整个软件的数据都会更新 */
+    if (act === 'acc-scan') {
+      scanOneAccount(el.getAttribute('data-sec') || '', el.getAttribute('data-name') || '');
+      return;
+    }
     if (act === 'play') {
       var pid = el.getAttribute('data-id');
       openInApp(pid);          // 只唤起抖音 App；网页端不跳转、不开新标签
@@ -3047,8 +3135,6 @@
 
     /* 点当前分类那一行 → 展开/收起分类下拉 */
     if (act === 'mgr-drop') { MGR.drop = !MGR.drop; MGR.adding = false; MGR.editing = ''; open('manage'); return; }
-    if (act === 'mgr-sync') { MGR.sync = true; open('manage'); return; }
-    if (act === 'mgr-sync-close') { MGR.sync = false; open('manage'); return; }
 
     if (act === 'mgr-pick') {
       MGR.cat = el.getAttribute('data-cat'); MGR.drop = false; MGR.adding = false; MGR.editing = '';
@@ -3228,6 +3314,9 @@
     reconUnread: reconUnread,
     renderRecon: renderRecon,
     ghostAuthors: ghostAuthors,
+    listIsFresh: listIsFresh,
+    pruneToAccounts: pruneToAccounts,
+    scanOneAccount: scanOneAccount,
     catMembers: catMembers,
     catUnread: catUnread,
     normName: normName,
