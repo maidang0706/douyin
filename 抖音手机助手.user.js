@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 23:58 · 真机截图破案：网页版【确实】写着「N个作品未看」，路子是对的；但【正在直播的号，网页端这一行不写角标】（截图里「记忆宫殿宁梓亦」在直播、没有任何角标，而 App 里它是 5 个未看）—— 于是老规则「在侧栏里但没角标 = 官方 0 条」把直播号误判成了 0。★ 修法：新增直播行识别（行内文本或子元素含 live/直播），直播号无角标一律算【未知】，绝不报 0。★ 新增「📡 读全部账号的官方未读数」：一次把「我的关注」侧栏滚到底（388 个号），把每行抖音写的未读数全部抄下来落盘（全局快照 + 每号独立角标），整个面板按它更新 —— 不用再一个一个滚。★ 体检升级：把该号那一行的【原始 HTML 和原文】也抄出来，一眼看出角标/直播标记到底怎么写。
+// @version      2026-10-04 00:35 · 回答「除了角标还有没有别的办法拿到未读数」——先补上一个决定性盲点：以前只监听 4 个已知地址（follow/post/following/history），抖音只要用【任何一个别的接口】下发未读数，我们连记录都不会记录，这就是这个问题一直没答案的原因。★ 新增「🌐 扫描接口」：开启后 60 秒，把抖音给自己前端发的【每一个】/aweme/ 接口都记一笔（只留地址和它有没有未读类字段，不留全文），结束后自动出清单。体检报告新增【六】节：列出全部见到过的接口、请求次数、每个接口的顶层字段，以及哪几个【带未读类字段】——那些就是第二个数据源，可以不再依赖页面上那个角标（尤其能救「直播号网页端不写角标」的情况）。
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -42,7 +42,8 @@
          抖音前端发的请求带完整签名 + uifid + 真设备指纹，服务端必然给它 200。
        ★ 我们只是把响应【抄一份】进 NET.buf，后面自己解析。不改任何请求 → 不可能被风控。
      ========================================================================== */
-  var NET = { buf: [], on: false };
+  /* wide = 接口扫描模式的截止时间戳（0 = 关）。平时完全不干活，不占资源。 */
+  var NET = { buf: [], on: false, wide: 0, seen: {}, seenList: [] };
   function netKind(url) {
     if (!url) return '';
     if (url.indexOf('/aweme/v1/web/follow/') >= 0) return 'feed';
@@ -73,6 +74,63 @@
     for (var i = 0; i < NET.buf.length; i++) if (NET.buf[i].kind === kind) n++;
     return n;
   }
+
+  /* ===================================================================
+     ★★ 「接口扫描」（2026-10-04 新增）—— 回答「除了页面上那个角标，
+     还有没有别的办法拿到未读数」的唯一实证手段。
+     以前我们只听 4 个已知地址，抖音只要换任何一个别的接口下发未读数，
+     我们连记录都不会记录 —— 这就是「到底还有没有别的办法」一直没答案的原因。
+     现在：扫描模式下，抖音自己发出的【每一个】/aweme/ 接口都记一笔，
+     只留「地址 + 里面有没有未读类字段」，不留全文，占不了多少内存。
+     =================================================================== */
+
+  /* 把 URL 洗成看得懂的样子：去掉域名、去掉签名类噪音参数，只留路径 + 参数名 */
+  var URL_NOISE_RE = /^(msToken|X-Bogus|_signature|a_bogus|verifyFp|s_v_web_id|fp|ts|device_id|_rticket|iid|cdid|cookie|ac|aid|app_name|version_code|version_name|channel|device_platform|os_api|os_version|d_devicebrand|uifid|webid|pc_client_type|pc_lib)$/i;
+  function netCleanUrl(u) {
+    var s = String(u || ''), q = '';
+    try {
+      var i = s.indexOf('?');
+      if (i >= 0) {
+        var keys = [], parts = s.slice(i + 1).split('&');
+        for (var j = 0; j < parts.length; j++) {
+          var kv = parts[j], eq = kv.indexOf('='), kk = eq >= 0 ? kv.slice(0, eq) : kv;
+          if (!kk || URL_NOISE_RE.test(kk)) continue;
+          keys.push(kk);
+        }
+        if (keys.length) q = '?' + keys.join('&');
+        s = s.slice(0, i);
+      }
+      s = s.replace(/^https?:\/\/[^/]+/, '');
+    } catch (e) { }
+    return (s + q).slice(0, 150);
+  }
+
+  /* 扫描期间：每见到一个新接口就记一条（同一地址只记一次，只累加次数） */
+  function netWideRecord(url, text) {
+    try {
+      var clean = netCleanUrl(url);
+      if (clean.indexOf('/aweme/') < 0) return;
+      if (NET.seen[clean]) { NET.seen[clean].n++; return; }
+      var rec = { url: clean, n: 1, fields: [], topKeys: '', raw: '' };
+      NET.seen[clean] = rec;
+      NET.seenList.push(rec);
+      if (NET.seenList.length > 120) {
+        var drop = NET.seenList.shift();
+        if (drop) delete NET.seen[drop.url];
+      }
+      try {
+        var j = JSON.parse(text);
+        if (j && typeof j === 'object') {
+          var ks = [], k;
+          for (k in j) if (Object.prototype.hasOwnProperty.call(j, k)) ks.push(k);
+          rec.topKeys = ks.slice(0, 24).join(', ');
+          walkUnreadFields(j, '', rec.fields, 0);
+          rec.fields = uniq(rec.fields).slice(0, 12);
+        }
+      } catch (e) { rec.raw = '（不是 JSON）'; }
+    } catch (e2) { }
+  }
+
   function installNetHook() {
     if (NET.on) return;
     NET.on = true;
@@ -83,12 +141,18 @@
         try { url = typeof args[0] === 'string' ? args[0] : ((args[0] && args[0].url) || ''); } catch (e) { }
         var k = netKind(url);
         var p = F.apply(this, args);
-        if (!k || !p || typeof p.then !== 'function') return p;
+        if (!p || typeof p.then !== 'function') return p;
+        /* 非已知接口：扫描期间也抄一份（只在 wide 开着的时候，平时一行都不多跑） */
+        var maybeWide = !k && String(url).indexOf('/aweme/') >= 0;
+        if (!k && !maybeWide) return p;
         return p.then(function (r) {
           /* ★ 只 clone 不消费：原响应原样交还给抖音，它完全感觉不到我们 */
           try {
             if (r && r.ok && typeof r.clone === 'function') {
-              r.clone().text().then(function (t) { netPush(k, url, t); }).catch(function () { });
+              r.clone().text().then(function (t) {
+                if (k) netPush(k, url, t);
+                else if (NET.wide > Date.now()) netWideRecord(url, t);
+              }).catch(function () { });
             }
           } catch (e) { }
           return r;
@@ -109,10 +173,16 @@
       if (typeof se === 'function') {
         X.prototype.send = function () {
           var self = this, k = netKind(this.__dyUrl);
-          if (k) {
+          var maybeWide = !k && String(this.__dyUrl).indexOf('/aweme/') >= 0;
+          if (k || maybeWide) {
             try {
               this.addEventListener('load', function () {
-                try { if (self.status === 200) netPush(k, self.__dyUrl, self.responseText); } catch (e) { }
+                try {
+                  if (self.status === 200) {
+                    if (k) netPush(k, self.__dyUrl, self.responseText);
+                    else if (NET.wide > Date.now()) netWideRecord(self.__dyUrl, self.responseText);
+                  }
+                } catch (e) { }
               });
             } catch (e) { }
           }
@@ -131,8 +201,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 23:58 · 真机截图破案：网页版【确实】写着「N个作品未看」，路子是对的；但【正在直播的号，网页端这一行不写角标】（截图里「记忆宫殿宁梓亦」在直播、没有任何角标，而 App 里它是 5 个未看）—— 于是老规则「在侧栏里但没角标 = 官方 0 条」把直播号误判成了 0。★ 修法：新增直播行识别（行内文本或子元素含 live/直播），直播号无角标一律算【未知】，绝不报 0。★ 新增「📡 读全部账号的官方未读数」：一次把「我的关注」侧栏滚到底（388 个号），把每行抖音写的未读数全部抄下来落盘（全局快照 + 每号独立角标），整个面板按它更新 —— 不用再一个一个滚。★ 体检升级：把该号那一行的【原始 HTML 和原文】也抄出来，一眼看出角标/直播标记到底怎么写。'
-  var VER_SHORT = '10-03 23:58';
+  var VER = '2026-10-04 00:35 · 回答「除了角标还有没有别的办法拿到未读数」——先补上一个决定性盲点：以前只监听 4 个已知地址（follow/post/following/history），抖音只要用【任何一个别的接口】下发未读数，我们连记录都不会记录，这就是这个问题一直没答案的原因。★ 新增「🌐 扫描接口」：开启后 60 秒，把抖音给自己前端发的【每一个】/aweme/ 接口都记一笔（只留地址和它有没有未读类字段，不留全文），结束后自动出清单。体检报告新增【六】节：列出全部见到过的接口、请求次数、每个接口的顶层字段，以及哪几个【带未读类字段】——那些就是第二个数据源，可以不再依赖页面上那个角标（尤其能救「直播号网页端不写角标」的情况）。'
+  var VER_SHORT = '10-04 00:35';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -891,8 +961,16 @@
 
   /* 已捕获的网络响应里到底有没有「未读数」这个字段？顶层 key + 候选字段全列出来 */
   function netProbe() {
-    var out = { kinds: {}, topKeys: {}, fields: [], urls: [] };
+    var out = {
+      kinds: {}, topKeys: {}, fields: [], urls: [],
+      wide: { left: 0, list: [] }
+    };
     try {
+      out.wide.left = NET.wide > Date.now() ? Math.ceil((NET.wide - Date.now()) / 1000) : 0;
+      for (var m = 0; m < NET.seenList.length; m++) {
+        var rc = NET.seenList[m];
+        out.wide.list.push({ url: rc.url, n: rc.n, fields: rc.fields, topKeys: rc.topKeys, raw: rc.raw });
+      }
       for (var i = 0; i < NET.buf.length; i++) {
         var it = NET.buf[i];
         out.kinds[it.kind] = (out.kinds[it.kind] || 0) + 1;
@@ -1031,8 +1109,49 @@
     if (np.fields && np.fields.length) for (var f = 0; f < np.fields.length; f++) L.push('    · ' + np.fields[f]);
     if (np.urls && np.urls.length) { L.push('  最近请求:'); for (var u = 0; u < np.urls.length; u++) L.push('    - ' + np.urls[u]); }
     L.push('');
+    L.push('【六】★ 接口全扫描：抖音这段时间到底发了哪些接口（去重）');
+    var w = (np.wide) || {};
+    L.push('  扫描状态: ' + (w.left > 0 ? ('进行中，还剩 ' + w.left + ' 秒') : '未开始/已结束（点「🌐 扫描接口」开一次）'));
+    var lst = w.list || [];
+    L.push('  已看到 ' + lst.length + ' 个不同的 /aweme/ 接口');
+    if (!lst.length) {
+      L.push('  （还没有 —— 点「🌐 扫描接口」，然后去关注页上下滚 30 秒，再回来看）');
+    } else {
+      var hitN = 0, q;
+      for (q = 0; q < lst.length; q++) if (lst[q].fields && lst[q].fields.length) hitN++;
+      L.push('  ★ 其中【带未读类字段】的接口: ' + hitN + ' 个' +
+        (hitN ? ' ← 【这就是第二个数据源】，可以不再依赖页面上的角标' : ' ← 抖音给网页端的接口里没带未读数，那网页端只能靠角标'));
+      L.push('');
+      for (q = 0; q < lst.length; q++) {
+        L.push('  · ' + lst[q].url + '  (请求 ' + lst[q].n + ' 次)');
+        if (lst[q].raw) L.push('      ' + lst[q].raw);
+        if (lst[q].fields && lst[q].fields.length) {
+          for (var z = 0; z < lst[q].fields.length; z++) L.push('      ⭐ ' + lst[q].fields[z]);
+        }
+        if (lst[q].topKeys) L.push('      顶层: ' + lst[q].topKeys);
+      }
+    }
+    L.push('');
     L.push('（把上面这段整段复制发给我，我就能定位到底差在哪，不用再猜）');
     return L.join('\n');
+  }
+
+  /* ★ 开一次「接口全扫描」：这段时间里抖音发出的每一个 /aweme/ 接口都记下来。
+     目的只有一个 —— 查清除了页面上那个角标，抖音还有没有【别的地方】也下发未读数。 */
+  var NETSCAN_MS = 60000;
+  function startNetScan() {
+    NET.seen = {}; NET.seenList = [];
+    NET.wide = Date.now() + NETSCAN_MS;
+    toast('已开启扫描（60 秒）—— 现在去抖音「关注」页上下滚几屏，也可以点开一两个号，让抖音多请求几次', 6000);
+    setTimeout(function () {
+      NET.wide = 0;
+      var hit = 0, i;
+      try {
+        for (i = 0; i < NET.seenList.length; i++) if (NET.seenList[i].fields && NET.seenList[i].fields.length) hit++;
+      } catch (e) { }
+      toast('扫描结束：共看到 ' + NET.seenList.length + ' 个接口，其中 ' + hit + ' 个带未读类字段', 6000);
+      try { open('probe'); } catch (e2) { }
+    }, NETSCAN_MS + 1200);
   }
 
   function renderProbe(r) {
@@ -1056,6 +1175,10 @@
       'background:#fff8d0;color:#3d2f00;border:1px solid #e5cd7d;border-radius:10px;padding:10px">' + esc(txt) + '<\/textarea>';
     h += '<button class="dyh-btn primary" data-act="probe-copy">📋 复制体检结果（发给我）</button>';
     h += '<button class="dyh-btn" data-act="acc-probe" data-sec="' + esc(r._sec || '') + '" data-name="' + esc(r._name || '') + '">🔄 再体检一次</button>';
+    h += (NET.wide > Date.now())
+      ? '<div class="dyh-tip" style="color:#c8920a">🌐 接口扫描进行中…去抖音关注页上下滚几屏，60 秒后自动出结果。</div>'
+      : '<button class="dyh-btn" data-act="net-scan">🌐 扫描接口：抖音还有哪些接口带着未读数</button>';
+    h += '<div class="dyh-tip">🌐 扫描接口 = 开启 60 秒，把抖音给自己前端发的<b>每一个</b>接口都记下来，看有没有第二个地方也带着未读数（这个能回答「除了角标还有没有别的办法」）。</div>';
     h += '<div class="dyh-tip">先去抖音「关注」页往下滚几屏，让侧栏加载出一些账号，再体检 —— 信息会全很多。</div>';
     setBody(h);
   }
@@ -3240,6 +3363,9 @@
     /* ★ 23:30：未读数和 App 对不上时，先做这个 —— 把抖音网页端的原始证据抄出来，别再猜 */
     h += '<label class="dyh-lb">🩺 未读数字体检 / 一键读全部</label>';
     h += '<button class="dyh-btn" data-act="read-all-badges">📡 读全部账号的官方未读数（把侧栏滚到底）</button>';
+    h += (NET.wide > Date.now())
+      ? '<div class="dyh-tip" style="color:#c8920a">🌐 接口扫描进行中…现在去抖音关注页上下滚几屏，60 秒后自动出结果（可以先把面板收起）。</div>'
+      : '<button class="dyh-btn" data-act="net-scan">🌐 扫描接口：抖音还有哪些接口带着未读数</button>';
     h += '<button class="dyh-btn" data-act="probe">🩺 体检：抖音网页上到底写了什么</button>';
     h += '<div class="dyh-tip" style="margin-top:2px">未读数和抖音 App 对不上时用：<b>先去抖音「关注」页往下滚几屏</b>（让侧栏加载出一些账号），' +
       '再回来点它。它会把 ①网页上出现<b>几次</b>「N个作品未看」②<b>账号行原文</b>③抖音接口里<b>有没有未读字段</b> ' +
@@ -3802,6 +3928,7 @@
       return;
     }
     if (act === 'probe-copy') { copyProbeText(); return; }
+    if (act === 'net-scan') { startNetScan(); return; }
     /* ★ 23:55：一次把全部账号的官方未读数读下来（把侧栏滚到底） */
     if (act === 'read-all-badges') { readAllBadges(); return; }
     if (act === 'play') {
@@ -4089,6 +4216,9 @@
     sideProbe: sideProbe,
     netProbe: netProbe,
     probeText: probeText,
+    netCleanUrl: netCleanUrl,
+    netWideRecord: netWideRecord,
+    startNetScan: startNetScan,
     harvestFollowPage: harvestFollowPage,
     push: function () { return ghPush('unread.json', JSON.stringify(buildPayload()), '手机端更新 ' + fmtTime(Date.now())); },
     openPanel: function () { open('home'); }
