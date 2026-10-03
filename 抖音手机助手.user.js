@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 23:35 · 停止猜测，先把证据抓出来 + 修掉「读角标不等网络」的死穴：那个 16 不是抖音写的数，是我们【视频库里这个号的条数】。根因是读不到官方角标（readFollowUnreadDom 假设账号行一定是 <li>，抖音换了标签就一个都读不到），于是代码退化成「把该号全部视频当未读」。两处修：① 角标读取改为以【作者主页链接】为锚点、向上最多 6 层祖先里找「N个作品未看」，不再依赖 <li>；② 完全没有可信来源时（无官方角标、无未读边界）**不再拿视频库条数顶替未读数**，列表显示「需重读」、账号页说明「未读数还不知道」，宁可空着也不编数字
+// @version      2026-10-03 23:58 · 真机截图破案：网页版【确实】写着「N个作品未看」，路子是对的；但【正在直播的号，网页端这一行不写角标】（截图里「记忆宫殿宁梓亦」在直播、没有任何角标，而 App 里它是 5 个未看）—— 于是老规则「在侧栏里但没角标 = 官方 0 条」把直播号误判成了 0。★ 修法：新增直播行识别（行内文本或子元素含 live/直播），直播号无角标一律算【未知】，绝不报 0。★ 新增「📡 读全部账号的官方未读数」：一次把「我的关注」侧栏滚到底（388 个号），把每行抖音写的未读数全部抄下来落盘（全局快照 + 每号独立角标），整个面板按它更新 —— 不用再一个一个滚。★ 体检升级：把该号那一行的【原始 HTML 和原文】也抄出来，一眼看出角标/直播标记到底怎么写。
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -131,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 23:35 · 停止猜测，先把证据抓出来；同时修掉一个一直存在的死穴。★ 死穴：读官方角标的代码是【同步 for 循环】——滚一下立刻再读 DOM，网络根本没回来，等于同一帧连读十遍，这个号没露出来就永远读不到（「一直读到同一个数 / 一直读不到」就是这么来的）。现在改成 readBadgeWait：每滚一次真等 900ms，最多滚 20~22 次。★ 体检（新增）：连改 5 版都对不上，说明我们一直在猜抖音网页端到底写了什么。新增「🩺 体检」（账号页 + 设置页都能点），不改任何数据，只把原始证据抄出来：①网页全文里出现几次「N个作品未看」②含「未看/新作品」的原文行③账号行原文④抖音自己发的接口响应里有没有 unread 类字段（连路径一起列）。★ 关键判据：如果①是 0 次 → 说明抖音网页版根本不显示「N个作品未看」（那是 App 独有的），网页端永远读不到这个数，这才是和 App 对不上的真正根因，需要换数据源而不是继续改解析'
-  var VER_SHORT = '10-03 23:35';
+  var VER = '2026-10-03 23:58 · 真机截图破案：网页版【确实】写着「N个作品未看」，路子是对的；但【正在直播的号，网页端这一行不写角标】（截图里「记忆宫殿宁梓亦」在直播、没有任何角标，而 App 里它是 5 个未看）—— 于是老规则「在侧栏里但没角标 = 官方 0 条」把直播号误判成了 0。★ 修法：新增直播行识别（行内文本或子元素含 live/直播），直播号无角标一律算【未知】，绝不报 0。★ 新增「📡 读全部账号的官方未读数」：一次把「我的关注」侧栏滚到底（388 个号），把每行抖音写的未读数全部抄下来落盘（全局快照 + 每号独立角标），整个面板按它更新 —— 不用再一个一个滚。★ 体检升级：把该号那一行的【原始 HTML 和原文】也抄出来，一眼看出角标/直播标记到底怎么写。'
+  var VER_SHORT = '10-03 23:58';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -627,6 +627,11 @@
        所以「在列表里但没角标」= 官方明确 0 条，「压根不在列表里」= 还没读到（-1）。
        这两种必须分得开，否则会把「官方 0 条」误当成「没读到」。 */
     var secSeen = {}, nameSeen = {};
+    /* ★★ 23:55 真机截图发现的关键事实：**正在直播的号，网页端这一行【不写】「N个作品未看」**。
+       截图里「记忆宫殿宁梓亦」名字带红色直播标、后面没有任何角标，而 App 里它是「5个作品未看」。
+       所以「在侧栏里但没角标 = 官方 0 条」这条规则对【直播号】是错的 —— 它必须算「未知」，
+       否则会把 App 里有未读的直播号报成「0 条未读」。 */
+    var liveSeen = {};
     try {
       var t = document.body.innerText || '';
       var m = t.match(/我的关注\s*[（(]\s*(\d+)\s*[）)]/);
@@ -680,6 +685,21 @@
           var nm2 = (a2.getAttribute('title') || a2.getAttribute('aria-label') || a2.innerText || '')
             .replace(/认证徽章/g, '').replace(/\s+/g, ' ').trim();
           if (nm2 && nm2.length <= 50) nameSeen[normName(nm2)] = 1;
+          /* ★ 23:55：这一行是不是「正在直播」的号？是的话它的「N个作品未看」可能压根不显示 */
+          try {
+            var elL = a2, isLive = false;
+            for (var lv = 0; lv < 4 && elL; lv++) {
+              if (/直播/.test(elL.innerText || '')) { isLive = true; break; }
+              try {
+                if (elL.querySelector && elL.querySelector('[class*="live"],[class*="Live"],[class*="LIVE"]')) { isLive = true; break; }
+              } catch (e4) { }
+              elL = elL.parentElement;
+            }
+            if (isLive) {
+              if (sec2) liveSeen[sec2] = 1;
+              if (nm2) liveSeen[normName(nm2)] = 1;
+            }
+          } catch (e5) { }
           if (sec2 && secSeen[sec2]) continue;              /* 已在上面那轮读到过 */
           var el2 = a2, got = null;
           for (var up = 0; up < 6 && el2; up++) {
@@ -701,7 +721,7 @@
     } catch (e) { }
     return {
       secMap: secMap, nameMap: nameMap, map: secMap, byName: nameMap,
-      secSeen: secSeen, nameSeen: nameSeen,
+      secSeen: secSeen, nameSeen: nameSeen, liveSeen: liveSeen,
       total: total, liTotal: liTotal, rows: rows,
       unreadAcc: Object.keys(secMap).length
     };
@@ -927,6 +947,22 @@
         r.sec = String(sec).slice(0, 24) + '…';
         r.secBadge = (du.secMap && du.secMap[sec] != null) ? du.secMap[sec] : -1;
         r.secSeen = !!(du.secSeen && du.secSeen[sec]);
+        r.secLive = !!(du.liveSeen && du.liveSeen[sec]);
+        /* ★ 把该号那一行的【原始 HTML】抄下来（截断到 1200 字）——
+           一眼就能看出网页端把角标和「直播中」标记到底写在哪、写成什么样，不用再猜。 */
+        try {
+          var as3 = document.querySelectorAll('a[href*="/user/"]');
+          for (var q = 0; q < as3.length; q++) {
+            var hq = (as3[q].getAttribute('href') || '').match(/\/user\/([^\/?#]+)/);
+            if (!hq) continue;
+            if (decodeURIComponent(hq[1]).replace(/^@/, '') !== sec) continue;
+            var row = as3[q];
+            for (var u2 = 0; u2 < 3 && row.parentElement; u2++) row = row.parentElement;
+            r.rowText = String(row.innerText || '').replace(/\s+/g, ' ').slice(0, 220);
+            r.rowHtml = String(row.outerHTML || '').replace(/\s+/g, ' ').slice(0, 1200);
+            break;
+          }
+        } catch (e6) { }
       }
       if (name) {
         var nn = normName(name);
@@ -971,7 +1007,16 @@
       L.push('  这个号: ' + (r.name || r.sec));
       L.push('  按 secUid 读到角标: ' + r.secBadge + '（在侧栏里出现过: ' + (r.secSeen ? '是' : '否') + '）');
       L.push('  按昵称读到角标: ' + r.nameBadge + '（在侧栏里出现过: ' + (r.nameSeen ? '是' : '否') + '）');
-      L.push('  ★ -1 = 没读到。若「出现过=是」而角标=-1 → 抖音给它标的就是 0 条。');
+      L.push('  ★ 是否直播中（直播号网页端不写角标）: ' + (r.secLive ? '是 ← 网页端读不到它，属正常' : '否'));
+      L.push('  ★ -1 = 没读到。若「出现过=是」+「非直播」而角标=-1 → 抖音给它标的就是 0 条。');
+      if (r.rowText) {
+        L.push('');
+        L.push('【四之二】这个号那一行的原文（网页上真实长这样）');
+        L.push('  文本: ' + r.rowText);
+      }
+      if (r.rowHtml) {
+        L.push('  HTML: ' + r.rowHtml);
+      }
     }
     L.push('');
     L.push('【五】抖音自己发的接口响应里有没有未读字段');
@@ -1032,7 +1077,7 @@
   /* 【同步】读一次这个号旁边的官方角标：>=0 读到了（0 = 抖音标的就是 0 条），-1 = 这一帧没读到。
      注意「在侧栏里但没角标」和「压根不在侧栏里」要分开：前者是官方 0 条，后者是没读到。 */
   function readBadgeOnce(acc) {
-    var badge = -1, inSidebar = false;
+    var badge = -1, inSidebar = false, liveNoBadge = false;
     try {
       var side = readFollowUnreadDom();
       if (side.secMap && side.secMap[acc.secUserId] != null) badge = side.secMap[acc.secUserId];
@@ -1042,8 +1087,16 @@
       }
       if (badge < 0 && side.secSeen && side.secSeen[acc.secUserId]) inSidebar = true;
       else if (badge < 0 && side.nameSeen && acc.name && side.nameSeen[normName(acc.name)]) inSidebar = true;
-      if (badge < 0 && inSidebar) badge = 0;      // 在侧栏里但没角标 = 抖音标的就是 0
+      /* ★ 23:55：这行是不是「正在直播」的号？直播号网页端不写角标 → 没角标【不能】当 0 */
+      var isLive = false;
+      if (side.liveSeen) {
+        if (acc.secUserId && side.liveSeen[acc.secUserId]) isLive = true;
+        else if (acc.name && side.liveSeen[normName(acc.name)]) isLive = true;
+      }
+      if (badge < 0 && inSidebar && !isLive) badge = 0;   // 在侧栏里、非直播、又没角标 = 抖音标的就是 0
+      if (isLive) liveNoBadge = true;                     // 直播中：网页端读不到它，只能算「未知」
     } catch (e) { }
+    if (acc) acc._liveNoBadge = liveNoBadge;
     return badge;
   }
 
@@ -1072,6 +1125,49 @@
         try { scrollFollowSidebar(); } catch (e) { }
         setTimeout(tick, waitMs);
       })();
+    });
+  }
+
+  /* ★★ 23:55 新增：一次性把左侧「我的关注」列表滚到底，把抖音写的未读数【全部】读下来落盘。
+     为什么要批量：388 个关注里，单号去读往往要滚很多次才轮到它；批量滚一遍，
+     所有有未读的号一次全拿到（而且这个数就是网页端写出来的、与 App 同源）。
+     ⚠ 直播中的号网页端不写角标（真机截图已证实），这类号读不到 —— 会如实算「未知」，不会报成 0。 */
+  var SIDE_HARVEST_WAIT = 1100;
+  function readAllBadges() {
+    if (!onFollowPage()) {
+      S.pendingAllBadge = { at: Date.now() };
+      save();
+      toast('官方未读数只能在抖音「关注」页读到，正在带你去…');
+      setTimeout(function () { try { location.href = '/follow'; } catch (e) { location.reload(); } }, 600);
+      return Promise.resolve(-1);
+    }
+    setBody('<div class="dyh-back" data-act="manage">← 返回</div>' +
+      '<div class="dyh-prog" id="dyh-prog">📡 正在把左侧「我的关注」列表滚到底…<br>' +
+      '<span style="font-size:19px">把抖音写的「N个作品未看」全部读下来</span></div>');
+    return harvestFollowSidebar({
+      maxRounds: 80, wait: SIDE_HARVEST_WAIT,
+      onTick: function (p) {
+        var el = document.getElementById('dyh-prog');
+        if (el) el.innerHTML = '📡 正在读抖音写的未读数…<br><span style="font-size:19px">' +
+          '读到 <b>' + p.acc + '</b> 个号有未看 · 列表已加载 <b>' + p.liTotal + '</b> 行' +
+          (p.total > 0 ? ' · 关注共 <b>' + p.total + '</b> 个' : '') + '</span>';
+      }
+    }).then(function (best) {
+      var n = Object.keys(best.secMap || {}).length, k;
+      /* 落盘成全局侧栏快照（有效期 = SNAP_VALID_MS，过期一律不参与计算） */
+      S.domUnread = {
+        ts: Date.now(), map: best.secMap || {}, byName: best.nameMap || {},
+        rows: best.rows || 0, liTotal: best.liTotal || 0, total: best.total || -1, all: 1
+      };
+      /* 同时给每个读到的号写【独立角标】（各自带时间戳），单号页面优先用它 */
+      for (k in best.secMap) {
+        if (Object.prototype.hasOwnProperty.call(best.secMap, k)) S.accBadge[k] = { n: best.secMap[k], at: Date.now() };
+      }
+      save();
+      open('manage');
+      toast('读到 ' + n + ' 个号有未看' +
+        (best.total > 0 ? '（关注共 ' + best.total + ' 个 / 列表加载 ' + best.liTotal + ' 行）' : ''));
+      return n;
     });
   }
 
@@ -2499,6 +2595,13 @@
       h += '</div>';
     }
 
+    /* ★★ 23:55：「一次读全部」——单号去读要滚很多次才轮到它，这里一次性把侧栏滚到底，
+       把抖音写的未读数【全部】读下来（这个数与 App 同源，就是权威值）。 */
+    h += '<button class="dyh-btn primary" data-act="read-all-badges">📡 读全部账号的官方未读数</button>';
+    h += '<div class="dyh-tip" style="margin-top:2px">把抖音「关注」页左侧列表<b>滚到底</b>，每行写的「N个作品未看」<b>全部抄下来</b>，' +
+      '然后整个面板（未读列表 / 分类统计 / 首页未读总数）都按它更新。共 ' + S.accounts.length + ' 个号。<br>' +
+      '⚠️ <b>正在直播的号，网页端不写这个角标</b>（真机截图已确认）—— 这类号会如实标成「未知」，不会瞎报 0。</div>';
+
     /* ---- 搜索 ---- */
     h += '<input id="dyh-mgr-kw" class="dyh-input" placeholder="搜公众号名称（留空看全部）" value="' + esc(MGR.kw || '') + '">';
 
@@ -3135,7 +3238,8 @@
       '想更快 → 上限填 <b>8~10</b>；还是失败多 → 上限填 <b>3~4</b>（慢一点但几乎不失败）。<br>' +
       '全部 ' + S.accounts.length + ' 个账号：上限 6 大约 2~5 分钟，上限 3 大约 4~8 分钟。</div>';
     /* ★ 23:30：未读数和 App 对不上时，先做这个 —— 把抖音网页端的原始证据抄出来，别再猜 */
-    h += '<label class="dyh-lb">🩺 未读数字体检</label>';
+    h += '<label class="dyh-lb">🩺 未读数字体检 / 一键读全部</label>';
+    h += '<button class="dyh-btn" data-act="read-all-badges">📡 读全部账号的官方未读数（把侧栏滚到底）</button>';
     h += '<button class="dyh-btn" data-act="probe">🩺 体检：抖音网页上到底写了什么</button>';
     h += '<div class="dyh-tip" style="margin-top:2px">未读数和抖音 App 对不上时用：<b>先去抖音「关注」页往下滚几屏</b>（让侧栏加载出一些账号），' +
       '再回来点它。它会把 ①网页上出现<b>几次</b>「N个作品未看」②<b>账号行原文</b>③抖音接口里<b>有没有未读字段</b> ' +
@@ -3698,6 +3802,8 @@
       return;
     }
     if (act === 'probe-copy') { copyProbeText(); return; }
+    /* ★ 23:55：一次把全部账号的官方未读数读下来（把侧栏滚到底） */
+    if (act === 'read-all-badges') { readAllBadges(); return; }
     if (act === 'play') {
       var pid = el.getAttribute('data-id');
       openInApp(pid);          // 只唤起抖音 App；网页端不跳转、不开新标签
@@ -3906,6 +4012,13 @@
         }
       } else if (S.pendingAccBadge) { S.pendingAccBadge = null; save(); }
     } catch (e) { }
+    /* ★ 23:55：「读全部账号的官方未读数」被带到 /follow 之后自动续跑 */
+    try {
+      if (S.pendingAllBadge && Date.now() - S.pendingAllBadge.at < 180000) {
+        S.pendingAllBadge = null; save();
+        if (onFollowPage()) setTimeout(function () { try { readAllBadges(); } catch (e) { } }, 1500);
+      } else if (S.pendingAllBadge) { S.pendingAllBadge = null; save(); }
+    } catch (e) { }
     console.log('[抖音关注助手] 已加载。右下角 🎯 按钮打开面板。');
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
@@ -3968,6 +4081,14 @@
     onFollowPage: onFollowPage,
     scrollDown: scrollDown,
     readFollowUnreadDom: readFollowUnreadDom,
+    readBadgeOnce: readBadgeOnce,
+    readBadgeWait: readBadgeWait,
+    applyBadge: applyBadge,
+    readAllBadges: readAllBadges,
+    harvestFollowSidebar: harvestFollowSidebar,
+    sideProbe: sideProbe,
+    netProbe: netProbe,
+    probeText: probeText,
     harvestFollowPage: harvestFollowPage,
     push: function () { return ghPush('unread.json', JSON.stringify(buildPayload()), '手机端更新 ' + fmtTime(Date.now())); },
     openPanel: function () { open('home'); }
