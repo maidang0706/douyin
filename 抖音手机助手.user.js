@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-03 18:05 · 找到「16」的真正来源并修掉：那个 16 不是抖音写的数，是我们【视频库里这个号的条数】。根因是读不到官方角标（readFollowUnreadDom 假设账号行一定是 <li>，抖音换了标签就一个都读不到），于是代码退化成「把该号全部视频当未读」。两处修：① 角标读取改为以【作者主页链接】为锚点、向上最多 6 层祖先里找「N个作品未看」，不再依赖 <li>；② 完全没有可信来源时（无官方角标、无未读边界）**不再拿视频库条数顶替未读数**，列表显示「需重读」、账号页说明「未读数还不知道」，宁可空着也不编数字
+// @version      2026-10-03 23:35 · 停止猜测，先把证据抓出来 + 修掉「读角标不等网络」的死穴：那个 16 不是抖音写的数，是我们【视频库里这个号的条数】。根因是读不到官方角标（readFollowUnreadDom 假设账号行一定是 <li>，抖音换了标签就一个都读不到），于是代码退化成「把该号全部视频当未读」。两处修：① 角标读取改为以【作者主页链接】为锚点、向上最多 6 层祖先里找「N个作品未看」，不再依赖 <li>；② 完全没有可信来源时（无官方角标、无未读边界）**不再拿视频库条数顶替未读数**，列表显示「需重读」、账号页说明「未读数还不知道」，宁可空着也不编数字
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -131,8 +131,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-03 18:05 · 找到「16」的真正来源：它不是抖音写的数，是我们视频库里这个号的条数（真机截图里 App 写的是 5 个作品未看）。根因链：readFollowUnreadDom 假设「账号行」是 <li> → 抖音换了标签就一个角标都读不到 → 没有任何官方数字 → accUnread 退回「把该号的全部视频当未读」= 16。★ 修法：① 角标读取不再依赖 <li>，改为以「作者主页链接」为锚点向上最多 6 层找含「N个作品未看」的祖先，抖音用什么标签都能读到；② 完全没有可信来源时（无官方角标、无未读边界）accUnread 直接返回 0 并由 accUnreadUnknown 标记，列表显示「需重读」、账号页如实说明「未读数还不知道」—— 宁可空着也绝不拿视频库条数冒充未读数'
-  var VER_SHORT = '10-03 18:05';
+  var VER = '2026-10-03 23:35 · 停止猜测，先把证据抓出来；同时修掉一个一直存在的死穴。★ 死穴：读官方角标的代码是【同步 for 循环】——滚一下立刻再读 DOM，网络根本没回来，等于同一帧连读十遍，这个号没露出来就永远读不到（「一直读到同一个数 / 一直读不到」就是这么来的）。现在改成 readBadgeWait：每滚一次真等 900ms，最多滚 20~22 次。★ 体检（新增）：连改 5 版都对不上，说明我们一直在猜抖音网页端到底写了什么。新增「🩺 体检」（账号页 + 设置页都能点），不改任何数据，只把原始证据抄出来：①网页全文里出现几次「N个作品未看」②含「未看/新作品」的原文行③账号行原文④抖音自己发的接口响应里有没有 unread 类字段（连路径一起列）。★ 关键判据：如果①是 0 次 → 说明抖音网页版根本不显示「N个作品未看」（那是 App 独有的），网页端永远读不到这个数，这才是和 App 对不上的真正根因，需要换数据源而不是继续改解析'
+  var VER_SHORT = '10-03 23:35';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -841,6 +841,237 @@
         list: got, pages: pages, covered: covered, oldest: oldest,
         rounds: rounds, ms: Date.now() - t0
       };
+    });
+  }
+
+  /* ==========================================================================
+     ★★★ 未读数字「体检」（2026-10-03 23:30 新增）★★★
+     连着改了 5 版（16:05 / 16:28 / 17:25 / 18:05）都还是和 App 对不上，说明我们一直
+     在【猜】抖音网页端到底写了什么、写在哪、叫什么名字。猜是猜不出来的。
+     这一版先把【原始证据】抓出来：不加工、不推断 —— 抖音页面上写什么就原样抄什么，
+     接口响应里有哪些字段也连路径一起列出来。拿到证据再改，别再猜。
+     ========================================================================== */
+  var UNREAD_KEY_RE = /unread|not_?see|unsee|new_?aweme|new_?count|new_?item|not_?watch|unwatch|watch_?status|item_?status|is_?new/i;
+
+  /* 递归扫 JSON：把所有「看起来像未读数」的字段连路径一起列出来 */
+  function walkUnreadFields(node, path, out, depth) {
+    if (!node || depth > 8 || out.length > 80) return;
+    if (Object.prototype.toString.call(node) === '[object Array]') {
+      for (var i = 0; i < node.length && i < 3; i++) walkUnreadFields(node[i], path + '[' + i + ']', out, depth + 1);
+      return;
+    }
+    if (typeof node !== 'object') return;
+    for (var k in node) {
+      if (!Object.prototype.hasOwnProperty.call(node, k)) continue;
+      var v = node[k], p = path ? (path + '.' + k) : k;
+      if (typeof v === 'number' && UNREAD_KEY_RE.test(k)) { out.push(p + ' = ' + v); continue; }
+      if (v && typeof v === 'object') walkUnreadFields(v, p, out, depth + 1);
+    }
+  }
+
+  /* 已捕获的网络响应里到底有没有「未读数」这个字段？顶层 key + 候选字段全列出来 */
+  function netProbe() {
+    var out = { kinds: {}, topKeys: {}, fields: [], urls: [] };
+    try {
+      for (var i = 0; i < NET.buf.length; i++) {
+        var it = NET.buf[i];
+        out.kinds[it.kind] = (out.kinds[it.kind] || 0) + 1;
+        var u = String(it.url || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 120);
+        if (out.urls.length < 8) out.urls.push(it.kind + ' | ' + u);
+        var j = it.json || {}, ks = [], k;
+        for (k in j) if (Object.prototype.hasOwnProperty.call(j, k)) ks.push(k);
+        if (!out.topKeys[it.kind]) out.topKeys[it.kind] = ks.slice(0, 30).join(', ');
+        walkUnreadFields(j, '', out.fields, 0);
+      }
+      out.fields = uniq(out.fields).slice(0, 40);
+    } catch (e) { }
+    return out;
+  }
+
+  /* 把「抖音网页端现在到底显示着什么」原样抄下来（不加工、不推断） */
+  function sideProbe(sec, name) {
+    var r = { at: Date.now() };
+    try {
+      r.url = location.href;
+      r.path = location.pathname || '';
+      r.onFollow = onFollowPage();
+      var body = document.body ? (document.body.innerText || '') : '';
+      r.bodyLen = body.length;
+      r.hitsOfWenkan = (body.match(/\d+\s*个作品未看/g) || []).length;
+      r.hasOtherWord = (body.match(/\d+\s*(个)?(新作品|条新视频|个未看|条未看|个视频未看)/g) || []).slice(0, 10);
+      var frags = body.split('\n'), i;
+      r.frags = [];
+      for (i = 0; i < frags.length && r.frags.length < 20; i++) {
+        var t = (frags[i] || '').trim();
+        if (t && /未看|新作品|未观看/.test(t)) r.frags.push(t.slice(0, 70));
+      }
+      var as = document.querySelectorAll('a[href*="/user/"]');
+      r.userLinks = as.length;
+      r.rows = [];
+      for (i = 0; i < as.length && r.rows.length < 12; i++) {
+        var a = as[i], el = a, txt = '';
+        for (var up = 0; up < 5 && el; up++) {
+          var tt = (el.innerText || '').replace(/\s+/g, ' ').trim();
+          if (tt && tt.length > txt.length && tt.length < 200) txt = tt;
+          el = el.parentElement;
+        }
+        if (txt) r.rows.push(txt.slice(0, 90));
+      }
+      var m = body.match(/我的关注\s*[（(]\s*(\d+)\s*[）)]/);
+      r.myFollow = m ? parseInt(m[1], 10) : -1;
+      var du = readFollowUnreadDom();
+      r.badgeAcc = Object.keys(du.secMap || {}).length;
+      r.seenAcc = Object.keys(du.secSeen || {}).length;
+      r.liTotal = du.liTotal;
+      if (sec) {
+        r.sec = String(sec).slice(0, 24) + '…';
+        r.secBadge = (du.secMap && du.secMap[sec] != null) ? du.secMap[sec] : -1;
+        r.secSeen = !!(du.secSeen && du.secSeen[sec]);
+      }
+      if (name) {
+        var nn = normName(name);
+        r.name = name;
+        r.nameBadge = (du.nameMap && du.nameMap[name] != null) ? du.nameMap[name]
+          : ((du.nameMap && du.nameMap[nn] != null) ? du.nameMap[nn] : -1);
+        r.nameSeen = !!(du.nameSeen && du.nameSeen[nn]);
+      }
+      r.domUnreadAge = (S.domUnread && S.domUnread.ts) ? Math.round((Date.now() - S.domUnread.ts) / 60000) : null;
+      r.domUnreadAcc = (S.domUnread && S.domUnread.map) ? Object.keys(S.domUnread.map).length : 0;
+      r.net = netProbe();
+    } catch (e) { r.err = String((e && e.message) || e); }
+    return r;
+  }
+
+  /* 体检结果 → 一段可以直接发给我的纯文本 */
+  function probeText(r) {
+    var L = [];
+    L.push('== 抖音未读数字体检 ' + fmtTime(r.at) + ' ==');
+    L.push('当前页面: ' + r.path + (r.onFollow ? '  (是关注页)' : '  (★不是关注页！角标只在这里读得到)'));
+    L.push('脚本版本: ' + VER_SHORT);
+    L.push('');
+    L.push('【一】网页上有没有「N个作品未看」这几个字');
+    L.push('  页面全文里出现了 ' + (r.hitsOfWenkan || 0) + ' 次「N个作品未看」');
+    L.push('  其他类似说法: ' + ((r.hasOtherWord && r.hasOtherWord.length) ? r.hasOtherWord.join(' / ') : '（没有）'));
+    L.push('  ★ 如果上面是 0 次 → 抖音【网页版根本不显示这个角标】（那是 App 独有的），网页端无从读取，这才是和 App 对不上的根因。');
+    L.push('');
+    L.push('【二】页面原文里含「未看/新作品」的行（原样抄，最多 20 行）');
+    if (r.frags && r.frags.length) { for (var i = 0; i < r.frags.length; i++) L.push('  · ' + r.frags[i]); }
+    else L.push('  （一行都没有）');
+    L.push('');
+    L.push('【三】账号行原文（前 12 行，原样抄）');
+    if (r.rows && r.rows.length) { for (var j = 0; j < r.rows.length; j++) L.push('  · ' + r.rows[j]); }
+    else L.push('  （页面上没找到任何 /user/ 链接）');
+    L.push('');
+    L.push('【四】这次读到的情况');
+    L.push('  页面里 /user/ 链接数: ' + r.userLinks + '  「我的关注」总数: ' + r.myFollow);
+    L.push('  本轮读到角标的号: ' + r.badgeAcc + ' 个；侧栏里出现过的号: ' + r.seenAcc + ' 个；列表行数: ' + r.liTotal);
+    L.push('  之前存的全局快照: ' + r.domUnreadAcc + ' 个号' + (r.domUnreadAge != null ? '（' + r.domUnreadAge + ' 分钟前）' : '（无）'));
+    if (r.sec) {
+      L.push('  ---');
+      L.push('  这个号: ' + (r.name || r.sec));
+      L.push('  按 secUid 读到角标: ' + r.secBadge + '（在侧栏里出现过: ' + (r.secSeen ? '是' : '否') + '）');
+      L.push('  按昵称读到角标: ' + r.nameBadge + '（在侧栏里出现过: ' + (r.nameSeen ? '是' : '否') + '）');
+      L.push('  ★ -1 = 没读到。若「出现过=是」而角标=-1 → 抖音给它标的就是 0 条。');
+    }
+    L.push('');
+    L.push('【五】抖音自己发的接口响应里有没有未读字段');
+    var np = r.net || {};
+    var ks = [], k;
+    for (k in np.kinds) if (Object.prototype.hasOwnProperty.call(np.kinds, k)) ks.push(k + '×' + np.kinds[k]);
+    L.push('  已捕获响应: ' + (ks.length ? ks.join(', ') : '（还没捕获到 —— 先去关注页滚一滚再体检）'));
+    for (k in np.topKeys) if (Object.prototype.hasOwnProperty.call(np.topKeys, k)) {
+      L.push('  ' + k + ' 响应顶层字段: ' + np.topKeys[k]);
+    }
+    L.push('  候选未读字段: ' + ((np.fields && np.fields.length) ? '' : '（一个都没有）'));
+    if (np.fields && np.fields.length) for (var f = 0; f < np.fields.length; f++) L.push('    · ' + np.fields[f]);
+    if (np.urls && np.urls.length) { L.push('  最近请求:'); for (var u = 0; u < np.urls.length; u++) L.push('    - ' + np.urls[u]); }
+    L.push('');
+    L.push('（把上面这段整段复制发给我，我就能定位到底差在哪，不用再猜）');
+    return L.join('\n');
+  }
+
+  function renderProbe(r) {
+    var txt = probeText(r);
+    var ok = (r.hitsOfWenkan || 0) > 0;
+    var h = '<div class="dyh-back" data-act="accv">← 返回</div>';
+    h += '<div class="dyh-card"><div class="dyh-row"><b>体检结论</b><span class="dyh-hl">' +
+      (ok ? '网页上能读到「N个作品未看」（' + r.hitsOfWenkan + ' 处）' : '⚠️ 网页上【没有】「N个作品未看」') +
+      '</span></div>';
+    if (!ok) {
+      h += '<div class="dyh-tip" style="color:#f53f3f;margin:8px 0 0">' +
+        '<b>这很可能就是和 App 对不上的根因。</b>抖音网页版的关注页可能<b>根本不写</b>「N个作品未看」这个角标' +
+        '（那是 App 独有的显示），那我们在网页里就<b>永远读不到这个数</b> —— 不管怎么改解析都读不到。' +
+        '<br>请确认一件事：在手机浏览器里打开抖音关注页，看看账号列表里到底有没有「X个作品未看」这几个字。' +
+        '<br>如果确实没有 → 网页端这条路走不通，需要换数据源（我会按下面的接口字段另想办法）。</div>';
+    }
+    h += '<div class="dyh-row"><b>读到角标的号</b><span>' + r.badgeAcc + ' 个 / 侧栏出现 ' + r.seenAcc + ' 个</span></div>';
+    h += '<div class="dyh-row"><b>接口里的未读字段</b><span>' +
+      (((r.net && r.net.fields) ? r.net.fields.length : 0) + ' 个候选') + '</span></div></div>';
+    h += '<textarea id="dyh-probe-t" readonly style="width:100%;height:340px;font-size:16px;' +
+      'background:#fff8d0;color:#3d2f00;border:1px solid #e5cd7d;border-radius:10px;padding:10px">' + esc(txt) + '<\/textarea>';
+    h += '<button class="dyh-btn primary" data-act="probe-copy">📋 复制体检结果（发给我）</button>';
+    h += '<button class="dyh-btn" data-act="acc-probe" data-sec="' + esc(r._sec || '') + '" data-name="' + esc(r._name || '') + '">🔄 再体检一次</button>';
+    h += '<div class="dyh-tip">先去抖音「关注」页往下滚几屏，让侧栏加载出一些账号，再体检 —— 信息会全很多。</div>';
+    setBody(h);
+  }
+
+  function copyProbeText() {
+    var ta = document.getElementById('dyh-probe-t');
+    if (!ta) { toast('没有可复制的内容'); return; }
+    var t = ta.value || '';
+    var done = false;
+    try { ta.removeAttribute('readonly'); ta.select(); ta.setSelectionRange(0, t.length); done = document.execCommand('copy'); ta.setAttribute('readonly', 'readonly'); } catch (e) { }
+    if (!done && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(function () { toast('已复制，粘贴发给我即可'); },
+        function () { toast('复制失败，请长按上面的文本框手动全选复制'); });
+      return;
+    }
+    toast(done ? '已复制，粘贴发给我即可' : '复制失败，请长按上面的文本框手动全选复制');
+  }
+
+  /* 【同步】读一次这个号旁边的官方角标：>=0 读到了（0 = 抖音标的就是 0 条），-1 = 这一帧没读到。
+     注意「在侧栏里但没角标」和「压根不在侧栏里」要分开：前者是官方 0 条，后者是没读到。 */
+  function readBadgeOnce(acc) {
+    var badge = -1, inSidebar = false;
+    try {
+      var side = readFollowUnreadDom();
+      if (side.secMap && side.secMap[acc.secUserId] != null) badge = side.secMap[acc.secUserId];
+      else if (side.nameMap && acc.name) {
+        if (side.nameMap[acc.name] != null) badge = side.nameMap[acc.name];
+        else if (side.nameMap[normName(acc.name)] != null) badge = side.nameMap[normName(acc.name)];
+      }
+      if (badge < 0 && side.secSeen && side.secSeen[acc.secUserId]) inSidebar = true;
+      else if (badge < 0 && side.nameSeen && acc.name && side.nameSeen[normName(acc.name)]) inSidebar = true;
+      if (badge < 0 && inSidebar) badge = 0;      // 在侧栏里但没角标 = 抖音标的就是 0
+    } catch (e) { }
+    return badge;
+  }
+
+  /* 把读到的官方角标落盘（单号独立记录 + 给页面显示的数字） */
+  function applyBadge(acc, badge) {
+    if (!acc || !acc.secUserId || badge == null || badge < 0) return false;
+    var cur = S.accBadge[acc.secUserId];
+    if (cur && cur.n === badge && Date.now() - cur.at < 20000) return false;
+    S.accBadge[acc.secUserId] = { n: badge, at: Date.now() };
+    return true;
+  }
+
+  /* ★ 23:30 修：读官方角标必须【真等】。
+     以前是同步 for 循环 —— 滚一下立刻再读 DOM，网络还没回来就读，等于同一帧读了十遍，
+     这个号没露出来就永远读不到（这就是「一直读到同一个数 / 一直读不到」的原因）。
+     现在每滚一次真等 900ms，最多滚 rounds 次。 */
+  function readBadgeWait(acc, rounds, waitMs) {
+    rounds = rounds || 20; waitMs = waitMs || 900;
+    var round = 0;
+    return new Promise(function (res) {
+      (function tick() {
+        var badge = readBadgeOnce(acc);
+        if (badge >= 0) return res(badge);
+        if (round >= rounds) return res(-1);
+        round++;
+        try { scrollFollowSidebar(); } catch (e) { }
+        setTimeout(tick, waitMs);
+      })();
     });
   }
 
@@ -2586,6 +2817,10 @@
     /* ★ 17:00：即使当前就在关注页、也强制重读一次官方数字（清掉旧快照，不再拿旧数糊弄你） */
     h += '<button class="dyh-btn" data-act="acc-badge" data-sec="' + esc(sec) + '" data-name="' + esc(name) + '">' +
       '🔄 只重读抖音官方的未读数字</button>';
+    /* ★ 23:30：改了 5 版都对不上 → 先把抖音网页端到底写了什么【原样抄出来】再看。
+       点它会输出：网页上出现几次「N个作品未看」、账号行原文、接口里有没有未读字段。 */
+    h += '<button class="dyh-btn" data-act="acc-probe" data-sec="' + esc(sec) + '" data-name="' + esc(name) + '">' +
+      '🩺 体检：抖音网页上到底写了什么</button>';
     h += '<div class="dyh-tip" style="margin:0 0 10px">只抓<b>这一个号</b>：读它的作品 + 读你的<b>抖音已看记录</b>，' +
       '算出抖音 App 里那个「N个作品未看」的<b>数量</b>，并列出对应的<b>未读视频</b>。' +
       '结果直接写进本机数据，<b>整个面板（未读列表、分类、首页未读总数）都会按它更新</b>。</div>';
@@ -2681,18 +2916,21 @@
     setBody('<div class="dyh-back" data-act="accv">← 返回</div>' +
       '<div class="dyh-prog" id="dyh-prog">🔎 正在读抖音官方的未读数字…<br>' +
       '<span style="font-size:19px">「' + esc(who) + '」旁边写的「N个作品未看」</span></div>');
-    return new Promise(function (res) {
-      var badge = -1, inSidebar = false, round = 0;
-      (function tick() {
-        var side = readFollowUnreadDom();
-        if (side.secMap && side.secMap[acc.secUserId] != null) badge = side.secMap[acc.secUserId];
-        else if (side.nameMap) {
-          if (side.nameMap[acc.name] != null) badge = side.nameMap[acc.name];
-          else if (side.nameMap[normName(acc.name)] != null) badge = side.nameMap[normName(acc.name)];
-        }
-        if (badge < 0 && side.secSeen && side.secSeen[acc.secUserId]) inSidebar = true;
-        if (badge < 0 && inSidebar) badge = 0;
-        if (badge < 0 && round < 12) { round++; scrollFollowSidebar(); return setTimeout(tick, 350); }
+    /* ★ 23:30：也换成 readBadgeWait（每滚一次真等 900ms）。
+       以前是 350ms × 12 轮 —— 侧栏懒加载一轮网络往返都不止 350ms，等于白滚。
+       ★ 同样先【同步读一次】：页面上已经有这个号时立刻就有结果。 */
+    var b0 = readBadgeOnce(acc);
+    if (b0 >= 0) {
+      applyBadge(acc, b0);
+      S.accUnreadN[acc.secUserId] = {
+        n: b0, at: Date.now(), source: 'badge', noBoundary: false,
+        got: (function () { var c = 0, v; for (v = 0; v < S.videos.length; v++) if (S.videos[v].secUid === acc.secUserId) c++; return c; })()
+      };
+      save();
+    }
+    return readBadgeWait(acc, 22, 900).then(function (badge) {
+      if (badge < 0 && b0 >= 0) badge = b0;
+      (function () {
         if (badge >= 0) {
           S.accBadge[acc.secUserId] = { n: badge, at: Date.now() };
           S.accUnreadN[acc.secUserId] = {
@@ -2701,10 +2939,10 @@
           };
           save();
         }
-        open('accv');
-        toast(badge >= 0 ? ('抖音官方写的是：' + badge + ' 条未看') : '还是没读到（这个号在侧栏里没露出来）');
-        res(badge);
       })();
+      open('accv');
+      toast(badge >= 0 ? ('抖音官方写的是：' + badge + ' 条未看') : '还是没读到（点「🩺 体检」看看网页到底有没有这个角标）');
+      return badge;
     });
   }
 
@@ -2739,25 +2977,15 @@
     }
     /* ① 先把这个号旁边的官方角标读下来（多滚几轮，确保它在侧栏里露出来） */
     prog('🔎 正在读抖音官方的未读数字…', '「' + esc(who) + '」旁边写的「N个作品未看」');
-    var badge = -1, inSidebar = false;
-    try {
-      for (var round = 0; round < 10 && badge < 0; round++) {
-        var side = readFollowUnreadDom();
-        if (side.secMap && side.secMap[acc.secUserId] != null) badge = side.secMap[acc.secUserId];
-        else if (side.nameMap) {
-          if (side.nameMap[acc.name] != null) badge = side.nameMap[acc.name];
-          else if (side.nameMap[normName(acc.name)] != null) badge = side.nameMap[normName(acc.name)];
-        }
-        /* ★ 抖音对 0 未读的号不写角标 → 「在侧栏里但没角标」= 官方明确 0 条 */
-        if (badge < 0 && side.secSeen) {
-          if (side.secSeen[acc.secUserId]) inSidebar = true;
-          else if (side.nameSeen && acc.name && side.nameSeen[normName(acc.name)]) inSidebar = true;
-        }
-        if (badge < 0 && inSidebar) { badge = 0; break; }
-        if (badge < 0) scrollFollowSidebar();
-      }
-    } catch (e) { }
-    if (badge >= 0) S.accBadge[acc.secUserId] = { n: badge, at: Date.now() };
+    /* ★ 23:30：改成 readBadgeWait —— 每滚一次【真等】900ms 让网络把下一屏账号送回来。
+       以前那份是同步 for 循环：滚一下立刻再读 DOM，网络根本没回来，等于同一帧读了十遍，
+       这个号没露出来就永远读不到（「一直读到同一个数 / 一直读不到」就是这么来的）。
+       ★ 另外先【同步读一次】：页面上已经有这个号时就不用白等 18 秒。 */
+    var badge0 = readBadgeOnce(acc);
+    if (badge0 >= 0) applyBadge(acc, badge0);
+    return readBadgeWait(acc, 20, 900).then(function (badge) {
+    if (badge < 0 && badge0 >= 0) badge = badge0;
+    if (badge >= 0) applyBadge(acc, badge);
 
     /* ② 抓这个号的作品，用来列出「最新 N 条」那些视频 */
     prog('📡 正在抓「' + esc(who) + '」的作品…', '用来列出未读清单');
@@ -2817,6 +3045,7 @@
           '<button class="dyh-btn" data-act="accv">← 返回这个号</button>');
         return 0;
       });
+    });   /* ← readBadgeWait().then(...) 收口 */
   }
 
   /* 唤起抖音 App 打开视频详情页（10-03 00:50 重写）
@@ -2905,6 +3134,13 @@
       '一旦连续失败或看到风控提示，立刻砍半并冷却，绝不会把整轮搞崩。<br>' +
       '想更快 → 上限填 <b>8~10</b>；还是失败多 → 上限填 <b>3~4</b>（慢一点但几乎不失败）。<br>' +
       '全部 ' + S.accounts.length + ' 个账号：上限 6 大约 2~5 分钟，上限 3 大约 4~8 分钟。</div>';
+    /* ★ 23:30：未读数和 App 对不上时，先做这个 —— 把抖音网页端的原始证据抄出来，别再猜 */
+    h += '<label class="dyh-lb">🩺 未读数字体检</label>';
+    h += '<button class="dyh-btn" data-act="probe">🩺 体检：抖音网页上到底写了什么</button>';
+    h += '<div class="dyh-tip" style="margin-top:2px">未读数和抖音 App 对不上时用：<b>先去抖音「关注」页往下滚几屏</b>（让侧栏加载出一些账号），' +
+      '再回来点它。它会把 ①网页上出现<b>几次</b>「N个作品未看」②<b>账号行原文</b>③抖音接口里<b>有没有未读字段</b> ' +
+      '原样抄出来，一键复制。<br><b>如果①是 0 次 → 说明抖音网页版根本不显示这个角标</b>（那是 App 独有的），' +
+      '网页端就永远读不到这个数，这才是和 App 对不上的根因。</div>';
     h += '<button class="dyh-btn primary" data-act="save-settings">💾 保存</button>';
     /* 皮肤自检：直接把浏览器【实际算出来】的底色打印出来。
        如果这里显示的是白色/透明，说明有别的东西（旧脚本的样式表 / Via 的夜间模式）在压我们 ——
@@ -3453,6 +3689,15 @@
       readAccBadgeOnly(el.getAttribute('data-sec') || '', el.getAttribute('data-name') || '');
       return;
     }
+    /* ★ 23:30 体检：不改任何数据，只把抖音网页端现在显示的东西原样抄出来 */
+    if (act === 'acc-probe' || act === 'probe') {
+      var ps = el.getAttribute('data-sec') || '', pn = el.getAttribute('data-name') || '';
+      var pr = sideProbe(ps, pn);
+      pr._sec = ps; pr._name = pn;
+      renderProbe(pr);
+      return;
+    }
+    if (act === 'probe-copy') { copyProbeText(); return; }
     if (act === 'play') {
       var pid = el.getAttribute('data-id');
       openInApp(pid);          // 只唤起抖音 App；网页端不跳转、不开新标签
