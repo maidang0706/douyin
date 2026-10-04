@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-04 23:12 · ★★ 你说得对：读完了就该【全站更新】，以前只更新了一半。病根：unreadVideosOf()（每个号点进去看到的「未读视频清单」）完全没用抖音接口给的 not_seen_item_id_list —— 那份含「具体哪几条没看」的数据读完就只是存起来当个数量用，清单还按本机边界猜。于是出现「数字对上了，点进去看到的还是老视频」。★ 新增 applyApiUnreadAll()：读完一次性把三样东西落到【每一个账号】上 —— ① 数量（抖音接口给的 N，含明确 0）；② 清单（按接口给的未看视频 id 取，本机被误记成「已看」的一律撤回——抖音说没看就是没看）；③ 已看边界 accCursor（划在「抖音说已看的最后一条」上，接口数据过期后本机兜底也不跑偏）。★ 读完不再直接跳列表，先给一张汇总：读到几个号 / 合计几条未读 / 本机有明细几条 / 还差几条详情 + 「去抓缺的 N 条」按钮（数量立刻全站生效，缺的详情跑一轮抓取补齐）。★ 列表页新增「🔌 上次读接口」凭据卡（多久前读的、几个号、合计几条、其中几条有详情），账号详情页新增「🔌 抖音接口给的」卡片 + 对账里把接口列为最优先来源。★ 接口数据 12 小时有效期，过期即失效（绝不让昨天的数压着今天显示）。
+// @version      2026-10-05 00:15 · 你说得对：不该去「看页面上写了什么字」，那份数据抖音自己一定【存着】—— 直接去它存放的地方读。★ 我扒了抖音 bundle，里面出现 __REACT_DEVTOOLS_GLOBAL_HOOK__ / react-dom → 抖音 PC 网页端就是 React。接口回来的整份账号数据会被塞进组件的 props 和 useState 的 hook 链（fiber.memoizedProps / memoizedState），页面上那行「N个作品未看」只是这份数据【渲染出来的一个字】。★ 新增「🧬 从网页内存直接读」：顺着 DOM 元素上的 __reactFiber$ 找到 fiber，往上翻 props、往下扫 hook 链，把抖音存着的对象整份抄出来 —— 全程不看任何文字、不依赖标签名、不受界面规则影响。比读角标强在四处：① 直播号页面上不写角标，内存里照样有；② 虚拟滚动已经回收掉的行，只要抖音没丢弃就还读得到；③ 不用等它渲染成文字；④ 拿到的是 not_seen_item_id_list（具体哪几条），不只是个数。★ 读完同样走 applyApiUnreadAll：数量 + 未读视频清单 + 已看边界，一次性落到每一个账号。★ 体检新增【七】节：把内存里扫到几个 fiber、几个对象、找到几个带未读数据的账号、认到的是哪个字段，原样抄出来 —— 一眼确认抖音到底把数据存在哪。
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -241,8 +241,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-04 23:12 · ★★ 你说得对：读完了就该【全站更新】，以前只更新了一半。病根：unreadVideosOf()（每个号点进去看到的「未读视频清单」）完全没用抖音接口给的 not_seen_item_id_list —— 那份含「具体哪几条没看」的数据读完就只是存起来当个数量用，清单还按本机边界猜。于是出现「数字对上了，点进去看到的还是老视频」。★ 新增 applyApiUnreadAll()：读完一次性把三样东西落到【每一个账号】上 —— ① 数量（抖音接口给的 N，含明确 0）；② 清单（按接口给的未看视频 id 取，本机被误记成「已看」的一律撤回——抖音说没看就是没看）；③ 已看边界 accCursor（划在「抖音说已看的最后一条」上，接口数据过期后本机兜底也不跑偏）。★ 读完不再直接跳列表，先给一张汇总：读到几个号 / 合计几条未读 / 本机有明细几条 / 还差几条详情 + 「去抓缺的 N 条」按钮（数量立刻全站生效，缺的详情跑一轮抓取补齐）。★ 列表页新增「🔌 上次读接口」凭据卡（多久前读的、几个号、合计几条、其中几条有详情），账号详情页新增「🔌 抖音接口给的」卡片 + 对账里把接口列为最优先来源。★ 接口数据 12 小时有效期，过期即失效（绝不让昨天的数压着今天显示）。'
-  var VER_SHORT = '10-04 23:12';
+  var VER = '2026-10-05 00:15 · 你说得对：不该去「看页面上写了什么字」，那份数据抖音自己一定【存着】—— 直接去它存放的地方读。★ 我扒了抖音 bundle，里面出现 __REACT_DEVTOOLS_GLOBAL_HOOK__ / react-dom → 抖音 PC 网页端就是 React。接口回来的整份账号数据会被塞进组件的 props 和 useState 的 hook 链（fiber.memoizedProps / memoizedState），页面上那行「N个作品未看」只是这份数据【渲染出来的一个字】。★ 新增「🧬 从网页内存直接读」：顺着 DOM 元素上的 __reactFiber$ 找到 fiber，往上翻 props、往下扫 hook 链，把抖音存着的对象整份抄出来 —— 全程不看任何文字、不依赖标签名、不受界面规则影响。比读角标强在四处：① 直播号页面上不写角标，内存里照样有；② 虚拟滚动已经回收掉的行，只要抖音没丢弃就还读得到；③ 不用等它渲染成文字；④ 拿到的是 not_seen_item_id_list（具体哪几条），不只是个数。★ 读完同样走 applyApiUnreadAll：数量 + 未读视频清单 + 已看边界，一次性落到每一个账号。★ 体检新增【七】节：把内存里扫到几个 fiber、几个对象、找到几个带未读数据的账号、认到的是哪个字段，原样抄出来 —— 一眼确认抖音到底把数据存在哪。'
+  var VER_SHORT = '10-05 00:15';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1037,6 +1037,221 @@
 
   /* 让抖音自己去翻关注列表（滚侧栏触发它发请求），我们一路收响应里的未读 id 列表。
      ★ 注意：我们【一个请求都不自己发】（自签必 403），全程只听抖音前端自己的响应。 */
+  /* ===================================================================
+     ★★★ 00:15 · 直接读【抖音网页端存放这份数据的地方】—— React 内存状态 ★★★
+
+     你问得对：不该去"看页面上写了什么字"。那份数据抖音自己一定【存着】。
+     我扒了它的 bundle，里面出现 __REACT_DEVTOOLS_GLOBAL_HOOK__ / react-dom
+     → 抖音 PC 网页端就是 React。那么接口回来的整份账号数据，会被塞进
+       组件 props / useState 的 hook 链（fiber.memoizedProps / memoizedState），
+     页面上那行「N个作品未看」只是这份数据【渲染出来的一个字】。
+
+     所以直接从 fiber 树里把对象取出来，绕开所有渲染层：
+       ① 直播号页面上不写角标 → 内存里照样有（不受界面规则限制）；
+       ② 虚拟滚动已经回收掉的行 → 只要抖音没丢弃，内存里还在；
+       ③ 不用等它渲染成文字，也不用猜文案格式/标签名；
+       ④ 拿到的不是「一个数字」，是那条 not_seen_item_id_list（具体哪几条）。
+     =================================================================== */
+  var FIBER_MAX = 80000;        /* 最多扫多少个 fiber 节点（防卡死） */
+  var FIBER_OBJ_MAX = 150000;   /* 最多扫多少个内部对象 */
+  var FIBER_DEPTH = 8;          /* 对象递归深度 */
+  var FIBER_SKIP_KEYS = {
+    alternate: 1, return: 1, stateNode: 1, _owner: 1, _store: 1,
+    parentElement: 1, parentNode: 1, ownerDocument: 1, nextSibling: 1, previousSibling: 1
+  };
+
+  /* React 会把 fiber 挂在 DOM 元素上：__reactFiber$<随机> / __reactContainer$<随机> */
+  function fiberOf(el) {
+    if (!el || typeof el !== 'object') return null;
+    try {
+      var ks = Object.keys(el), i;
+      for (i = 0; i < ks.length; i++) {
+        var k = ks[i];
+        if (k.indexOf('__reactFiber$') === 0 || k.indexOf('__reactInternalInstance$') === 0 ||
+          k.indexOf('__reactContainer$') === 0) {
+          if (el[k] && typeof el[k] === 'object') return el[k];
+        }
+      }
+    } catch (e) { }
+    return null;
+  }
+  function fiberRootOf(el) {
+    var f = fiberOf(el);
+    if (!f) return null;
+    var g = 0;
+    while (f && f.return && g++ < 800) f = f.return;
+    return f || null;
+  }
+
+  /* 从一个账号对象里取「未看作品」—— 认抖音自己的字段名（snake_case 原始 + camelCase 已映射） */
+  function userUnreadFromObj(o) {
+    if (!o || typeof o !== 'object') return null;
+    var sec = o.sec_uid || o.secUid || o.sec_user_id;
+    if (!sec || typeof sec !== 'string' || sec.length < 4) return null;
+    var ids = null, src = '', i;
+    var KEYS = ['not_seen_item_id_list_v2', 'not_seen_item_id_list', 'not_seen_item_id_list_v1',
+      'notSeenItemList', 'notSeenItemIdList'];
+    for (i = 0; i < KEYS.length; i++) {
+      var v = o[KEYS[i]];
+      if (Object.prototype.toString.call(v) === '[object Array]') { ids = v; src = KEYS[i]; break; }
+    }
+    var n = ids ? ids.length : -1;
+    if (n < 0) {
+      var c = (o.user_not_see != null) ? o.user_not_see : ((o.userNotSee != null) ? o.userNotSee : null);
+      if (c != null) { var ci = parseInt(c, 10); if (!isNaN(ci)) { n = ci; src = 'user_not_see'; } }
+    }
+    if (n < 0) return null;
+    var out = [];
+    if (ids) { for (i = 0; i < ids.length; i++) out.push(String(ids[i])); }
+    return {
+      sec: String(sec), nickname: String(o.nickname || o.remark_name || o.remarkName || ''),
+      ids: out, n: n, src: src
+    };
+  }
+
+  /* 在一个任意对象里递归找「含未读数据的账号对象」 */
+  function deepFindUsers(v, depth, out, stats) {
+    if (!v || typeof v !== 'object') return;
+    if (depth > FIBER_DEPTH) return;
+    if (stats.n > FIBER_OBJ_MAX) return;
+    stats.n++;
+    if (Object.prototype.toString.call(v) === '[object Array]') {
+      var lim = Math.min(v.length, 3000), i;
+      for (i = 0; i < lim; i++) {
+        var u = v[i];
+        if (!u || typeof u !== 'object') continue;
+        var r = userUnreadFromObj(u);
+        if (r) { out.push(r); continue; }
+        deepFindUsers(u, depth + 1, out, stats);
+      }
+      return;
+    }
+    var r0 = userUnreadFromObj(v);
+    if (r0) { out.push(r0); return; }
+    for (var k in v) {
+      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+      if (FIBER_SKIP_KEYS[k]) continue;
+      var vv;
+      try { vv = v[k]; } catch (e) { continue; }
+      if (vv && typeof vv === 'object') deepFindUsers(vv, depth + 1, out, stats);
+    }
+  }
+
+  /* 一个 fiber 节点上可能挂数据的地方：props + hooks 链 */
+  function scanFiberNode(f, out, stats) {
+    if (!f || typeof f !== 'object') return;
+    var paths = ['memoizedProps', 'pendingProps', 'memoizedState'], i;
+    for (i = 0; i < paths.length; i++) {
+      try {
+        var v = f[paths[i]];
+        if (v && typeof v === 'object') deepFindUsers(v, 0, out, stats);
+      } catch (e) { }
+    }
+    /* useState 的 hook 链：{ memoizedState, next } 一路 next */
+    try {
+      var h = f.memoizedState, g = 0;
+      while (h && typeof h === 'object' && g++ < 300) {
+        if (h.memoizedState && typeof h.memoizedState === 'object') deepFindUsers(h.memoizedState, 0, out, stats);
+        h = h.next;
+        if (stats.n > FIBER_OBJ_MAX) break;
+      }
+    } catch (e) { }
+  }
+
+  /* 从根扫整棵 fiber 树（能捞到已经滚出屏幕、DOM 里回收掉的数据） */
+  function walkFiberTree(root, out, stats) {
+    if (!root) return 0;
+    var stack = [root], n = 0;
+    while (stack.length) {
+      var f = stack.pop();
+      if (!f || typeof f !== 'object') continue;
+      if (++n > FIBER_MAX) break;
+      stats.fibers++;
+      scanFiberNode(f, out, stats);
+      if (stats.n > FIBER_OBJ_MAX) break;
+      if (f.child) stack.push(f.child);
+      if (f.sibling) stack.push(f.sibling);
+    }
+    return n;
+  }
+
+  function mergeUnreadMap(acc, got) {
+    if (!got) return acc;
+    var k;
+    if (got.users > acc.users) acc.users = got.users;
+    for (k in got.map) {
+      if (!Object.prototype.hasOwnProperty.call(got.map, k)) continue;
+      var nv = got.map[k], ov = acc.map[k];
+      if (!ov || nv.n > ov.n || (nv.n === ov.n && (nv.ids || []).length > (ov.ids || []).length)) acc.map[k] = nv;
+    }
+    for (k in got.byName) {
+      if (!Object.prototype.hasOwnProperty.call(got.byName, k)) continue;
+      if (acc.byName[k] == null || got.byName[k] > acc.byName[k]) acc.byName[k] = got.byName[k];
+    }
+    acc.got = Object.keys(acc.map).length;
+    return acc;
+  }
+
+  /* ★ 从 React 内存里读所有账号的未读数据（quick=只走"每一行往上反查"的快路径） */
+  function collectFiberUnread(opts) {
+    opts = opts || {};
+    var out = [], stats = { n: 0, fibers: 0 }, i;
+    try {
+      var as = document.querySelectorAll('a[href*="/user/"]');
+      var lim = Math.min(as.length, 500);
+      /* —— 快路径：每个作者链接往上反查 16 层，把它那一行的 props 翻出来 —— */
+      for (i = 0; i < lim; i++) {
+        var f = fiberOf(as[i]);
+        if (!f) continue;
+        var g = f, d = 0;
+        while (g && d < 16 && stats.n < FIBER_OBJ_MAX) {
+          stats.fibers++;
+          scanFiberNode(g, out, stats);
+          g = g.return; d++;
+        }
+      }
+      /* —— 全量路径：从 React 根扫整棵树（虚拟滚动回收掉的也在这儿） —— */
+      if (!opts.quick) {
+        var roots = [], seen = [];
+        var step = Math.max(1, Math.floor(lim / 6));
+        for (i = 0; i < lim; i += step) {
+          var r0 = fiberRootOf(as[i]);
+          if (r0 && seen.indexOf(r0) < 0) { seen.push(r0); roots.push(r0); }
+        }
+        if (!roots.length) {
+          var c = null;
+          try { c = document.getElementById('root') || document.getElementById('app') || (document.body && document.body.firstElementChild); } catch (e) { }
+          var r1 = fiberRootOf(c);
+          if (r1) roots.push(r1);
+        }
+        for (i = 0; i < roots.length && stats.n < FIBER_OBJ_MAX; i++) walkFiberTree(roots[i], out, stats);
+      }
+    } catch (e) { }
+
+    var map = {}, byName = {};
+    for (i = 0; i < out.length; i++) {
+      var it = out[i];
+      if (!it || !it.sec) continue;
+      var ov = map[it.sec];
+      if (!ov || it.n > ov.n || (it.n === ov.n && it.ids.length > ov.ids.length)) map[it.sec] = it;
+      if (it.nickname) {
+        var nb = normName(it.nickname);
+        if (byName[nb] == null || it.n > byName[nb]) byName[nb] = it.n;
+      }
+    }
+    return {
+      map: map, byName: byName, users: Object.keys(map).length,
+      fibers: stats.fibers, objs: stats.n, found: out.length,
+      srcs: uniqSrcs(out)
+    };
+  }
+  function uniqSrcs(list) {
+    var m = {}, a = [], i;
+    for (i = 0; i < list.length; i++) if (list[i] && list[i].src) m[list[i].src] = (m[list[i].src] || 0) + 1;
+    for (var k in m) a.push(k + '×' + m[k]);
+    return a;
+  }
+
   function harvestApiUnread(opts) {
     opts = opts || {};
     var acc = { map: {}, byName: {}, got: 0, users: 0, rounds: 0 };
@@ -1483,6 +1698,27 @@
         }
       }
     }
+    /* ★【七】直接抄「抖音把数据存在内存的什么地方」—— 这是最该先看的一节 */
+    L.push('【七】★★ 网页内存（React 状态）里到底存着什么');
+    try {
+      var fr = collectFiberUnread({});
+      L.push('  扫过 fiber 节点: ' + fr.fibers + ' 个 · 扫过内部对象: ' + fr.objs + ' 个');
+      L.push('  ★ 找到带未读数据的账号对象: ' + fr.users + ' 个（命中 ' + fr.found + ' 次）');
+      if (fr.srcs && fr.srcs.length) L.push('  认到的未读字段: ' + fr.srcs.join('、'));
+      if (!fr.users) {
+        L.push('  ❌ 一个都没找到 —— 说明这份数据【现在不在】React 状态里（可能还没加载，或抖音换了存放处）。');
+        L.push('     先去「我的关注」页滚几屏让账号列表出来，再体检一次。');
+      } else {
+        var fk = Object.keys(fr.map), z2;
+        L.push('  前 12 个（sec 只截前 10 位）:');
+        for (z2 = 0; z2 < fk.length && z2 < 12; z2++) {
+          var fi = fr.map[fk[z2]];
+          L.push('    · ' + (fi.nickname || '(无名)') + ' / ' + String(fk[z2]).slice(0, 10) + '… ' +
+            '→ ' + fi.n + ' 条未看，id 列表 ' + fi.ids.length + ' 条' + (fi.src ? '（字段 ' + fi.src + '）' : ''));
+        }
+        L.push('  ★ 这些就是抖音自己存着的数 —— 页面上写的「N个作品未看」只是它渲染出来的一个字。');
+      }
+    } catch (e7) { L.push('  (扫描出错: ' + (e7 && e7.message) + ')'); }
     L.push('');
     L.push('（把上面这段整段复制发给我，我就能定位到底差在哪，不用再猜）');
     return L.join('\n');
@@ -1661,6 +1897,82 @@
       h += '<button class="dyh-btn primary" data-act="manage">📺 去看未读视频</button>';
       setBody(h);
       toast('读完 ' + st.known + ' 个号 · 合计 ' + st.sumN + ' 条未读');
+      return st.known;
+    });
+  }
+
+  /* ★ 00:15 · 「从网页内存里读」入口：滚 → 从 React 状态里把抖音存的那份数据抄出来
+     全程不读页面上的任何文字，只看抖音自己放在内存里的对象。 */
+  function readFiberUnread() {
+    if (!onFollowPage()) {
+      S.pendingAllBadge = { at: Date.now(), fiber: 1 };
+      save();
+      toast('要抖音的「关注」页才能读到，正在带你去…');
+      setTimeout(function () { try { location.href = '/follow'; } catch (e) { location.reload(); } }, 600);
+      return Promise.resolve(-1);
+    }
+    var TOTAL = 0;
+    try { var mt = (document.body ? (document.body.innerText || '') : '').match(/我的关注\s*[（(]\s*(\d+)\s*[）)]/); if (mt) TOTAL = parseInt(mt[1], 10); } catch (e0) { }
+    setBody('<div class="dyh-back" data-act="manage">← 返回</div>' +
+      '<div class="dyh-prog" id="dyh-prog">🧬 正在从网页内存里读…<br>' +
+      '<span style="font-size:19px">直接读抖音自己存的那份数据（不看页面上的字）</span></div>');
+
+    var acc = { map: {}, byName: {}, got: 0, users: 0 };
+    var lastN = -1, stable = 0, round = 0, maxRounds = 140;
+    function tick() {
+      if (round >= maxRounds) return Promise.resolve(acc);
+      round++;
+      mergeUnreadMap(acc, collectFiberUnread({ quick: true }));
+      var el = document.getElementById('dyh-prog');
+      if (el) el.innerHTML = '🧬 正在从网页内存里读…<br><span style="font-size:19px">' +
+        '已拿到 <b>' + acc.got + '</b> 个号的未读数' +
+        (TOTAL > 0 ? ' · 关注共 <b>' + TOTAL + '</b> 个' : '') + '</span>' +
+        '<br><span style="font-size:17px;color:#7A6A3F">第 ' + round + ' 屏（让它自己滚，别手动划）</span>';
+      if (TOTAL > 0 && acc.users >= Math.ceil(TOTAL * 0.85)) return finish();
+      var n = acc.got;
+      if (n === lastN) { stable++; } else { stable = 0; }
+      lastN = n;
+      if (stable >= 6) return finish();
+      try { scrollFollowSidebar(); } catch (e) { }
+      return sleep(700).then(tick);
+    }
+    /* 收尾：再从 React 根把整棵树扫一遍，把已经滚出屏幕、DOM 里回收掉的也捞回来 */
+    function finish() {
+      var full = collectFiberUnread({});
+      mergeUnreadMap(acc, full);
+      acc.full = full;
+      return Promise.resolve(acc);
+    }
+    return tick().then(function () {
+      /* ★★ 读完同样要落到【每一个账号】：数量 + 未读视频清单 + 已看边界 */
+      var st = applyApiUnreadAll(acc.map);
+      var srcs = (acc.full && acc.full.srcs) ? acc.full.srcs.join('、') : '';
+      var h = '<div class="dyh-back" data-act="home">← 返回</div>';
+      h += '<div class="dyh-card">' +
+        '<div class="dyh-row"><b>读到几个号</b><span class="dyh-hl">' + st.known + ' 个</span></div>' +
+        '<div class="dyh-row"><b>合计未读</b><span class="dyh-hl">' + st.sumN + ' 条</span></div>' +
+        '<div class="dyh-row"><b>本机已有明细</b><span>' + st.haveN + ' 条</span></div>' +
+        '<div class="dyh-row"><b>还差明细</b><span>' + st.missN + ' 条</span></div>' +
+        (st.revived ? '<div class="dyh-row"><b>改回未读</b><span>' + st.revived + ' 条（本机错标成已看的）</span></div>' : '') +
+        (srcs ? '<div class="dyh-row"><b>认到的字段</b><span>' + esc(srcs) + '</span></div>' : '') +
+        '</div>';
+      if (!st.known) {
+        h += '<div class="dyh-tip" style="color:#b88200">内存里没找到那份数据。' +
+          '常见原因：① 这不是「我的关注」侧栏所在的那一页；② 页面还没加载完（等它出账号列表再试）；' +
+          '③ 抖音换了存放位置。点下面「🩺 体检」把现在内存里到底有什么抄出来发我。</div>';
+        h += '<button class="dyh-btn" data-act="probe">🩺 体检</button>';
+      } else if (st.missN > 0) {
+        h += '<div class="dyh-tip" style="color:#b88200">抖音说有 <b>' + st.sumN + '</b> 条没看，' +
+          '但本机只存着 <b>' + st.haveN + '</b> 条的详情（标题/封面），还差 <b>' + st.missN + '</b> 条。' +
+          '未读<b>数量</b>已经全部更新好了；想让<b>清单</b>也齐，点下面去抓一轮。</div>';
+        h += '<button class="dyh-btn primary" data-act="scan">▶ 去抓缺的 ' + st.missN + ' 条视频</button>';
+      } else {
+        h += '<div class="dyh-tip">✅ 数量和清单都已按抖音自己存的数据更新完毕 —— 现在点开任何一个号，' +
+          '看到的未读视频就和抖音 App 里点开它看到的是<b>同一批</b>。</div>';
+      }
+      h += '<button class="dyh-btn primary" data-act="manage">📺 去看未读视频</button>';
+      setBody(h);
+      toast('从内存读到 ' + st.known + ' 个号 · 合计 ' + st.sumN + ' 条未读');
       return st.known;
     });
   }
@@ -3151,6 +3463,7 @@
        把抖音写的未读数【全部】读下来（这个数与 App 同源，就是权威值）。 */
     /* ★ 22:50：推荐走这条 —— 直接读抖音接口里的 not_seen_item_id_list_v2，
        比数页面上的角标准，连「直播号」都有（页面上不显示而已）。 */
+    h += '<button class="dyh-btn primary" data-act="read-fiber-unread">🧬 从网页内存直接读（推荐·最准）</button>';
     h += '<button class="dyh-btn primary" data-act="read-api-unread">🔌 从抖音接口读未读数（推荐·含直播号）</button>';
     h += '<button class="dyh-btn primary" data-act="read-all-badges">📡 读全部账号的官方未读数</button>';
 
@@ -3863,6 +4176,7 @@
       '全部 ' + S.accounts.length + ' 个账号：上限 6 大约 2~5 分钟，上限 3 大约 4~8 分钟。</div>';
     /* ★ 23:30：未读数和 App 对不上时，先做这个 —— 把抖音网页端的原始证据抄出来，别再猜 */
     h += '<label class="dyh-lb">🩺 未读数字体检 / 一键读全部</label>';
+    h += '<button class="dyh-btn primary" data-act="read-fiber-unread">🧬 从网页内存直接读（推荐·最准）</button>';
     h += '<button class="dyh-btn primary" data-act="read-api-unread">🔌 从抖音接口读未读数（推荐·含直播号）</button>';
     h += '<button class="dyh-btn" data-act="read-all-badges">📡 读全部账号的官方未读数（把侧栏滚到底）</button>';
     h += (NET.wide > Date.now())
@@ -4431,6 +4745,7 @@
     }
     if (act === 'probe-copy') { copyProbeText(); return; }
     if (act === 'read-api-unread') { readApiUnread(); return; }
+    if (act === 'read-fiber-unread') { readFiberUnread(); return; }
     if (act === 'net-scan') { startNetScan(); return; }
     /* ★ 23:55：一次把全部账号的官方未读数读下来（把侧栏滚到底） */
     if (act === 'read-all-badges') { readAllBadges(); return; }
@@ -4645,10 +4960,10 @@
     /* ★ 23:55：「读全部账号的官方未读数」被带到 /follow 之后自动续跑 */
     try {
       if (S.pendingAllBadge && Date.now() - S.pendingAllBadge.at < 180000) {
-        var apiMode = !!S.pendingAllBadge.api;
+        var apiMode = !!S.pendingAllBadge.api, fibMode = !!S.pendingAllBadge.fiber;
         S.pendingAllBadge = null; save();
         if (onFollowPage()) setTimeout(function () {
-          try { if (apiMode) readApiUnread(); else readAllBadges(); } catch (e) { }
+          try { if (fibMode) readFiberUnread(); else if (apiMode) readApiUnread(); else readAllBadges(); } catch (e) { }
         }, 1500);
       } else if (S.pendingAllBadge) { S.pendingAllBadge = null; save(); }
     } catch (e) { }
@@ -4731,6 +5046,14 @@
     collectFollowingUnread: collectFollowingUnread,
     harvestApiUnread: harvestApiUnread,
     readApiUnread: readApiUnread,
+    readFiberUnread: readFiberUnread,
+    collectFiberUnread: collectFiberUnread,
+    fiberOf: fiberOf,
+    fiberRootOf: fiberRootOf,
+    userUnreadFromObj: userUnreadFromObj,
+    deepFindUsers: deepFindUsers,
+    scanFiberNode: scanFiberNode,
+    walkFiberTree: walkFiberTree,
     apiUnreadOf: apiUnreadOf,
     findUserArray: findUserArray,
     pullUnreadIds: pullUnreadIds,
