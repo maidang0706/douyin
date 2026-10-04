@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-04 22:50 · ★★ 你说得对，网页能显示就【一定有接口】，我把抖音自己的前端代码扒出来找到了。证据在抖音 PC 网页端 ies/douyin_web/async/1463.js：关注列表接口 /aweme/v1/web/user/following/list/ 的响应里，每个账号对象带着 not_seen_item_id_list_v2（旧版字段 not_seen_item_id_list，另有计数 user_not_see），抖音前端把它映射成 notSeenItemList，页面上那个「N个作品未看」= notSeenItemList.length（>99 显示 99，见 notSeenTag 那段渲染）。★ 新增【🔌 从抖音接口读未读数】（未读视频查看页 / 设置页）：让抖音自己去翻关注列表（滚侧栏触发它发请求），我们一路收它自己的响应并解析该字段 —— 全程一个自签请求都不发（自签必 403）。★ 比读页面角标强在三处：① 不受界面规则限制 ——【正在直播的号】页面上不写角标，接口里照样有，这条路把它救回来了；② 拿到的不只是数量，还有【具体是哪几条视频 id】；③ 不用等每一行渲染出来。★ 数据来源优先级调整为：接口数据 > 单号刚算的 N > 独立角标 > 快照 > 本机估算；接口明确给的 0 也算「已知」。
+// @version      2026-10-04 23:12 · ★★ 你说得对：读完了就该【全站更新】，以前只更新了一半。病根：unreadVideosOf()（每个号点进去看到的「未读视频清单」）完全没用抖音接口给的 not_seen_item_id_list —— 那份含「具体哪几条没看」的数据读完就只是存起来当个数量用，清单还按本机边界猜。于是出现「数字对上了，点进去看到的还是老视频」。★ 新增 applyApiUnreadAll()：读完一次性把三样东西落到【每一个账号】上 —— ① 数量（抖音接口给的 N，含明确 0）；② 清单（按接口给的未看视频 id 取，本机被误记成「已看」的一律撤回——抖音说没看就是没看）；③ 已看边界 accCursor（划在「抖音说已看的最后一条」上，接口数据过期后本机兜底也不跑偏）。★ 读完不再直接跳列表，先给一张汇总：读到几个号 / 合计几条未读 / 本机有明细几条 / 还差几条详情 + 「去抓缺的 N 条」按钮（数量立刻全站生效，缺的详情跑一轮抓取补齐）。★ 列表页新增「🔌 上次读接口」凭据卡（多久前读的、几个号、合计几条、其中几条有详情），账号详情页新增「🔌 抖音接口给的」卡片 + 对账里把接口列为最优先来源。★ 接口数据 12 小时有效期，过期即失效（绝不让昨天的数压着今天显示）。
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -241,8 +241,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-04 22:50 · ★★ 你说得对，网页能显示就【一定有接口】，我把抖音自己的前端代码扒出来找到了。证据在抖音 PC 网页端 ies/douyin_web/async/1463.js：关注列表接口 /aweme/v1/web/user/following/list/ 的响应里，每个账号对象带着 not_seen_item_id_list_v2（旧版字段 not_seen_item_id_list，另有计数 user_not_see），抖音前端把它映射成 notSeenItemList，页面上那个「N个作品未看」= notSeenItemList.length（>99 显示 99，见 notSeenTag 那段渲染）。★ 新增【🔌 从抖音接口读未读数】（未读视频查看页 / 设置页）：让抖音自己去翻关注列表（滚侧栏触发它发请求），我们一路收它自己的响应并解析该字段 —— 全程一个自签请求都不发（自签必 403）。★ 比读页面角标强在三处：① 不受界面规则限制 ——【正在直播的号】页面上不写角标，接口里照样有，这条路把它救回来了；② 拿到的不只是数量，还有【具体是哪几条视频 id】；③ 不用等每一行渲染出来。★ 数据来源优先级调整为：接口数据 > 单号刚算的 N > 独立角标 > 快照 > 本机估算；接口明确给的 0 也算「已知」。'
-  var VER_SHORT = '10-04 22:50';
+  var VER = '2026-10-04 23:12 · ★★ 你说得对：读完了就该【全站更新】，以前只更新了一半。病根：unreadVideosOf()（每个号点进去看到的「未读视频清单」）完全没用抖音接口给的 not_seen_item_id_list —— 那份含「具体哪几条没看」的数据读完就只是存起来当个数量用，清单还按本机边界猜。于是出现「数字对上了，点进去看到的还是老视频」。★ 新增 applyApiUnreadAll()：读完一次性把三样东西落到【每一个账号】上 —— ① 数量（抖音接口给的 N，含明确 0）；② 清单（按接口给的未看视频 id 取，本机被误记成「已看」的一律撤回——抖音说没看就是没看）；③ 已看边界 accCursor（划在「抖音说已看的最后一条」上，接口数据过期后本机兜底也不跑偏）。★ 读完不再直接跳列表，先给一张汇总：读到几个号 / 合计几条未读 / 本机有明细几条 / 还差几条详情 + 「去抓缺的 N 条」按钮（数量立刻全站生效，缺的详情跑一轮抓取补齐）。★ 列表页新增「🔌 上次读接口」凭据卡（多久前读的、几个号、合计几条、其中几条有详情），账号详情页新增「🔌 抖音接口给的」卡片 + 对账里把接口列为最优先来源。★ 接口数据 12 小时有效期，过期即失效（绝不让昨天的数压着今天显示）。'
+  var VER_SHORT = '10-04 23:12';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -973,6 +973,9 @@
      =================================================================== */
   var UNREAD_ID_KEYS = ['not_seen_item_id_list_v2', 'not_seen_item_id_list', 'notSeenItemIdList'];
 
+  /* 接口读来的未读数有效期：超过就当没读过，绝不让昨天的数压着今天显示（17:25 的教训）。 */
+  var API_UNREAD_VALID_MS = 12 * 3600000;
+
   function pullUnreadIds(u) {
     var i;
     for (i = 0; i < UNREAD_ID_KEYS.length; i++) {
@@ -1073,6 +1076,95 @@
       return sleep(opts.wait || 800).then(tick);
     }
     return tick();
+  }
+
+  /* 某个号的视频（最新在前），直接走索引，避免每条都调 accountVideosSorted 的缓存路径 */
+  function secVideosSorted(sec) {
+    if (!sec) return [];
+    var arr = buildVideoIndex().bySec[sec];
+    if (!arr) return [];
+    return arr.slice().sort(function (x, y) { return (y.publishedAt || 0) - (x.publishedAt || 0); });
+  }
+
+  /* ★★★ 把接口读到的结果【落到每一个账号上】——数量 + 未读视频清单 + 边界，三样一起 ★★★
+     以前读完只把 {n, ids} 塞进 S.apiUnread 当缓存，清单还按本机边界猜 →
+     「数字对上了，点进去看到的还是老视频」。现在读完就把这三件事做掉：
+
+       ① 数量：抖音接口给的 N（accUnread 里最优先，含明确 0）；
+       ② 清单：用接口给的【未看作品 id 列表】反过来决定哪些视频算未读
+          —— 被本机误记成"已看"的，一律改回未读（抖音说没看就是没看，本机那套不算数）；
+       ③ 边界：把 accCursor 划到「抖音说已看的最后一条」上，
+          这样即使接口数据过期了，本机兜底算出来的也不会跑偏。
+
+     返回 { known, sumN, haveN, missN, revived } */
+  function applyApiUnreadAll(map) {
+    var st = { known: 0, sumN: 0, haveN: 0, missN: 0, revived: 0 };
+    if (!map) return st;
+    S.apiUnread = { __byName: {} };
+    var k, i, allIds = {}, secids = {}, order = [];
+
+    /* ---- 第一遍：落盘 + 收集所有「未看视频 id」 ---- */
+    for (k in map) {
+      if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
+      var it = map[k] || {};
+      var n = it.n, ids0 = it.ids || [], nm = it.nickname || '';
+      if (!(n >= 0)) continue;                       // 抖音没给数 = 这个号不知道，跳过
+      st.known++; st.sumN += n;
+      var rec = { n: n, ids: ids0, nickname: nm, at: Date.now() };
+      S.apiUnread[k] = rec;
+      if (nm) S.apiUnread.__byName[normName(nm)] = rec;
+      order.push(k);
+      secids[k] = ids0;
+      for (i = 0; i < ids0.length; i++) allIds[String(ids0[i])] = 1;
+    }
+    S.apiUnreadAt = Date.now();
+
+    /* ---- ② 本机记成"已看"但抖音说没看的 → 撤回已看标记 ----
+       网页自动播放 / 旧版本误标都会把还看过的视频塞进 readIds，结果它就不出现在未读里了。
+       权威只有一个：抖音给的未看 id 列表。 */
+    var before = S.readIds.length;
+    if (before) {
+      var kept = [];
+      for (i = 0; i < S.readIds.length; i++) {
+        if (allIds[String(S.readIds[i])]) { st.revived++; continue; }
+        kept.push(S.readIds[i]);
+      }
+      if (st.revived) { S.readIds = kept; S.__rseq = (S.__rseq || 0) + 1; }
+    }
+
+    /* ---- ②③ 每个号：划边界 + 数一数本机到底有几条明细 ---- */
+    for (i = 0; i < order.length; i++) {
+      k = order[i];
+      var ids = secids[k] || [], vids = secVideosSorted(k);
+      if (!vids.length) { st.missN += S.apiUnread[k].n; continue; }
+      if (!ids.length) {
+        /* 接口只给了个数（user_not_see 那种）→ 本机前 n 条算未读 */
+        var take = Math.min(S.apiUnread[k].n, vids.length);
+        st.haveN += take; st.missN += Math.max(0, S.apiUnread[k].n - take);
+        if (take > 0) S.accCursor[k] = (vids[take - 1].publishedAt || 0) - 1;
+        else S.accCursor[k] = (vids[0].publishedAt || 0);
+        continue;
+      }
+      var set = {}, j;
+      for (j = 0; j < ids.length; j++) set[String(ids[j])] = 1;
+      var hit = 0, boundary = -1;
+      for (j = 0; j < vids.length; j++) {
+        /* 从最新往回走：还在未看名单里就继续，第一条【不在】名单的就是「已看的最后一条」 */
+        if (!set[String(vids[j].awemeId)]) { boundary = vids[j].publishedAt || 0; break; }
+        hit++;
+      }
+      st.haveN += hit;
+      st.missN += Math.max(0, S.apiUnread[k].n - hit);
+      if (hit === vids.length) {
+        /* 本机有的全在未看名单里 → 边界压到最后一条之下，缺的那几条还没抓到 */
+        var oldest = vids[vids.length - 1].publishedAt || 0;
+        S.accCursor[k] = oldest > 0 ? oldest - 1 : 0;
+      } else {
+        S.accCursor[k] = boundary;
+      }
+    }
+    save();
+    return st;
   }
 
   /* 关注页收割：滚 → 收 → 滚 …… 直到追平（翻到上次抓取之前的视频）或滚不动为止
@@ -1545,20 +1637,31 @@
           '<br><span style="font-size:17px;color:#7A6A3F">第 ' + p.round + ' 屏（让它自己滚，别手动划）</span>';
       }
     }).then(function (acc) {
-      var k, map = acc.map || {};
-      /* 落盘：{sec: {n, ids, nickname, at}}，另存一份按昵称的索引方便对号 */
-      S.apiUnread = { __byName: {} };
-      for (k in map) {
-        if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
-        S.apiUnread[k] = { n: map[k].n, ids: map[k].ids || [], nickname: map[k].nickname || '', at: Date.now() };
-        if (map[k].nickname) S.apiUnread.__byName[normName(map[k].nickname)] = map[k];
+      var map = acc.map || {};
+      /* ★★ 读完就要把结果落到【每一个账号】：数量 + 未读视频清单 + 已看边界（一起更新） */
+      var st = applyApiUnreadAll(map);
+      var h = '<div class="dyh-back" data-act="home">← 返回</div>';
+      h += '<div class="dyh-card">' +
+        '<div class="dyh-row"><b>读到几个号</b><span class="dyh-hl">' + st.known + ' 个</span></div>' +
+        '<div class="dyh-row"><b>合计未读</b><span class="dyh-hl">' + st.sumN + ' 条</span></div>' +
+        '<div class="dyh-row"><b>本机已有明细</b><span>' + st.haveN + ' 条</span></div>' +
+        '<div class="dyh-row"><b>还差明细</b><span>' + st.missN + ' 条</span></div>' +
+        (st.revived ? '<div class="dyh-row"><b>改回未读</b><span>' + st.revived + ' 条（本机错标成已看的）</span></div>' : '') +
+        '<div class="dyh-row"><b>接口收到账号记录</b><span>' + acc.users + ' 条</span></div>' +
+        '</div>';
+      if (st.missN > 0) {
+        h += '<div class="dyh-tip" style="color:#b88200">抖音说有 <b>' + st.sumN + '</b> 条没看，' +
+          '但本机只存着 <b>' + st.haveN + '</b> 条的详情（标题/封面），还差 <b>' + st.missN + '</b> 条没抓回来。' +
+          '未读<b>数量</b>已经全部更新好了；想让<b>清单</b>也齐，点下面去抓一轮。</div>';
+        h += '<button class="dyh-btn primary" data-act="scan">▶ 去抓缺的 ' + st.missN + ' 条视频</button>';
+      } else if (st.known > 0) {
+        h += '<div class="dyh-tip">✅ 数量和清单都已按抖音接口更新完毕 —— 现在点开任何一个号，' +
+          '看到的未读视频就和抖音 App 里点开它看到的是<b>同一批</b>。</div>';
       }
-      S.apiUnreadAt = Date.now();
-      save();
-      open('manage');
-      var known = Object.keys(map).length;
-      toast('接口读到了 ' + known + ' 个号的未读数（共收到 ' + acc.users + ' 条账号记录）');
-      return known;
+      h += '<button class="dyh-btn primary" data-act="manage">📺 去看未读视频</button>';
+      setBody(h);
+      toast('读完 ' + st.known + ' 个号 · 合计 ' + st.sumN + ' 条未读');
+      return st.known;
     });
   }
 
@@ -2725,7 +2828,10 @@
     var v = null;
     if (a.secUserId) v = S.apiUnread[a.secUserId];
     if (!v && a.name && S.apiUnread.__byName) v = S.apiUnread.__byName[normName(a.name)];
-    return v || null;
+    if (!v || v.n == null) return null;
+    /* 过期就不认（它会不可信地盖住别的数据源） */
+    if (v.at && Date.now() - v.at > API_UNREAD_VALID_MS) return null;
+    return v;
   }
 
   function accUnreadUnknown(a) {
@@ -3047,6 +3153,31 @@
        比数页面上的角标准，连「直播号」都有（页面上不显示而已）。 */
     h += '<button class="dyh-btn primary" data-act="read-api-unread">🔌 从抖音接口读未读数（推荐·含直播号）</button>';
     h += '<button class="dyh-btn primary" data-act="read-all-badges">📡 读全部账号的官方未读数</button>';
+
+    /* ★ 读完留个凭据（23:12）：什么时候读的、读到几个号、合计几条 —— 一眼确认「全站已更新」 */
+    (function () {
+      var au = S.apiUnread, at = S.apiUnreadAt || 0, k;
+      if (!au || !at) return;
+      var cnt = 0, sum = 0, have = 0;
+      for (k in au) {
+        if (!Object.prototype.hasOwnProperty.call(au, k) || k === '__byName') continue;
+        var r = au[k];
+        if (!r || r.n == null) continue;
+        cnt++; sum += r.n;
+        var vv = secVideosSorted(k), hs = {};
+        if (r.ids) { for (var q = 0; q < r.ids.length; q++) hs[String(r.ids[q])] = 1; }
+        for (var p = 0; p < vv.length; p++) if (hs[String(vv[p].awemeId)]) have++;
+      }
+      if (!cnt) return;
+      var mins = Math.round((Date.now() - at) / 60000);
+      var age = mins < 2 ? '刚刚' : (mins < 60 ? mins + ' 分钟前' : Math.round(mins / 60) + ' 小时前');
+      var stale = Date.now() - at > API_UNREAD_VALID_MS;
+      h += '<div class="dyh-card">' +
+        '<div class="dyh-row"><b>🔌 上次读接口</b><span>' + age + (stale ? '（已过期，不再采信）' : '') + '</span></div>' +
+        '<div class="dyh-row"><b>　读到</b><span>' + cnt + ' 个号 · 合计 <b class="dyh-hl">' + sum + '</b> 条未读</span></div>' +
+        (sum > have ? '<div class="dyh-row"><b>　其中本机有明细</b><span>' + have + ' 条（还差 ' + (sum - have) + ' 条详情没抓到）</span></div>' : '') +
+        '</div>';
+    })();
     h += '<div class="dyh-tip" style="margin-top:2px">把抖音「关注」页左侧列表<b>滚到底</b>，每行写的「N个作品未看」<b>全部抄下来</b>，' +
       '然后整个面板（未读列表 / 分类统计 / 首页未读总数）都按它更新。共 ' + S.accounts.length + ' 个号。<br>' +
       '⚠️ <b>正在直播的号，网页端不写这个角标</b>（真机截图已确认）—— 这类号会如实标成「未知」，不会瞎报 0。</div>';
@@ -3210,6 +3341,22 @@
   }
 
   function unreadVideosOf(sec, acc) {
+    /* ★★★ ⓪ 抖音【接口】给的「未看作品 id 列表」—— 就是 App 里点开那个号看到的那一批。
+       以前只拿它算一个「数量」，清单还按本机边界瞎猜 —— 于是「数字对上了，点进去还是老视频」。
+       现在直接按 id 取；本机误标成"已看"的那些也已在 applyApiUnreadAll 里撤回。 */
+    var a0 = acc || { secUserId: sec };
+    var apiv = apiUnreadOf(a0);
+    if (apiv && apiv.n != null) {
+      if (apiv.ids && apiv.ids.length) {
+        var aid = {}, ax;
+        for (ax = 0; ax < apiv.ids.length; ax++) aid[String(apiv.ids[ax])] = 1;
+        var aAll = accountVideosSorted(a0), aOut = [], av;
+        for (ax = 0; ax < aAll.length; ax++) { av = aAll[ax]; if (aid[String(av.awemeId)]) aOut.push(av); }
+        return aOut;                       // accountVideosSorted 已是最新在前
+      }
+      if (apiv.n === 0) return [];         // 抖音明确说都看完了
+      return accountVideosSorted(a0).slice(0, apiv.n);   // 只给了个数（user_not_see）→ 取最新 n 条
+    }
     var readMap = readIdMap(), out = [], i, v;
     var all = accountVideosSorted(acc || { secUserId: sec });
     var cursor = accCursorOf(acc || { secUserId: sec });
@@ -3286,7 +3433,11 @@
     var mu = (acc && acc.secUserId && S.accUnreadN) ? (S.accUnreadN[acc.secUserId] || null) : null;
     /* 抖音标了 N 条未看 → 明细只留最新 N 条：更老的那几条是以前攒的旧视频，
        留在列表里会让你以为「未读里混着早看过的」，这也是「跟 App 对不上」的一部分。 */
-    if (srvN > 0 && vids.length > srvN) vids = vids.slice(0, srvN);
+    /* ★ 23:12：接口已经明确给了「是哪几条」时，不许再用侧栏快照的条数去截断清单
+       —— 那会把抖音点名的未看视频砍掉（这正是「清单和 App 对不上」的一个来源）。 */
+    if (srvN > 0 && vids.length > srvN && !(apiUnreadOf(acc) && apiUnreadOf(acc).ids && apiUnreadOf(acc).ids.length)) {
+      vids = vids.slice(0, srvN);
+    }
     var h = '<div class="dyh-back" data-act="manage">← 返回</div>';
     h += '<div class="dyh-card">' +
       '<div class="dyh-row"><b>公众号</b><span>' + esc(name) + (acc && acc._ghost ? ' <em style="font-style:normal;color:#7A6A3F">（非关注·不计未读）</em>' : '') + '</span></div>' +
@@ -3305,6 +3456,25 @@
       })() +
       (acc && acc.category ? '<div class="dyh-row"><b>分类</b><span>' + esc(acc.category) + '</span></div>' : '') +
       '</div>';
+    /* ★ 23:12：把「抖音接口」这份数据单独摊开——它同时决定了【数量】和下面【清单里的每一条】 */
+    var apiV = acc ? apiUnreadOf(acc) : null;
+    (function () {
+      if (!apiV || apiV.n == null) return;
+      var mins = Math.round((Date.now() - (apiV.at || 0)) / 60000);
+      var age = mins < 2 ? '刚刚' : (mins < 60 ? mins + ' 分钟前' : Math.round(mins / 60) + ' 小时前');
+      h += '<div class="dyh-card">' +
+        '<div class="dyh-row"><b>🔌 抖音接口给的</b><span class="dyh-hl">' + apiV.n + ' 条未看</span></div>' +
+        '<div class="dyh-row"><b>　字段</b><span>' +
+        (apiV.ids && apiV.ids.length ? 'not_seen_item_id_list（连哪几条都给了）' : 'user_not_see（只给了数量）') +
+        ' · ' + age + '</span></div>' +
+        '<div class="dyh-row"><b>　本机有详情</b><span>' + vids.length + ' 条</span></div>' +
+        '</div>';
+      if (apiV.n > vids.length) {
+        h += '<div class="dyh-tip" style="color:#b88200">抖音说这个号有 <b>' + apiV.n + '</b> 条没看，' +
+          '本机只存着 <b>' + vids.length + '</b> 条的详情（缺 ' + (apiV.n - vids.length) + ' 条）。' +
+          '<b>下面列出来的是本机有详情的那几条</b>，去首页「📡 抓最新未读视频」跑一轮就能补齐清单。</div>';
+      }
+    })();
     /* ★ 18:00：没有可信的官方数字时，如实说明「未读数未知」，绝不拿视频库条数冒充 */
     if (acc && !acc._ghost && accUnreadUnknown(acc)) {
       h += '<div class="dyh-tip" style="color:#b88200">⚠️ <b>这个号的未读数现在还不知道</b>（本机没有它的官方角标、也没有未读边界）。' +
@@ -3326,6 +3496,11 @@
        以前 App 显示 6、我们显示 16 却看不出原因，就是因为几个来源悄悄互相盖住。 */
     (function () {
       var rows = [];
+      /* ★ 接口给出的 n（含具体未看视频 id）排在最上面：它同时决定数量与清单 */
+      if (apiV && apiV.n != null) {
+        rows.push(['🔌 抖音接口（未看作品 id 列表）', apiV.n + ' 条',
+          '★★ 最可信 —— 和 App 同源，清单也按它取']);
+      }
       if (mu && mu.n != null) rows.push(['抖音官方角标（刚读）', mu.n + ' 条', '★ 就是 App 里那个数']);
       else if (mu) rows.push(['抖音官方角标', '没读到', '这个号在侧栏里没露出来']);
       var ab = acc ? accBadgeOf(acc) : null;
@@ -4559,6 +4734,8 @@
     apiUnreadOf: apiUnreadOf,
     findUserArray: findUserArray,
     pullUnreadIds: pullUnreadIds,
+    applyApiUnreadAll: applyApiUnreadAll,
+    secVideosSorted: secVideosSorted,
     harvestFollowPage: harvestFollowPage,
     push: function () { return ghPush('unread.json', JSON.stringify(buildPayload()), '手机端更新 ' + fmtTime(Date.now())); },
     openPanel: function () { open('home'); }
