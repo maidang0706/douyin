@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-04 01:05 · 找到「读不全 / 和 App 对不上」的真正根因：滚动写成了【一次跳到列表最底部】sc.scrollTop = sc.scrollHeight，而抖音这个关注列表是【虚拟滚动】——DOM 里只保留看得见的那几行，滚出视口就被回收。一跳到底 = 中间几百个号从头到尾根本没被渲染过，永远读不到；而列表行数始终不变，代码还以为「已经到底了」提前收工。★ 仿真对照：30 个号，旧版只读到 16 个，新版 30/30 全读到。★ 修法：① 改成每次只往下滚【一屏】，逐屏渲染、逐屏读（追加渲染和虚拟滚动两种模式都成立）；② 进度判据从「当前 DOM 行数」改成【累计读到过的账号数】；③ 容器查找从 8 层放宽到 25 层；④ 到底后回顶再走一轮，别漏最上面的号；⑤ 轮数 80→160，等待 1100→800ms。★ 体检新增【零】环境诊断（UA 是手机还是电脑、页面里到底有没有「我的关注(N)」那个侧栏 —— 手机 UA 下抖音给的是移动版，压根没这个侧栏，那就什么都读不到）+【零之二】滚动有效性（找没找到可滚动容器、滚了之后位置到底动没动）。★ 接口扫描再升级：把响应里【列表第一个对象的全部字段】摊开列出来，未读数藏在哪个字段一眼就能认出来。
+// @version      2026-10-04 22:50 · ★★ 你说得对，网页能显示就【一定有接口】，我把抖音自己的前端代码扒出来找到了。证据在抖音 PC 网页端 ies/douyin_web/async/1463.js：关注列表接口 /aweme/v1/web/user/following/list/ 的响应里，每个账号对象带着 not_seen_item_id_list_v2（旧版字段 not_seen_item_id_list，另有计数 user_not_see），抖音前端把它映射成 notSeenItemList，页面上那个「N个作品未看」= notSeenItemList.length（>99 显示 99，见 notSeenTag 那段渲染）。★ 新增【🔌 从抖音接口读未读数】（未读视频查看页 / 设置页）：让抖音自己去翻关注列表（滚侧栏触发它发请求），我们一路收它自己的响应并解析该字段 —— 全程一个自签请求都不发（自签必 403）。★ 比读页面角标强在三处：① 不受界面规则限制 ——【正在直播的号】页面上不写角标，接口里照样有，这条路把它救回来了；② 拿到的不只是数量，还有【具体是哪几条视频 id】；③ 不用等每一行渲染出来。★ 数据来源优先级调整为：接口数据 > 单号刚算的 N > 独立角标 > 快照 > 本机估算；接口明确给的 0 也算「已知」。
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -241,8 +241,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-04 01:05 · 找到「读不全 / 和 App 对不上」的真正根因：滚动写成了【一次跳到列表最底部】sc.scrollTop = sc.scrollHeight，而抖音这个关注列表是【虚拟滚动】——DOM 里只保留看得见的那几行，滚出视口就被回收。一跳到底 = 中间几百个号从头到尾根本没被渲染过，永远读不到；而列表行数始终不变，代码还以为「已经到底了」提前收工。★ 仿真对照：30 个号，旧版只读到 16 个，新版 30/30 全读到。★ 修法：① 改成每次只往下滚【一屏】，逐屏渲染、逐屏读（追加渲染和虚拟滚动两种模式都成立）；② 进度判据从「当前 DOM 行数」改成【累计读到过的账号数】；③ 容器查找从 8 层放宽到 25 层；④ 到底后回顶再走一轮，别漏最上面的号；⑤ 轮数 80→160，等待 1100→800ms。★ 体检新增【零】环境诊断（UA 是手机还是电脑、页面里到底有没有「我的关注(N)」那个侧栏 —— 手机 UA 下抖音给的是移动版，压根没这个侧栏，那就什么都读不到）+【零之二】滚动有效性（找没找到可滚动容器、滚了之后位置到底动没动）。★ 接口扫描再升级：把响应里【列表第一个对象的全部字段】摊开列出来，未读数藏在哪个字段一眼就能认出来。'
-  var VER_SHORT = '10-04 01:05';
+  var VER = '2026-10-04 22:50 · ★★ 你说得对，网页能显示就【一定有接口】，我把抖音自己的前端代码扒出来找到了。证据在抖音 PC 网页端 ies/douyin_web/async/1463.js：关注列表接口 /aweme/v1/web/user/following/list/ 的响应里，每个账号对象带着 not_seen_item_id_list_v2（旧版字段 not_seen_item_id_list，另有计数 user_not_see），抖音前端把它映射成 notSeenItemList，页面上那个「N个作品未看」= notSeenItemList.length（>99 显示 99，见 notSeenTag 那段渲染）。★ 新增【🔌 从抖音接口读未读数】（未读视频查看页 / 设置页）：让抖音自己去翻关注列表（滚侧栏触发它发请求），我们一路收它自己的响应并解析该字段 —— 全程一个自签请求都不发（自签必 403）。★ 比读页面角标强在三处：① 不受界面规则限制 ——【正在直播的号】页面上不写角标，接口里照样有，这条路把它救回来了；② 拿到的不只是数量，还有【具体是哪几条视频 id】；③ 不用等每一行渲染出来。★ 数据来源优先级调整为：接口数据 > 单号刚算的 N > 独立角标 > 快照 > 本机估算；接口明确给的 0 也算「已知」。'
+  var VER_SHORT = '10-04 22:50';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -267,7 +267,13 @@
       __rseq: 0,         // 已看记录版本号（S.readIds 变动时 +1）：readMap 按它复用缓存
       listAt: 0,         // 关注列表最后刷新的时间：刷新后未读视图以这份列表为准（见 listIsFresh / pruneToAccounts）
       accUnreadN: {},    // {secUserId: {n, at, got, noBoundary}}：单独抓某个号时，按抖音口径算出的「N个作品未看」
-      accBadge: {}       // {secUserId: {n, at}}：单独读到的【这个号的】官方角标（带独立时间戳，避免被几小时前的全局快照盖住）
+      accBadge: {},      // {secUserId: {n, at}}：单独读到的【这个号的】官方角标（带独立时间戳，避免被几小时前的全局快照盖住）
+      /* ★ 22:50：抖音关注列表接口 /aweme/v1/web/user/following/list/ 响应里，
+         每个账号自带 not_seen_item_id_list_v2 —— 页面上的「N个作品未看」就是它的长度。
+         格式 {secUserId: {n, ids:[awemeId], nickname, at}}。
+         ★ 这是最可信的一档：不受界面规则影响（直播号也有），还能给出【具体是哪几条】。 */
+      apiUnread: {},
+      apiUnreadAt: 0
     };
     try {
       var raw = localStorage.getItem(LS);
@@ -946,6 +952,129 @@
     return tick().then(function () { return best; });
   }
 
+  /* ===================================================================
+     ★★★ 22:50 · 你说的没错 —— 网页能显示，背后一定有接口。
+     我把抖音 PC 网页端自己的前端代码扒出来看了（ies/douyin_web/async/1463.js）：
+
+       let { sec_uid, uid, nickname, remark_name, avatar_uri, signature,
+             follow_status, room_data, room_id,
+             not_seen_item_id_list_v2: b, not_seen_item_id_list: E,
+             live_status, aweme_count, user_not_see, is_not_show,
+             account_cert_info, ... } = 关注列表里的一个用户对象;
+       return { secUid, nickname, ..., notSeenItemList: (b ?? E) ?? [], ... }
+
+     页面上那个「N个作品未看」就是 notSeenItemList.length（>99 显示 99，见 notSeenTag 那段）。
+     也就是说：【关注列表接口 /aweme/v1/web/user/following/list/ 的响应里，
+     每个账号自带「我没看过的作品 id 列表」】—— N 是它的长度，里面就是具体哪几条。
+     这比读页面上的角标强得多：
+       ① 不受界面规则限制 —— 直播号也有这个字段（页面上不显示而已）；
+       ② 拿到的不只是数量，还有【具体是哪几条视频】；
+       ③ 不用等每一行渲染出来，抖音自己翻页我们收响应就行。
+     =================================================================== */
+  var UNREAD_ID_KEYS = ['not_seen_item_id_list_v2', 'not_seen_item_id_list', 'notSeenItemIdList'];
+
+  function pullUnreadIds(u) {
+    var i;
+    for (i = 0; i < UNREAD_ID_KEYS.length; i++) {
+      var v = u[UNREAD_ID_KEYS[i]];
+      if (Object.prototype.toString.call(v) === '[object Array]') return v;
+    }
+    return null;
+  }
+
+  /* 在响应 JSON 里找「元素是含 sec_uid 的对象」的那个数组
+     （不写死叫 user_list，抖音改 key 也能找到） */
+  function findUserArray(node, depth) {
+    if (!node || typeof node !== 'object' || depth > 6) return null;
+    if (Object.prototype.toString.call(node) === '[object Array]') {
+      for (var i = 0; i < node.length; i++) {
+        if (node[i] && typeof node[i] === 'object' && (node[i].sec_uid || node[i].secUid)) return node;
+      }
+      return null;
+    }
+    for (var k in node) {
+      if (!Object.prototype.hasOwnProperty.call(node, k)) continue;
+      var r = findUserArray(node[k], depth + 1);
+      if (r) return r;
+    }
+    return null;
+  }
+
+  /* 把已经捕获到的所有 following 响应解析成 { secUid: {n, ids, nickname, src} } */
+  function collectFollowingUnread() {
+    var out = { map: {}, byName: {}, n: 0, users: 0 };
+    try {
+      var i, j;
+      for (i = 0; i < NET.buf.length; i++) {
+        var it = NET.buf[i];
+        if (it.kind !== 'following') continue;
+        var arr = findUserArray(it.json, 0);
+        if (!arr) continue;
+        for (j = 0; j < arr.length; j++) {
+          var u = arr[j] || {};
+          var sec = u.sec_uid || u.secUid;
+          if (!sec) continue;
+          out.users++;
+          var nm = u.nickname || u.nickName || '';
+          var ids = pullUnreadIds(u);
+          /* 优先用【未看作品 id 列表】的长度；没有列表才退用抖音给的计数 user_not_see */
+          var n = -1, src = '';
+          if (ids) { n = ids.length; src = 'ids'; }
+          else if (u.user_not_see != null) { n = parseInt(u.user_not_see, 10); src = 'count'; }
+          if (!(n >= 0)) continue;                            // 两者都没有 = 这个号不知道
+          var old = out.map[sec];
+          if (!old || n > old.n) out.map[sec] = { n: n, ids: ids || [], nickname: nm, src: src };
+          if (nm && (out.byName[nm] == null || n > out.byName[nm])) out.byName[nm] = n;
+        }
+      }
+      out.n = Object.keys(out.map).length;
+    } catch (e) { }
+    return out;
+  }
+
+  /* 让抖音自己去翻关注列表（滚侧栏触发它发请求），我们一路收响应里的未读 id 列表。
+     ★ 注意：我们【一个请求都不自己发】（自签必 403），全程只听抖音前端自己的响应。 */
+  function harvestApiUnread(opts) {
+    opts = opts || {};
+    var acc = { map: {}, byName: {}, got: 0, users: 0, rounds: 0 };
+    var lastN = -1, stable = 0, round = 0, maxRounds = opts.maxRounds || 160;
+    function merge(got) {
+      if (!got) return;
+      var k;
+      if (got.users > acc.users) acc.users = got.users;
+      for (k in got.map) {
+        if (!Object.prototype.hasOwnProperty.call(got.map, k)) continue;
+        var nv = got.map[k], ov = acc.map[k];
+        if (!ov || nv.n > ov.n) acc.map[k] = nv;
+      }
+      for (k in got.byName) {
+        if (!Object.prototype.hasOwnProperty.call(got.byName, k)) continue;
+        if (acc.byName[k] == null || got.byName[k] > acc.byName[k]) acc.byName[k] = got.byName[k];
+      }
+      acc.got = Object.keys(acc.map).length;
+    }
+    function tick() {
+      if (opts.shouldStop && opts.shouldStop()) return Promise.resolve(acc);
+      if (round >= maxRounds) return Promise.resolve(acc);
+      round++;
+      acc.rounds = round;
+      merge(collectFollowingUnread());
+      if (opts.onTick) {
+        try {
+          opts.onTick({ round: round, got: acc.got, users: acc.users });
+        } catch (e) { }
+      }
+      var n = Object.keys(acc.map).length;
+      if (opts.total > 0 && acc.users >= Math.ceil(opts.total * 0.85)) return Promise.resolve(acc);
+      if (n === lastN) { stable++; } else { stable = 0; }
+      lastN = n;
+      if (stable >= 8) return Promise.resolve(acc);
+      scrollFollowSidebar();
+      return sleep(opts.wait || 800).then(tick);
+    }
+    return tick();
+  }
+
   /* 关注页收割：滚 → 收 → 滚 …… 直到追平（翻到上次抓取之前的视频）或滚不动为止
      opts: { horizon, maxMs, uidMap, newest, shouldStop, onPage, stableMax }
      返回 { list, pages, covered, oldest, rounds, ms } —— list 就是新视频明细 */
@@ -1389,6 +1518,50 @@
   /* ★ 10-04：改成逐屏滚动后，一轮 = 一屏，轮数要够（几百个号 / 每屏十来个）；
      等待可以短一些（滚一屏后渲染很快，不再是等一整页网络）。 */
   var SIDE_HARVEST_WAIT = 800;
+  /* ★★ 22:50：直接从【抖音关注列表接口】读每个号「几个作品未看」+ 具体是哪几条。
+     做法：让抖音自己去翻关注列表（滚侧栏触发它发请求），我们一路收它自己的响应，
+     解析里面的 not_seen_item_id_list_v2。全程一个自签请求都不发（自签必 403）。 */
+  function readApiUnread() {
+    if (!onFollowPage()) {
+      S.pendingAllBadge = { at: Date.now(), api: 1 };
+      save();
+      toast('要抖音的「关注」页才能读到，正在带你去…');
+      setTimeout(function () { try { location.href = '/follow'; } catch (e) { location.reload(); } }, 600);
+      return Promise.resolve(-1);
+    }
+    var SIDE_PREV = S.apiUnread || {};
+    var SIDE_TOTAL = 0;
+    try { var mt = (document.body ? (document.body.innerText || '') : '').match(/我的关注\s*[（(]\s*(\d+)\s*[）)]/); if (mt) SIDE_TOTAL = parseInt(mt[1], 10); } catch (e0) { }
+    setBody('<div class="dyh-back" data-act="manage">← 返回</div>' +
+      '<div class="dyh-prog" id="dyh-prog">🔌 正在从抖音接口读未读数…<br>' +
+      '<span style="font-size:19px">收的是抖音关注列表自己返回的数据（含直播号）</span></div>');
+    return harvestApiUnread({
+      maxRounds: 200, wait: 800, total: SIDE_TOTAL,
+      onTick: function (p) {
+        var el = document.getElementById('dyh-prog');
+        if (el) el.innerHTML = '🔌 正在从抖音接口读未读数…<br><span style="font-size:19px">' +
+          '已拿到 <b>' + p.got + '</b> 个号的未读数 · 接口返回了 <b>' + p.users + '</b> 条账号记录' +
+          (SIDE_TOTAL > 0 ? ' · 关注共 <b>' + SIDE_TOTAL + '</b> 个' : '') + '</span>' +
+          '<br><span style="font-size:17px;color:#7A6A3F">第 ' + p.round + ' 屏（让它自己滚，别手动划）</span>';
+      }
+    }).then(function (acc) {
+      var k, map = acc.map || {};
+      /* 落盘：{sec: {n, ids, nickname, at}}，另存一份按昵称的索引方便对号 */
+      S.apiUnread = { __byName: {} };
+      for (k in map) {
+        if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
+        S.apiUnread[k] = { n: map[k].n, ids: map[k].ids || [], nickname: map[k].nickname || '', at: Date.now() };
+        if (map[k].nickname) S.apiUnread.__byName[normName(map[k].nickname)] = map[k];
+      }
+      S.apiUnreadAt = Date.now();
+      save();
+      open('manage');
+      var known = Object.keys(map).length;
+      toast('接口读到了 ' + known + ' 个号的未读数（共收到 ' + acc.users + ' 条账号记录）');
+      return known;
+    });
+  }
+
   function readAllBadges() {
     if (!onFollowPage()) {
       S.pendingAllBadge = { at: Date.now() };
@@ -2546,9 +2719,20 @@
      不知道 = 既没读到官方角标、也没有未读边界。此时**绝不能拿视频库条数冒充未读数** ——
      那个 16 就是这么来的（我们库里存了 16 条，就报"16 条未读"），而抖音 App 里只有 5。
      宁可显示「需重读」，也不编一个看起来很像真的数字。 */
+  /* 接口里这个号的未读（{n, ids, nickname, at}），取不到返回 null */
+  function apiUnreadOf(a) {
+    if (!a || !S.apiUnread) return null;
+    var v = null;
+    if (a.secUserId) v = S.apiUnread[a.secUserId];
+    if (!v && a.name && S.apiUnread.__byName) v = S.apiUnread.__byName[normName(a.name)];
+    return v || null;
+  }
+
   function accUnreadUnknown(a) {
     if (!a || a._ghost) return false;
     if (accFreshN(a) || accBadgeOf(a)) return false;
+    /* ★ 接口给的明确数字（哪怕 0）也算已知 —— 这是最可信的一档 */
+    if (apiUnreadOf(a)) return false;
     if (accCursorOf(a) >= 0) return false;
     var du = S.domUnread;
     if (du && du.ts && Date.now() - du.ts <= SNAP_VALID_MS) {
@@ -2569,6 +2753,11 @@
   function accUnread(a, um) {
     if (!a) return 0;
     if (a._ghost) return localUnread(a, um);          // 非关注的推荐号：抖音不会给它未读数
+    /* ★★★ ⓪ 抖音关注列表【接口】给的未读 id 列表（22:50 新增，最可信）
+         证据在抖音前端 async/1463.js：notSeenItemList = not_seen_item_id_list_v2 ?? not_seen_item_id_list
+         页面上的「N个作品未看」就是这个的长度。直播号在页面上不显示，但接口里照样有 → 这档能救它。 */
+    var api = apiUnreadOf(a);
+    if (api) return api.n;
     /* ① 刚按官方角标算出来的 N（最可信：就是 App 里那个数） */
     var mu = accFreshN(a);
     if (mu) return mu.n;
@@ -2854,6 +3043,9 @@
 
     /* ★★ 23:55：「一次读全部」——单号去读要滚很多次才轮到它，这里一次性把侧栏滚到底，
        把抖音写的未读数【全部】读下来（这个数与 App 同源，就是权威值）。 */
+    /* ★ 22:50：推荐走这条 —— 直接读抖音接口里的 not_seen_item_id_list_v2，
+       比数页面上的角标准，连「直播号」都有（页面上不显示而已）。 */
+    h += '<button class="dyh-btn primary" data-act="read-api-unread">🔌 从抖音接口读未读数（推荐·含直播号）</button>';
     h += '<button class="dyh-btn primary" data-act="read-all-badges">📡 读全部账号的官方未读数</button>';
     h += '<div class="dyh-tip" style="margin-top:2px">把抖音「关注」页左侧列表<b>滚到底</b>，每行写的「N个作品未看」<b>全部抄下来</b>，' +
       '然后整个面板（未读列表 / 分类统计 / 首页未读总数）都按它更新。共 ' + S.accounts.length + ' 个号。<br>' +
@@ -3496,6 +3688,7 @@
       '全部 ' + S.accounts.length + ' 个账号：上限 6 大约 2~5 分钟，上限 3 大约 4~8 分钟。</div>';
     /* ★ 23:30：未读数和 App 对不上时，先做这个 —— 把抖音网页端的原始证据抄出来，别再猜 */
     h += '<label class="dyh-lb">🩺 未读数字体检 / 一键读全部</label>';
+    h += '<button class="dyh-btn primary" data-act="read-api-unread">🔌 从抖音接口读未读数（推荐·含直播号）</button>';
     h += '<button class="dyh-btn" data-act="read-all-badges">📡 读全部账号的官方未读数（把侧栏滚到底）</button>';
     h += (NET.wide > Date.now())
       ? '<div class="dyh-tip" style="color:#c8920a">🌐 接口扫描进行中…现在去抖音关注页上下滚几屏，60 秒后自动出结果（可以先把面板收起）。</div>'
@@ -4062,6 +4255,7 @@
       return;
     }
     if (act === 'probe-copy') { copyProbeText(); return; }
+    if (act === 'read-api-unread') { readApiUnread(); return; }
     if (act === 'net-scan') { startNetScan(); return; }
     /* ★ 23:55：一次把全部账号的官方未读数读下来（把侧栏滚到底） */
     if (act === 'read-all-badges') { readAllBadges(); return; }
@@ -4276,8 +4470,11 @@
     /* ★ 23:55：「读全部账号的官方未读数」被带到 /follow 之后自动续跑 */
     try {
       if (S.pendingAllBadge && Date.now() - S.pendingAllBadge.at < 180000) {
+        var apiMode = !!S.pendingAllBadge.api;
         S.pendingAllBadge = null; save();
-        if (onFollowPage()) setTimeout(function () { try { readAllBadges(); } catch (e) { } }, 1500);
+        if (onFollowPage()) setTimeout(function () {
+          try { if (apiMode) readApiUnread(); else readAllBadges(); } catch (e) { }
+        }, 1500);
       } else if (S.pendingAllBadge) { S.pendingAllBadge = null; save(); }
     } catch (e) { }
     console.log('[抖音关注助手] 已加载。右下角 🎯 按钮打开面板。');
@@ -4355,6 +4552,13 @@
     netCleanUrl: netCleanUrl,
     netWideRecord: netWideRecord,
     startNetScan: startNetScan,
+    netPush: netPush,
+    collectFollowingUnread: collectFollowingUnread,
+    harvestApiUnread: harvestApiUnread,
+    readApiUnread: readApiUnread,
+    apiUnreadOf: apiUnreadOf,
+    findUserArray: findUserArray,
+    pullUnreadIds: pullUnreadIds,
     harvestFollowPage: harvestFollowPage,
     push: function () { return ghPush('unread.json', JSON.stringify(buildPayload()), '手机端更新 ' + fmtTime(Date.now())); },
     openPanel: function () { open('home'); }
