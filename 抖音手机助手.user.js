@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-06 00:50 · UI 大瘦身：删掉单号「抓这个号的未读」按钮与满屏批注说明；首页新增「📖 正确操作步骤」；未读数只信「从抖音接口读未读数 / 从网页内存直接读」两个权威源按钮
+// @version      2026-10-06 02:10 · 未读数准确性大修：修掉「合并取最大值导致只看不减」「覆盖不全就清空其余账号权威数据」「读取前不清陈旧缓冲」三个让数字虚高/乱变的 bug；账号页新增「还差明细」缺口说明
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -241,8 +241,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-06 00:50 · UI 大瘦身：删掉单号「抓这个号的未读」按钮与满屏批注说明；首页新增「正确操作步骤」；未读数只信「从抖音接口读未读数 / 从网页内存直接读」两个权威源';
-  var VER_SHORT = '10-06 00:50';
+  var VER = '2026-10-06 02:10 · 未读数准确性大修：修掉「合并取最大值导致只看不减」「覆盖不全就清空其余账号权威数据」「读取前不清陈旧缓冲」三个让数字虚高/乱变的 bug；账号页新增「还差明细」缺口说明';
+  var VER_SHORT = '10-06 02:10';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -856,9 +856,12 @@
           if (ids) { n = ids.length; src = 'ids'; }
           else if (u.user_not_see != null) { n = parseInt(u.user_not_see, 10); src = 'count'; }
           if (!(n >= 0)) continue;                            // 两者都没有 = 这个号不知道
-          var old = out.map[sec];
-          if (!old || n > old.n) out.map[sec] = { n: n, ids: ids || [], nickname: nm, src: src };
-          if (nm && (out.byName[nm] == null || n > out.byName[nm])) out.byName[nm] = n;
+          /* ★ 10-06 修正：以【最后一份响应】为准 —— NET.buf 是按到达顺序存的，后到的更新。
+             旧写法「取历史最大值」有个致命后果：你刷掉几条之后再读，数字只会虚高、绝不回落，
+             清单里还一直留着早就看过的视频。改成覆盖后又有的优雅性质：
+             同一账号在多页重复出现时值相同，取最后一份不影响结果。 */
+          out.map[sec] = { n: n, ids: ids || [], nickname: nm, src: src };
+          if (nm) out.byName[nm] = n;
         }
       }
       out.n = Object.keys(out.map).length;
@@ -1093,12 +1096,13 @@
       if (got.users > acc.users) acc.users = got.users;
       for (k in got.map) {
         if (!Object.prototype.hasOwnProperty.call(got.map, k)) continue;
-        var nv = got.map[k], ov = acc.map[k];
-        if (!ov || nv.n > ov.n) acc.map[k] = nv;
+        /* ★ 10-06 修正：同样以最新一份为准（collectFollowingUnread 已是「后来的覆盖先来的」），
+           不再取历史最大值 —— 否则看完的号永远回落不了。 */
+        acc.map[k] = got.map[k];
       }
       for (k in got.byName) {
         if (!Object.prototype.hasOwnProperty.call(got.byName, k)) continue;
-        if (acc.byName[k] == null || got.byName[k] > acc.byName[k]) acc.byName[k] = got.byName[k];
+        acc.byName[k] = got.byName[k];
       }
       acc.got = Object.keys(acc.map).length;
     }
@@ -1143,13 +1147,32 @@
           这样即使接口数据过期了，本机兜底算出来的也不会跑偏。
 
      返回 { known, sumN, haveN, missN, revived } */
-  function applyApiUnreadAll(map) {
-    var st = { known: 0, sumN: 0, haveN: 0, missN: 0, revived: 0 };
-    if (!map) return st;
-    S.apiUnread = { __byName: {} };
+  function applyApiUnreadAll(map, opts) {
+    opts = opts || {};
+    var st = { known: 0, sumN: 0, haveN: 0, missN: 0, revived: 0, kept: 0, staleDropped: 0 };
+    /* ★ 10-06 重大修正：本轮【没读到】的号，必须保留它上一次的权威数据。
+       旧写法第一行就是 S.apiUnread = { __byName: {} } —— 整体重建。于是只要这一轮
+       没滚到某个号（harvestApiUnread 覆盖到 85% 就收工 / 连续 8 屏无新增也收工 /
+       单号扫描只带回来 1 个号），那个号的权威未读数就被抹掉，悄悄退回本机估算。
+       表现就是：明明读过，过一会儿再看数字又变了、而且变小或变乱。 */
+    if (!map) map = {};
+    if (!S.apiUnread || typeof S.apiUnread !== 'object') S.apiUnread = {};
+    if (!S.apiUnread.__byName || typeof S.apiUnread.__byName !== 'object') S.apiUnread.__byName = {};
+
+    /* 超过 12 小时的旧记录先清掉 —— 保留归保留，但不能让它赖着冒充今天的数 */
+    var _now0 = Date.now(), _k0;
+    for (_k0 in S.apiUnread) {
+      if (!Object.prototype.hasOwnProperty.call(S.apiUnread, _k0)) continue;
+      if (_k0 === '__byName') continue;
+      var _oe = S.apiUnread[_k0];
+      if (_oe && _oe.at && _now0 - _oe.at > API_UNREAD_VALID_MS) {
+        delete S.apiUnread[_k0]; st.staleDropped++;
+      }
+    }
+
     var k, i, allIds = {}, secids = {}, order = [];
 
-    /* ---- 第一遍：落盘 + 收集所有「未看视频 id」 ---- */
+    /* ---- 第一遍：落盘 + 收集本轮所有「未看视频 id」 ---- */
     for (k in map) {
       if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
       var it = map[k] || {};
@@ -1158,10 +1181,19 @@
       st.known++; st.sumN += n;
       var rec = { n: n, ids: ids0, nickname: nm, at: Date.now() };
       S.apiUnread[k] = rec;
-      if (nm) S.apiUnread.__byName[normName(nm)] = rec;
       order.push(k);
       secids[k] = ids0;
       for (i = 0; i < ids0.length; i++) allIds[String(ids0[i])] = 1;
+    }
+    /* 数一数「本轮没读到、但上次的数还在」的号，同时重建 __byName 索引
+       （旧索引条目可能还指着刚被过期清掉的 rec，必须重挂一遍） */
+    S.apiUnread.__byName = {};
+    for (k in S.apiUnread) {
+      if (!Object.prototype.hasOwnProperty.call(S.apiUnread, k)) continue;
+      if (k === '__byName') continue;
+      if (order.indexOf(k) < 0) st.kept++;
+      var _e0 = S.apiUnread[k];
+      if (_e0 && _e0.nickname) S.apiUnread.__byName[normName(_e0.nickname)] = _e0;
     }
     S.apiUnreadAt = Date.now();
 
@@ -1334,6 +1366,10 @@
     var SIDE_PREV = S.apiUnread || {};
     var SIDE_TOTAL = 0;
     try { var mt = (document.body ? (document.body.innerText || '') : '').match(/我的关注\s*[（(]\s*(\d+)\s*[）)]/); if (mt) SIDE_TOTAL = parseInt(mt[1], 10); } catch (e0) { }
+    /* ★ 10-06 修正：开读之前，先把缓冲里【上一次遗留】的关注列表响应倒掉。
+       NET.buf 会留着最近 150 个响应、且不按时间淘汰 —— 不清的话，上一次（可能是几小时前）
+       读到的旧名单会和这一轮的新名单混在一起被解析，出来的数就是新旧掺假的。 */
+    var prevFoll = netTake('following');
     setBody('<div class="dyh-back" data-act="manage">← 返回</div>' +
       '<div class="dyh-prog" id="dyh-prog">🔌 正在从抖音接口读未读数…<br>' +
       '<span style="font-size:19px">收的是抖音关注列表自己返回的数据（含直播号）</span></div>');
@@ -1347,6 +1383,12 @@
           '<br><span style="font-size:17px;color:#7A6A3F">第 ' + p.round + ' 屏（让它自己滚，别手动划）</span>';
       }
     }).then(function (acc) {
+      /* ★ 兜底：万一这一轮抖音【一条关注列表响应都没发】（例如已经停在列表底部不再翻页），
+         就把刚才倒掉的那份放回去解析 —— 有数据总好过读成一片空白。 */
+      if ((!acc.users) && prevFoll.length) {
+        for (var pi = 0; pi < prevFoll.length; pi++) NET.buf.push(prevFoll[pi]);
+        acc = collectFollowingUnread();
+      }
       var map = acc.map || {};
       /* ★★ 读完就要把结果落到【每一个账号】：数量 + 未读视频清单 + 已看边界（一起更新） */
       var st = applyApiUnreadAll(map);
@@ -1354,6 +1396,8 @@
       h += '<div class="dyh-card">' +
         '<div class="dyh-row"><b>读到几个号</b><span class="dyh-hl">' + st.known + ' 个</span></div>' +
         '<div class="dyh-row"><b>合计未读</b><span class="dyh-hl">' + st.sumN + ' 条</span></div>' +
+        (st.kept ? '<div class="dyh-row"><b>沿用上次</b><span>' + st.kept +
+          ' 个号（这轮没滚到，沿用上次读到的数，不会乱变）</span></div>' : '') +
         '<div class="dyh-row"><b>本机已有明细</b><span>' + st.haveN + ' 条</span></div>' +
         '<div class="dyh-row"><b>还差明细</b><span>' + st.missN + ' 条</span></div>' +
         (st.revived ? '<div class="dyh-row"><b>改回未读</b><span>' + st.revived + ' 条（本机错标成已看的）</span></div>' : '') +
@@ -1425,6 +1469,8 @@
       h += '<div class="dyh-card">' +
         '<div class="dyh-row"><b>读到几个号</b><span class="dyh-hl">' + st.known + ' 个</span></div>' +
         '<div class="dyh-row"><b>合计未读</b><span class="dyh-hl">' + st.sumN + ' 条</span></div>' +
+        (st.kept ? '<div class="dyh-row"><b>沿用上次</b><span>' + st.kept +
+          ' 个号（这轮没滚到，沿用上次读到的数，不会乱变）</span></div>' : '') +
         '<div class="dyh-row"><b>本机已有明细</b><span>' + st.haveN + ' 条</span></div>' +
         '<div class="dyh-row"><b>还差明细</b><span>' + st.missN + ' 条</span></div>' +
         (st.revived ? '<div class="dyh-row"><b>改回未读</b><span>' + st.revived + ' 条（本机错标成已看的）</span></div>' : '') +
@@ -2975,6 +3021,8 @@
         (apiV.ids && apiV.ids.length ? 'not_seen_item_id_list（连哪几条都给了）' : 'user_not_see（只给了数量）') +
         ' · ' + age + '</span></div>' +
         '<div class="dyh-row"><b>　本机有详情</b><span>' + vids.length + ' 条</span></div>' +
+        (vids.length < apiV.n ? '<div class="dyh-row"><b>　还差明细</b><span style="color:#b88200">' +
+          (apiV.n - vids.length) + ' 条没抓回来</span></div>' : '') +
         '</div>';
       if (apiV.n > vids.length) {
 
@@ -3094,8 +3142,15 @@
         /* ② 从抖音接口读这个号的官方未读（not_seen_item_id_list_v2，和 App 同源）。
            让抖音自己翻关注列表，我们只收它自己的响应、一个自签请求都不发。 */
         prog('🔌 正在从抖音接口读官方未读…', '「' + esc(who) + '」未看的视频');
+        /* ★ 10-06 修正：同样先倒掉上一次遗留的响应，只收本轮抖音新返回的；
+           若这一轮它一条都没发，再把旧的放回去兜底，避免读成空白。 */
+        var prevFoll = netTake('following');
         return harvestApiUnread({ maxRounds: 80, wait: 800 })
           .then(function (got) {
+            if (got && (!got.users) && prevFoll.length) {
+              for (var pi = 0; pi < prevFoll.length; pi++) NET.buf.push(prevFoll[pi]);
+              got = collectFollowingUnread();
+            }
             if (got && got.map) applyApiUnreadAll(got.map);   // 落：数量 + 未读清单 + 已看边界
             var apiV = apiUnreadOf(acc);
             open('accv');
