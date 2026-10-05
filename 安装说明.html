@@ -823,7 +823,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-05 23:32 · 全面清理：删除全部角标/快照/估算/对账/诊断代理方法（readFollowUnreadDom、readBadgeWait、readAllBadges、serverUnread、accBadgeOf、accFreshN、accUnreadUnknown、reconUnread、sideProbe、netScan、applyBadgeCursors 等及其 S 状态），未读数量/清单只信任抖音接口 not_seen_item_id_list_v2（apiUnreadOf / S.apiUnread）与网页内存 fiber 直读（readApiUnread / readFiberUnread），scanUnread 仅保留抓视频。
+// @version      2026-10-06 00:50 · UI 大瘦身：删掉单号「抓这个号的未读」按钮与满屏批注说明；首页新增「📖 正确操作步骤」；未读数只信「从抖音接口读未读数 / 从网页内存直接读」两个权威源按钮
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -1063,8 +1063,8 @@ function copyRaw(){
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-05 00:15 · 你说得对：不该去「看页面上写了什么字」，那份数据抖音自己一定【存着】—— 直接去它存放的地方读。★ 我扒了抖音 bundle，里面出现 __REACT_DEVTOOLS_GLOBAL_HOOK__ / react-dom → 抖音 PC 网页端就是 React。接口回来的整份账号数据会被塞进组件的 props 和 useState 的 hook 链（fiber.memoizedProps / memoizedState），页面上那行「N个作品未看」只是这份数据【渲染出来的一个字】。★ 新增「🧬 从网页内存直接读」：顺着 DOM 元素上的 __reactFiber$ 找到 fiber，往上翻 props、往下扫 hook 链，把抖音存着的对象整份抄出来 —— 全程不看任何文字、不依赖标签名、不受界面规则影响。比读角标强在四处：① 直播号页面上不写角标，内存里照样有；② 虚拟滚动已经回收掉的行，只要抖音没丢弃就还读得到；③ 不用等它渲染成文字；④ 拿到的是 not_seen_item_id_list（具体哪几条），不只是个数。★ 读完同样走 applyApiUnreadAll：数量 + 未读视频清单 + 已看边界，一次性落到每一个账号。★ 体检新增【七】节：把内存里扫到几个 fiber、几个对象、找到几个带未读数据的账号、认到的是哪个字段，原样抄出来 —— 一眼确认抖音到底把数据存在哪。'
-  var VER_SHORT = '10-05 23:32';
+  var VER = '2026-10-06 00:50 · UI 大瘦身：删掉单号「抓这个号的未读」按钮与满屏批注说明；首页新增「正确操作步骤」；未读数只信「从抖音接口读未读数 / 从网页内存直接读」两个权威源';
+  var VER_SHORT = '10-06 00:50';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -3178,8 +3178,17 @@ function copyRaw(){
     h += '&lt;button class="dyh-btn" data-act="search"&gt;🔎 搜索并关注新账号&lt;/button&gt;';
     h += '&lt;button class="dyh-btn" data-act="push"&gt;☁️ 推到 GitHub（手机端 HTML 可看）&lt;/button&gt;';
     h += '&lt;button class="dyh-btn gray" data-act="settings"&gt;⚙️ 设置（GitHub / 数据）&lt;/button&gt;';
-    h += '&lt;div class="dyh-tip"&gt;标题后面那个 &lt;b&gt;' + VER_SHORT +
-      '&lt;/b&gt; 是版本号（生成时间 + 本次改动，完整说明在设置页最下面），用来确认手机上跑的是不是最新版。&lt;/div&gt;';
+    h += '&lt;div class="dyh-tip"&gt;标题后面那个 &lt;b&gt;' + VER_SHORT + '&lt;/b&gt; 是版本号，用来确认手机上跑的是不是最新版。&lt;/div&gt;';
+    h += '&lt;div class="dyh-card" style="background:#F0E6CC"&gt;' +
+      '&lt;div class="dyh-row" style="font-weight:bold"&gt;📖 正确操作步骤&lt;/div&gt;' +
+      '&lt;div class="dyh-tip" style="margin:6px 0 0"&gt;① 抖音网页版登录账号，进入「关注」页。&lt;br&gt;' +
+      '② 点右下角 🎯 打开本助手面板。&lt;br&gt;' +
+      '③ 点「📡 抓最新未读视频」——自动去关注页，把每个号的未看视频抓进本机（不会失败）。&lt;br&gt;' +
+      '④ 抓完点「📺 未读视频查看」，再点「🔌 从抖音接口读未读数」——把抖音自己标的未看数量（和 App 同源）读进来，面板未读总数就准了。&lt;br&gt;' +
+      '⑤ 点任意账号看未看视频，用抖音 App 打开观看（看过的自动记成已看）。&lt;/div&gt;' +
+      '&lt;div class="dyh-tip" style="margin:8px 0 0"&gt;📌 为什么要两步？「抓视频」只把视频抓下来；「读未读数」才向抖音要【准确数量 + 具体哪几条】（权威数，和 App 一致）。两者配合，数量才准。&lt;br&gt;' +
+      '⚠️ 若弹「允许网站打开抖音吗」：Via → 设置 → 高级设置 → 链接处理 → 改成「直接打开」。&lt;/div&gt;' +
+      '&lt;/div&gt;';
     return h;
   }
 
@@ -3574,9 +3583,7 @@ function copyRaw(){
         (sum &gt; have ? '&lt;div class="dyh-row"&gt;&lt;b&gt;　其中本机有明细&lt;/b&gt;&lt;span&gt;' + have + ' 条（还差 ' + (sum - have) + ' 条详情没抓到）&lt;/span&gt;&lt;/div&gt;' : '') +
         '&lt;/div&gt;';
     })();
-    h += '&lt;div class="dyh-tip" style="margin-top:2px"&gt;把抖音「关注」页左侧列表&lt;b&gt;滚到底&lt;/b&gt;，每行写的「N个作品未看」&lt;b&gt;全部抄下来&lt;/b&gt;，' +
-      '然后整个面板（未读列表 / 分类统计 / 首页未读总数）都按它更新。共 ' + S.accounts.length + ' 个号。&lt;br&gt;' +
-      '⚠️ &lt;b&gt;正在直播的号，网页端不写这个角标&lt;/b&gt;（真机截图已确认）—— 这类号会如实标成「未知」，不会瞎报 0。&lt;/div&gt;';
+
 
     /* ---- 搜索 ---- */
     h += '&lt;input id="dyh-mgr-kw" class="dyh-input" placeholder="搜公众号名称（留空看全部）" value="' + esc(MGR.kw || '') + '"&gt;';
@@ -3792,25 +3799,17 @@ function copyRaw(){
         '&lt;div class="dyh-row"&gt;&lt;b&gt;　本机有详情&lt;/b&gt;&lt;span&gt;' + vids.length + ' 条&lt;/span&gt;&lt;/div&gt;' +
         '&lt;/div&gt;';
       if (apiV.n &gt; vids.length) {
-        h += '&lt;div class="dyh-tip" style="color:#b88200"&gt;抖音说这个号有 &lt;b&gt;' + apiV.n + '&lt;/b&gt; 条没看，' +
-          '本机只存着 &lt;b&gt;' + vids.length + '&lt;/b&gt; 条的详情（缺 ' + (apiV.n - vids.length) + ' 条）。' +
-          '&lt;b&gt;下面列出来的是本机有详情的那几条&lt;/b&gt;，去首页「📡 抓最新未读视频」跑一轮就能补齐清单。&lt;/div&gt;';
+
       }
     })();
     /* 没读到官方未读时的诚实提示：下面列的是本机抓到的未读明细（受边界约束），数量可能不准 */
     if (!apiV || apiV.n == null) {
-      h += '&lt;div class="dyh-tip" style="color:#b88200"&gt;⚠️ &lt;b&gt;这个号的官方未读数现在还没读到&lt;/b&gt;（抖音接口没给 / 已过期）。' +
-        '下面列的是本机抓到的未读明细，&lt;b&gt;数量可能不准&lt;/b&gt;；点下面的「📡 抓这个号的未读」或回首页跑一轮「📡 抓最新未读视频」即可补上官方数字。&lt;/div&gt;';
+
     }
     /* ★ 2026-10-03 15:14 新增：
        抓这一个号的「N个作品未看」数量 + 对应的未读视频清单（只发几次请求，不用跑整轮、不用跳关注页）。 */
-    h += '&lt;button class="dyh-btn primary" data-act="acc-scan" data-sec="' + esc(sec) + '" data-name="' + esc(name) + '"&gt;' +
-      '📡 抓这个号的未读（数量 + 清单）&lt;/button&gt;';
-    h += '&lt;div class="dyh-tip" style="margin:0 0 10px"&gt;只抓&lt;b&gt;这一个号&lt;/b&gt;：抓它的作品 + 从抖音接口读它的&lt;b&gt;官方未读&lt;/b&gt;' +
-      '（not_seen_item_id_list_v2，和 App 同源），并列出对应的&lt;b&gt;未读视频&lt;/b&gt;。' +
-      '结果直接写进本机数据，&lt;b&gt;整个面板（未读列表、分类、首页未读总数）都会按它更新&lt;/b&gt;。&lt;/div&gt;';
-    h += '&lt;div class="dyh-tip"&gt;点任意一条 → 用&lt;b&gt;抖音 App&lt;/b&gt; 观看，唤起后&lt;b&gt;网页端不跳转、不做任何动作&lt;/b&gt;' +
-      '（面板原样留在这）；打开的同时记成已看，未读数当场减一。&lt;/div&gt;';
+
+
     /* 「唤起方式」开关：不同手机 / 不同浏览器对 scheme 和 intent 的放行程度不一样，
        哪个不弹「允许网站打开抖音吗」就锁哪个（点一下循环切换，会记住）。 */
     var om = S.cfg.openMode || 'scheme';
@@ -3818,9 +3817,7 @@ function copyRaw(){
     var omTxt = { scheme: '① 只 scheme（默认，发一次）', intent: '② 只 intent（写死包名）', auto: '③ 自动（scheme 失败再补 intent）' };
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;唤起方式&lt;/b&gt;' +
       '&lt;span class="dyh-mini" data-act="openmode" data-mode="' + esc(omNext) + '"&gt;' + esc(omTxt[om]) + ' ⇄&lt;/span&gt;&lt;/div&gt;';
-    h += '&lt;div class="dyh-tip" style="margin:4px 0 10px"&gt;还是弹「允许网站打开抖音吗」？那是 &lt;b&gt;Via 自己&lt;/b&gt;的框（网页关不掉）：' +
-      'Via → 设置 → 高级设置 → &lt;b&gt;链接处理 → 改成「直接打开」&lt;/b&gt;（或弹框时勾「记住选择」再点允许）。' +
-      '也可以点上面那颗按钮换一种唤起方式试试。&lt;/div&gt;';
+
     for (i = 0; i &lt; vids.length; i++) {
       var v = vids[i];
       h += '&lt;div class="dyh-vid" data-act="play" data-id="' + esc(v.awemeId) + '" data-url="' + esc(v.url) + '"&gt;' +
@@ -3996,44 +3993,34 @@ function copyRaw(){
     h += '&lt;label class="dyh-lb"&gt;仓库名&lt;/label&gt;&lt;input id="dyh-repo" class="dyh-input" value="' + esc(S.cfg.repo) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;分支&lt;/label&gt;&lt;input id="dyh-branch" class="dyh-input" value="' + esc(S.cfg.branch) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;Token&lt;/label&gt;&lt;input id="dyh-token" class="dyh-input" type="password" value="' + esc(S.cfg.token) + '" placeholder="ghp_xxx"&gt;';
-    h += '&lt;div class="dyh-tip" style="margin-top:2px"&gt;助手面板已固定&lt;b&gt;铺满整块手机屏&lt;/b&gt;（切换大小的功能按你的要求取消了）。&lt;/div&gt;';
+
     /* ★ 抓法总开关（10-03 02:20）：「关注页收割」是我们不再失败的通道 —— 请求由抖音前端自己发。
        万一哪天它不灵（比如你用桌面 UA 看到的页面结构变了），可以关掉退回纯自签请求的旧路。 */
     var hvOn = S.cfg.harvest !== false;
     h += '&lt;label class="dyh-lb"&gt;抓未读的主通道&lt;/label&gt;&lt;div style="display:flex;gap:8px;margin:6px 0 4px"&gt;' +
       '&lt;button class="dyh-btn' + (hvOn ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="harvest-mode" data-mode="on"&gt;关注页收割（推荐·不失败）&lt;/button&gt;' +
       '&lt;button class="dyh-btn' + (!hvOn ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="harvest-mode" data-mode="off"&gt;老办法（自己发请求）&lt;/button&gt;' +
-      '&lt;/div&gt;' +
-      '&lt;div class="dyh-tip" style="margin-top:2px"&gt;&lt;b&gt;关注页收割&lt;/b&gt;：点「抓未读」时会先把你带到抖音&lt;b&gt;「关注」页&lt;/b&gt;，' +
-      '然后在页面里往下滚 —— 翻页的请求是&lt;b&gt;抖音自己的前端发的&lt;/b&gt;（带完整签名和真设备指纹），服务端必然给它 200，' +
-      '所以&lt;b&gt;不存在「获取失败」&lt;/b&gt;；我们只把它收到的响应抄一份。顺带还会直接读页面上抖音写的「N个作品未看」，那是真实未读数。&lt;br&gt;' +
-      '&lt;b&gt;老办法&lt;/b&gt;：脚本自己拼参数发请求，现在大概率被抖音风控（403）—— 只在收割不灵时才用。&lt;/div&gt;';
+      '&lt;/div&gt;';
+
     var md = S.cfg.scanMode === 'post' ? 'post' : 'auto';
     h += '&lt;label class="dyh-lb"&gt;抓取方式&lt;/label&gt;&lt;div style="display:flex;gap:8px;margin:6px 0 4px"&gt;' +
       '&lt;button class="dyh-btn' + (md === 'auto' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="auto"&gt;智能（默认，推荐）&lt;/button&gt;' +
       '&lt;button class="dyh-btn' + (md === 'post' ? ' primary' : '') + '" style="flex:1;text-align:center" data-act="scan-mode" data-mode="post"&gt;只逐个抓&lt;/button&gt;' +
-      '&lt;/div&gt;' +
-      '&lt;div class="dyh-tip" style="margin-top:2px"&gt;&lt;b&gt;智能（默认）&lt;/b&gt; = 先用「关注页信息流」按时间倒序翻，翻到&lt;b&gt;上次抓取的位置&lt;/b&gt;就算追平' +
-      '（追平后 0 次逐个请求，也一个不漏 —— 自上次以来发过视频的账号必定都在信息流里）；' +
-      '万一信息流提前结束，没追平的账号照样逐个补。&lt;b&gt;日常只要 2~5 次请求，又快又不容易被风控。&lt;/b&gt;&lt;br&gt;' +
-      '&lt;b&gt;只逐个抓&lt;/b&gt; = 一个账号一个请求（392 个号就是 392 次请求，慢且容易被限流），一般不用选。&lt;/div&gt;';
+      '&lt;/div&gt;';
+
     h += '&lt;label class="dyh-lb"&gt;每次抓前几个账号（留空 = 全部 ' + S.accounts.length + ' 个）&lt;/label&gt;' +
       '&lt;input id="dyh-limit" class="dyh-input" type="number" min="0" inputmode="numeric" value="' + (S.cfg.scanLimit || 0) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;并发【上限】1~10（默认 6）&lt;/label&gt;' +
       '&lt;input id="dyh-conc" class="dyh-input" type="number" min="1" max="10" inputmode="numeric" value="' + (S.cfg.scanConc || 6) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;整轮最长几分钟（超时自动收尾，0 = 不限制）&lt;/label&gt;' +
       '&lt;input id="dyh-budget" class="dyh-input" type="number" min="0" max="60" inputmode="numeric" value="' + (S.cfg.scanBudget || 12) + '"&gt;';
-    h += '&lt;div class="dyh-tip"&gt;&lt;b&gt;不用改设置也能跑得又快又稳&lt;/b&gt;：开局只打 &lt;b&gt;3&lt;/b&gt; 个，抖音不拒绝就慢慢加到上限；' +
-      '一旦连续失败或看到风控提示，立刻砍半并冷却，绝不会把整轮搞崩。&lt;br&gt;' +
-      '想更快 → 上限填 &lt;b&gt;8~10&lt;/b&gt;；还是失败多 → 上限填 &lt;b&gt;3~4&lt;/b&gt;（慢一点但几乎不失败）。&lt;br&gt;' +
-      '全部 ' + S.accounts.length + ' 个账号：上限 6 大约 2~5 分钟，上限 3 大约 4~8 分钟。&lt;/div&gt;';
+
     /* ★ 未读数只信任抖音接口 / 网页内存里的权威数据（not_seen_item_id_list_v2，和 App 同源）。
        以下两个按钮直接读这份数据，读完整个面板的未读数 / 未读清单都会按它更新。 */
     h += '&lt;label class="dyh-lb"&gt;📡 读抖音官方未读数（权威源）&lt;/label&gt;';
     h += '&lt;button class="dyh-btn primary" data-act="read-fiber-unread"&gt;🧬 从网页内存直接读（推荐·最准）&lt;/button&gt;';
     h += '&lt;button class="dyh-btn primary" data-act="read-api-unread"&gt;🔌 从抖音接口读未读数（推荐·含直播号）&lt;/button&gt;';
-    h += '&lt;div class="dyh-tip" style="margin-top:2px"&gt;未读数和抖音 App 对不上时：先去抖音「关注」页往下滚几屏（让侧栏加载出账号），' +
-      '再回来点上面任一按钮 —— 它会把每个号的「未看作品 id 列表」读出来，&lt;b&gt;数量&lt;/b&gt;和&lt;b&gt;具体哪几条视频&lt;/b&gt;都给你。&lt;/div&gt;';
+
     h += '&lt;button class="dyh-btn primary" data-act="save-settings"&gt;💾 保存&lt;/button&gt;';
     /* 皮肤自检：直接把浏览器【实际算出来】的底色打印出来。
        如果这里显示的是白色/透明，说明有别的东西（旧脚本的样式表 / Via 的夜间模式）在压我们 ——
@@ -4041,9 +4028,7 @@ function copyRaw(){
     h += '&lt;label class="dyh-lb"&gt;🎨 浅黄皮肤自检&lt;/label&gt;';
     h += '&lt;div class="dyh-card"&gt;&lt;div class="dyh-tip" style="margin:0"&gt;' + skinProbe() + '&lt;/div&gt;&lt;/div&gt;';
     h += '&lt;button class="dyh-btn" data-act="reskin"&gt;🔧 重刷皮肤（底色被压回白色时点这个）&lt;/button&gt;';
-    h += '&lt;div class="dyh-tip" style="margin-top:2px"&gt;如果自检里写到 &lt;b&gt;rgb(255, 255, 255)&lt;/b&gt; 或 &lt;b&gt;rgba(0,0,0,0)&lt;/b&gt;：' +
-      '① 点一下上面这颗「重刷皮肤」；② 还是白 → 你手机里多半&lt;b&gt;还装着旧版脚本&lt;/b&gt;（在 Via 的脚本/书签里把旧的删掉，只留一个）；' +
-      '③ 开着 &lt;b&gt;Via 的夜间模式 / 深色网页&lt;/b&gt; 会把浅色反掉，先关掉再看。&lt;/div&gt;';
+
     h += '&lt;button class="dyh-btn gray" data-act="clear-job"&gt;🧹 清掉抓取断点（下次全部重抓）&lt;/button&gt;';
     h += '&lt;button class="dyh-btn" data-act="export"&gt;📤 导出数据到手机本地（下载 json）&lt;/button&gt;';
     h += '&lt;button class="dyh-btn gray" data-act="clear"&gt;🗑 清空本地数据&lt;/button&gt;';
