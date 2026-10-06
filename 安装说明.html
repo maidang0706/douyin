@@ -823,7 +823,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-06 11:52 · 接口读未读数「抓不到」修复：netKind 放宽匹配 + 响应体带未看字段即兜底捕获（路径/域名变了也能抓）+ 账号对象包一层也能解析 + 滚动补发 wheel 逼翻页 + 结果页显示「捕获 N 份响应」诊断
+// @version      2026-10-06 12:23 · 抓完自动读未读数（无需手动同步）+ 覆盖度达标才收工修复对不上 + 删除「从网页内存直接读」按钮
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -1075,8 +1075,8 @@ function copyRaw(){
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-06 11:52 · 接口读未读数「抓不到」修复：netKind 放宽匹配 + 响应体带未看字段即兜底捕获（路径/域名变了也能抓）+ 账号对象包一层也能解析 + 滚动补发 wheel 逼翻页 + 结果页显示「捕获 N 份响应」诊断';
-  var VER_SHORT = '10-06 11:52';
+  var VER = '2026-10-06 12:23 · 抓完自动读未读数（无需手动同步）+ 覆盖度达标才收工修复对不上 + 删除「从网页内存直接读」按钮';
+  var VER_SHORT = '10-06 12:23';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1612,18 +1612,22 @@ function copyRaw(){
       if (sc) {
         var step = Math.max(Math.floor(sc.clientHeight * 0.85), 300);
         var before = sc.scrollTop;
-        sc.scrollTop = before + step;                  // ★ 只滚一屏
+        sc.scrollTop = before + step;                  // ★ 滚一屏
+        /* ★ 10-06 修：虚拟滚动列表有时要吃「事件」才肯加载下一批，光改 scrollTop 不够 */
+        try { sc.dispatchEvent(new Event('scroll', { bubbles: true })); } catch (e) { }
+        try { if (typeof sc.scrollBy === 'function') sc.scrollBy(0, step); } catch (e) { }
         if (sc.scrollTop &gt; before + 1) moved = true;
-        else if (before &gt; 0) sc.scrollTop = 0;         // 真到底了：回顶部，再走一轮（别漏顶上的号）
+        else if (before &gt; 0) { sc.scrollTop = 0; try { sc.dispatchEvent(new Event('scroll', { bubbles: true })); } catch (e) { } }  // 真到底：回顶再走一轮
       }
-      /* ★ 10-06 修：无论原生滚动是否生效，都补发 wheel，确保虚拟滚动列表翻页 */
+      /* 补发 wheel：对「只认手势、不认 scrollTop 改写」的列表有效 */
       if (hit) dispatchWheel(hit);
+      if (sc) dispatchWheel(sc);
       if (!moved) {
         var se = document.scrollingElement || document.documentElement;
         if (se) {
           var step2 = Math.max(Math.floor((se.clientHeight || 600) * 0.85), 300);
           var b2 = se.scrollTop;
-          window.scrollBy(0, step2);
+          try { se.scrollBy(0, step2); } catch (e) { window.scrollBy(0, step2); }
           if (se.scrollTop &gt; b2 + 1) moved = true;
           else if (b2 &gt; 0) window.scrollTo(0, 0);
         }
@@ -1653,7 +1657,13 @@ function copyRaw(){
        ② 拿到的不只是数量，还有【具体是哪几条视频】；
        ③ 不用等每一行渲染出来，抖音自己翻页我们收响应就行。
      =================================================================== */
-  var UNREAD_ID_KEYS = ['not_seen_item_id_list_v2', 'not_seen_item_id_list', 'notSeenItemIdList'];
+  /* 抖音在不同接口 / 不同版本里，未看作品 id 列表的字段名会变：
+     · not_seen_item_id_list_v2（关注列表接口，最常出现）
+     · not_seen_item_id_list（旧版 v1）
+     · notSeenItemList / notSeenItemIdList（bundle 里映射后的驼峰名）
+     全部收进来，哪个能拿到用哪个，避免因为字段改名就整批读成 0。 */
+  var UNREAD_ID_KEYS = ['not_seen_item_id_list_v2', 'not_seen_item_id_list',
+    'notSeenItemList', 'notSeenItemIdList'];
 
   /* 接口读来的未读数有效期：超过就当没读过，绝不让昨天的数压着今天显示（17:25 的教训）。 */
   var API_UNREAD_VALID_MS = 12 * 3600000;
@@ -1704,7 +1714,7 @@ function copyRaw(){
 
   /* 把已经捕获到的所有 following 响应解析成 { secUid: {n, ids, nickname, src} } */
   function collectFollowingUnread() {
-    var out = { map: {}, byName: {}, n: 0, users: 0 };
+    var out = { map: {}, byName: {}, n: 0, users: 0, seen: 0 };
     try {
       var i, j;
       for (i = 0; i &lt; NET.buf.length; i++) {
@@ -1721,6 +1731,7 @@ function copyRaw(){
           }
           var sec = u.sec_uid || u.secUid;
           if (!sec) continue;
+          out.seen++;                                  // ★ 覆盖度统计：扫到过的【账号总数】（不论有无未看）
           out.users++;
           var nm = u.nickname || u.nickName || '';
           var ids = pullUnreadIds(u);
@@ -1961,22 +1972,23 @@ function copyRaw(){
 
   function harvestApiUnread(opts) {
     opts = opts || {};
-    var acc = { map: {}, byName: {}, got: 0, users: 0, rounds: 0 };
-    var lastN = -1, stable = 0, round = 0, maxRounds = opts.maxRounds || 160;
+    var acc = { map: {}, byName: {}, got: 0, users: 0, seen: 0, rounds: 0 };
+    var lastSeen = -1, stable = 0, round = 0, maxRounds = opts.maxRounds || 400;
     function merge(got) {
       if (!got) return;
       var k;
-      if (got.users &gt; acc.users) acc.users = got.users;
+      /* ★ 10-06 修正：以最新一份为准（collectFollowingUnread 已是「后来的覆盖先来的」），
+         不再取历史最大值 —— 否则看完的号永远回落不了。 */
       for (k in got.map) {
         if (!Object.prototype.hasOwnProperty.call(got.map, k)) continue;
-        /* ★ 10-06 修正：同样以最新一份为准（collectFollowingUnread 已是「后来的覆盖先来的」），
-           不再取历史最大值 —— 否则看完的号永远回落不了。 */
         acc.map[k] = got.map[k];
       }
       for (k in got.byName) {
         if (!Object.prototype.hasOwnProperty.call(got.byName, k)) continue;
         acc.byName[k] = got.byName[k];
       }
+      if (got.users &gt; acc.users) acc.users = got.users;
+      if (got.seen &gt; acc.seen) acc.seen = got.seen;   // ★ 覆盖度：扫到过多少个账号
       acc.got = Object.keys(acc.map).length;
     }
     function tick() {
@@ -1987,14 +1999,26 @@ function copyRaw(){
       merge(collectFollowingUnread());
       if (opts.onTick) {
         try {
-          opts.onTick({ round: round, got: acc.got, users: acc.users });
+          opts.onTick({ round: round, got: acc.got, users: acc.users, seen: acc.seen });
         } catch (e) { }
       }
-      var n = Object.keys(acc.map).length;
-      if (opts.total &gt; 0 &amp;&amp; acc.users &gt;= Math.ceil(opts.total * 0.85)) return Promise.resolve(acc);
-      if (n === lastN) { stable++; } else { stable = 0; }
-      lastN = n;
-      if (stable &gt;= 8) return Promise.resolve(acc);
+      /* ★★ 覆盖度判定（2026-10-06 修正「对不上」的核心）：
+         以前只在「连续 8 轮没新增账号」就收工 —— 但 619 个号的关注列表要滚很多屏才能扫完，
+         前面几屏没扫到的号根本没被读到，它们的未读数就退回本机估算、和抖音对不上。
+         现在改为：扫到的账号数（seen）已经覆盖到【关注总数 92% 以上】才收工；
+         否则即使暂时没新增（虚拟滚动偶发卡顿），也继续滚，直到把列表扫完。
+         最多连续 idle 40 轮（约半分钟）还没进展才认栽，避免卡死不动。 */
+      /* 单号扫描（没传 total）时不做覆盖度判定，否则 target 退化为 acc.seen、
+         covered 恒为 1，会第一圈就返回、滚不到目标号 —— 退回 idle 40 轮 / maxRounds 收工。 */
+      if (opts.total) {
+        var covered = acc.seen / opts.total;
+        if (covered &gt;= 0.92) return Promise.resolve(acc);
+      }
+      /* 单号扫描专用：一旦在缓冲里找到目标号，立即收工（不用等整列扫完） */
+      if (opts.untilSec &amp;&amp; acc.map[opts.untilSec]) return Promise.resolve(acc);
+      if (acc.seen === lastSeen) { stable++; } else { stable = 0; }
+      lastSeen = acc.seen;
+      if (stable &gt;= 40) return Promise.resolve(acc);
       scrollFollowSidebar();
       return sleep(opts.wait || 800).then(tick);
     }
@@ -2025,8 +2049,8 @@ function copyRaw(){
     var st = { known: 0, sumN: 0, haveN: 0, missN: 0, revived: 0, kept: 0, staleDropped: 0 };
     /* ★ 10-06 重大修正：本轮【没读到】的号，必须保留它上一次的权威数据。
        旧写法第一行就是 S.apiUnread = { __byName: {} } —— 整体重建。于是只要这一轮
-       没滚到某个号（harvestApiUnread 覆盖到 85% 就收工 / 连续 8 屏无新增也收工 /
-       单号扫描只带回来 1 个号），那个号的权威未读数就被抹掉，悄悄退回本机估算。
+       没滚到某个号（harvestApiUnread 覆盖度没到 92% 就提前收工 / 单号扫描只带回来 1 个号），
+       那个号的权威未读数就被抹掉，悄悄退回本机估算。
        表现就是：明明读过，过一会儿再看数字又变了、而且变小或变乱。 */
     if (!map) map = {};
     if (!S.apiUnread || typeof S.apiUnread !== 'object') S.apiUnread = {};
@@ -2251,8 +2275,8 @@ function copyRaw(){
       onTick: function (p) {
         var el = document.getElementById('dyh-prog');
         if (el) el.innerHTML = '🔌 正在从抖音接口读未读数…&lt;br&gt;&lt;span style="font-size:19px"&gt;' +
-          '已拿到 &lt;b&gt;' + p.got + '&lt;/b&gt; 个号的未读数 · 接口返回了 &lt;b&gt;' + p.users + '&lt;/b&gt; 条账号记录' +
-          (SIDE_TOTAL &gt; 0 ? ' · 关注共 &lt;b&gt;' + SIDE_TOTAL + '&lt;/b&gt; 个' : '') + '&lt;/span&gt;' +
+          '已拿到 &lt;b&gt;' + p.got + '&lt;/b&gt; 个号的未读数 · 扫到 &lt;b&gt;' + (p.seen || p.users) + '&lt;/b&gt; 个账号' +
+          (SIDE_TOTAL &gt; 0 ? ' / 关注共 &lt;b&gt;' + SIDE_TOTAL + '&lt;/b&gt; 个' : '') + '&lt;/span&gt;' +
           '&lt;br&gt;&lt;span style="font-size:17px;color:#7A6A3F"&gt;第 ' + p.round + ' 屏（让它自己滚，别手动划）&lt;/span&gt;';
       }
     }).then(function (acc) {
@@ -2291,12 +2315,20 @@ function copyRaw(){
         (st.revived ? '&lt;div class="dyh-row"&gt;&lt;b&gt;改回未读&lt;/b&gt;&lt;span&gt;' + st.revived + ' 条（本机错标成已看的）&lt;/span&gt;&lt;/div&gt;' : '') +
         '&lt;div class="dyh-row"&gt;&lt;b&gt;捕获关注列表响应&lt;/b&gt;&lt;span&gt;' + diagResp + ' 份 · 含 ' + diagUsers +
           ' 条账号记录 · ' + diagField + ' 个带未看列表&lt;/span&gt;&lt;/div&gt;' +
+        (SIDE_TOTAL &gt; 0 ? '&lt;div class="dyh-row"&gt;&lt;b&gt;覆盖账号&lt;/b&gt;&lt;span&gt;' + (acc.seen || 0) + ' / ' + SIDE_TOTAL +
+          ' 个（' + Math.round((acc.seen || 0) / SIDE_TOTAL * 100) + '%）&lt;/span&gt;&lt;/div&gt;' : '') +
         '&lt;/div&gt;';
       /* 诊断提示：如果「捕获关注列表响应 = 0」，说明钩子没抓到抖音的接口，问题在捕获层而非解析层 */
       if (!diagResp) {
         h += '&lt;div class="dyh-tip" style="color:#f53f3f"&gt;⚠ 这一轮没在缓冲里捕获到任何「关注列表」接口响应（捕获数=0）。' +
           '可能原因：① 当前不在抖音「关注」页（先点左侧「关注」）；② 抖音换了接口地址；' +
           '③ 页面刚加载、还没发请求 —— 等账号列表出来、手动把左侧账号列表往下滑几屏后再点一次。&lt;/div&gt;';
+      }
+      /* ★ 覆盖度提示：扫到的账号不到 90%，说明还有号没读到，它们会退回旧值/本机估算 → 对不上 */
+      if (SIDE_TOTAL &gt; 0 &amp;&amp; (acc.seen || 0) &lt; Math.ceil(SIDE_TOTAL * 0.9)) {
+        h += '&lt;div class="dyh-tip" style="color:#b88200"&gt;⚠ 只扫到 &lt;b&gt;' + (acc.seen || 0) + ' / ' + SIDE_TOTAL +
+          '&lt;/b&gt; 个账号（不到 90%），没扫到的号未读数可能还是旧值或本机估算，会跟抖音对不上。' +
+          '多半是关注列表太长、这一轮没滚到底 —— 在抖音「关注」页手动把左侧账号列表多滚几屏，再来一次即可补全。&lt;/div&gt;';
       }
       if (st.missN &gt; 0) {
         h += '&lt;div class="dyh-tip" style="color:#b88200"&gt;抖音说有 &lt;b&gt;' + st.sumN + '&lt;/b&gt; 条没看，' +
@@ -2316,81 +2348,6 @@ function copyRaw(){
 
   /* ★ 00:15 · 「从网页内存里读」入口：滚 → 从 React 状态里把抖音存的那份数据抄出来
      全程不读页面上的任何文字，只看抖音自己放在内存里的对象。 */
-  function readFiberUnread() {
-    if (!onFollowPage()) {
-      S.pendingAllBadge = { at: Date.now(), fiber: 1 };
-      save();
-      toast('要抖音的「关注」页才能读到，正在带你去…');
-      setTimeout(function () { try { location.href = '/follow'; } catch (e) { location.reload(); } }, 600);
-      return Promise.resolve(-1);
-    }
-    var TOTAL = 0;
-    try { var mt = (document.body ? (document.body.innerText || '') : '').match(/我的关注\s*[（(]\s*(\d+)\s*[）)]/); if (mt) TOTAL = parseInt(mt[1], 10); } catch (e0) { }
-    setBody('&lt;div class="dyh-back" data-act="manage"&gt;← 返回&lt;/div&gt;' +
-      '&lt;div class="dyh-prog" id="dyh-prog"&gt;🧬 正在从网页内存里读…&lt;br&gt;' +
-      '&lt;span style="font-size:19px"&gt;直接读抖音自己存的那份数据（不看页面上的字）&lt;/span&gt;&lt;/div&gt;');
-
-    var acc = { map: {}, byName: {}, got: 0, users: 0 };
-    var lastN = -1, stable = 0, round = 0, maxRounds = 140;
-    function tick() {
-      if (round &gt;= maxRounds) return Promise.resolve(acc);
-      round++;
-      mergeUnreadMap(acc, collectFiberUnread({ quick: true }));
-      var el = document.getElementById('dyh-prog');
-      if (el) el.innerHTML = '🧬 正在从网页内存里读…&lt;br&gt;&lt;span style="font-size:19px"&gt;' +
-        '已拿到 &lt;b&gt;' + acc.got + '&lt;/b&gt; 个号的未读数' +
-        (TOTAL &gt; 0 ? ' · 关注共 &lt;b&gt;' + TOTAL + '&lt;/b&gt; 个' : '') + '&lt;/span&gt;' +
-        '&lt;br&gt;&lt;span style="font-size:17px;color:#7A6A3F"&gt;第 ' + round + ' 屏（让它自己滚，别手动划）&lt;/span&gt;';
-      if (TOTAL &gt; 0 &amp;&amp; acc.users &gt;= Math.ceil(TOTAL * 0.85)) return finish();
-      var n = acc.got;
-      if (n === lastN) { stable++; } else { stable = 0; }
-      lastN = n;
-      if (stable &gt;= 6) return finish();
-      try { scrollFollowSidebar(); } catch (e) { }
-      return sleep(700).then(tick);
-    }
-    /* 收尾：再从 React 根把整棵树扫一遍，把已经滚出屏幕、DOM 里回收掉的也捞回来 */
-    function finish() {
-      var full = collectFiberUnread({});
-      mergeUnreadMap(acc, full);
-      acc.full = full;
-      return Promise.resolve(acc);
-    }
-    return tick().then(function () {
-      /* ★★ 读完同样要落到【每一个账号】：数量 + 未读视频清单 + 已看边界 */
-      var st = applyApiUnreadAll(acc.map);
-      var srcs = (acc.full &amp;&amp; acc.full.srcs) ? acc.full.srcs.join('、') : '';
-      var h = '&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;';
-      h += '&lt;div class="dyh-card"&gt;' +
-        '&lt;div class="dyh-row"&gt;&lt;b&gt;读到几个号&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + st.known + ' 个&lt;/span&gt;&lt;/div&gt;' +
-        '&lt;div class="dyh-row"&gt;&lt;b&gt;合计未读&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + st.sumN + ' 条&lt;/span&gt;&lt;/div&gt;' +
-        (st.kept ? '&lt;div class="dyh-row"&gt;&lt;b&gt;沿用上次&lt;/b&gt;&lt;span&gt;' + st.kept +
-          ' 个号（这轮没滚到，沿用上次读到的数，不会乱变）&lt;/span&gt;&lt;/div&gt;' : '') +
-        '&lt;div class="dyh-row"&gt;&lt;b&gt;本机已有明细&lt;/b&gt;&lt;span&gt;' + st.haveN + ' 条&lt;/span&gt;&lt;/div&gt;' +
-        '&lt;div class="dyh-row"&gt;&lt;b&gt;还差明细&lt;/b&gt;&lt;span&gt;' + st.missN + ' 条&lt;/span&gt;&lt;/div&gt;' +
-        (st.revived ? '&lt;div class="dyh-row"&gt;&lt;b&gt;改回未读&lt;/b&gt;&lt;span&gt;' + st.revived + ' 条（本机错标成已看的）&lt;/span&gt;&lt;/div&gt;' : '') +
-        (srcs ? '&lt;div class="dyh-row"&gt;&lt;b&gt;认到的字段&lt;/b&gt;&lt;span&gt;' + esc(srcs) + '&lt;/span&gt;&lt;/div&gt;' : '') +
-        '&lt;/div&gt;';
-      if (!st.known) {
-        h += '&lt;div class="dyh-tip" style="color:#b88200"&gt;内存里没找到那份数据。' +
-          '常见原因：① 这不是「我的关注」侧栏所在的那一页；② 页面还没加载完（等它出账号列表再试）；' +
-          '③ 抖音换了存放位置。点下面「🩺 体检」把现在内存里到底有什么抄出来发我。&lt;/div&gt;';
-        h += '&lt;button class="dyh-btn" data-act="probe"&gt;🩺 体检&lt;/button&gt;';
-      } else if (st.missN &gt; 0) {
-        h += '&lt;div class="dyh-tip" style="color:#b88200"&gt;抖音说有 &lt;b&gt;' + st.sumN + '&lt;/b&gt; 条没看，' +
-          '但本机只存着 &lt;b&gt;' + st.haveN + '&lt;/b&gt; 条的详情（标题/封面），还差 &lt;b&gt;' + st.missN + '&lt;/b&gt; 条。' +
-          '未读&lt;b&gt;数量&lt;/b&gt;已经全部更新好了；想让&lt;b&gt;清单&lt;/b&gt;也齐，点下面去抓一轮。&lt;/div&gt;';
-        h += '&lt;button class="dyh-btn primary" data-act="scan"&gt;▶ 去抓缺的 ' + st.missN + ' 条视频&lt;/button&gt;';
-      } else {
-        h += '&lt;div class="dyh-tip"&gt;✅ 数量和清单都已按抖音自己存的数据更新完毕 —— 现在点开任何一个号，' +
-          '看到的未读视频就和抖音 App 里点开它看到的是&lt;b&gt;同一批&lt;/b&gt;。&lt;/div&gt;';
-      }
-      h += '&lt;button class="dyh-btn primary" data-act="manage"&gt;📺 去看未读视频&lt;/button&gt;';
-      setBody(h);
-      toast('从内存读到 ' + st.known + ' 个号 · 合计 ' + st.sumN + ' 条未读');
-      return st.known;
-    });
-  }
 
 
   /* ★★★ 真实「已看」记录（2026-10-02 新增，这是本次修复的核心）★★★
@@ -3165,8 +3122,8 @@ function copyRaw(){
     /* ============ 阶段 0：关注页收割（10-03 02:20 新增，主引擎）============
        在抖音自己的「关注」页里往下滚，让抖音前端自己去翻页、自己发请求，
        我们只把它收到的响应抄下来解析 —— 全程 0 次自签名请求，所以 0 次失败。
-       未读数量 / 清单统一由接口 not_seen_item_id_list_v2（见 readApiUnread / readFiberUnread）提供，
-       不再从侧栏角标文字里读（角标/快照/估算方法已全部删除）。 */
+       未读数量 / 清单统一由接口 not_seen_item_id_list_v2（见 readApiUnread）提供，
+       不再从侧栏角标文字里读（角标/快照/估算/内存直读方法已全部删除）。 */
     var harvestInfo = null;
     function harvestPhase() {
       if (S.cfg.harvest === false) return Promise.resolve();
@@ -3286,7 +3243,7 @@ function copyRaw(){
     /* ★ 未读总数走「抖音自己在关注页标的数」，跟 App 同一口径（不是本机抓了多少条明细） */
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;未读视频&lt;/b&gt;&lt;span class="dyh-hl"&gt;' + tu.n + ' 条 / ' + tu.acc + ' 个号&lt;/span&gt;&lt;/div&gt;';
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;其中抖音官方未看&lt;/b&gt;&lt;span&gt;' +
-      (apiHas ? (apiAccs + ' 个号 · ' + apiN + ' 条') : '（还没读到，点「读全部账号官方未读」就有了）') + '&lt;/span&gt;&lt;/div&gt;';
+      (apiHas ? (apiAccs + ' 个号 · ' + apiN + ' 条') : '（抓完一轮会自动读进来，点「📡 抓最新未读视频」就有了）') + '&lt;/span&gt;&lt;/div&gt;';
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;本机抓到明细&lt;/b&gt;&lt;span&gt;' + unread.length + ' 条（点开看得到）&lt;/span&gt;&lt;/div&gt;';
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;上次抓取&lt;/b&gt;&lt;span&gt;' + (S.lastScanAt ? fmtTime(S.lastScanAt) : '从未') + '&lt;/span&gt;&lt;/div&gt;';
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;已看记录&lt;/b&gt;&lt;span&gt;' + S.readIds.length + ' 条&lt;/span&gt;&lt;/div&gt;';
@@ -3302,10 +3259,11 @@ function copyRaw(){
       '&lt;div class="dyh-row" style="font-weight:bold"&gt;📖 正确操作步骤&lt;/div&gt;' +
       '&lt;div class="dyh-tip" style="margin:6px 0 0"&gt;① 抖音网页版登录账号，进入「关注」页。&lt;br&gt;' +
       '② 点右下角 🎯 打开本助手面板。&lt;br&gt;' +
-      '③ 点「📡 抓最新未读视频」——自动去关注页，把每个号的未看视频抓进本机（不会失败）。&lt;br&gt;' +
-      '④ 抓完点「📺 未读视频查看」，再点「🔌 从抖音接口读未读数」——把抖音自己标的未看数量（和 App 同源）读进来，面板未读总数就准了。&lt;br&gt;' +
-      '⑤ 点任意账号看未看视频，用抖音 App 打开观看（看过的自动记成已看）。&lt;/div&gt;' +
-      '&lt;div class="dyh-tip" style="margin:8px 0 0"&gt;📌 为什么要两步？「抓视频」只把视频抓下来；「读未读数」才向抖音要【准确数量 + 具体哪几条】（权威数，和 App 一致）。两者配合，数量才准。&lt;br&gt;' +
+      '③ 点「📡 抓最新未读视频」——自动去关注页：先把每个号的未看视频抓进本机，' +
+      '【抓完会自动继续】把抖音自己标的未看数量（和 App 同源）也读进来，全程只需点这一次。&lt;br&gt;' +
+      '④ 点「📺 未读视频查看」，按账号看谁的未读最多；点任意账号看未看视频，用抖音 App 打开观看（看过的自动记成已看）。&lt;/div&gt;' +
+      '&lt;div class="dyh-tip" style="margin:8px 0 0"&gt;📌 以前「抓视频」和「读未读数」要分两次点，现在合并成一步：' +
+      '视频是明细、未读数是权威数量，二者都由抖音接口（not_seen_item_id_list_v2）给，和 App 完全一致。&lt;br&gt;' +
       '⚠️ 若弹「允许网站打开抖音吗」：Via → 设置 → 高级设置 → 链接处理 → 改成「直接打开」。&lt;/div&gt;' +
       '&lt;/div&gt;';
     return h;
@@ -3675,7 +3633,6 @@ function copyRaw(){
        把抖音写的未读数【全部】读下来（这个数与 App 同源，就是权威值）。 */
     /* ★ 22:50：推荐走这条 —— 直接读抖音接口里的 not_seen_item_id_list_v2，
        比数页面上的角标准，连「直播号」都有（页面上不显示而已）。 */
-    h += '&lt;button class="dyh-btn primary" data-act="read-fiber-unread"&gt;🧬 从网页内存直接读（推荐·最准）&lt;/button&gt;';
     h += '&lt;button class="dyh-btn primary" data-act="read-api-unread"&gt;🔌 从抖音接口读未读数（推荐·含直播号）&lt;/button&gt;';
 
     /* ★ 读完留个凭据（23:12）：什么时候读的、读到几个号、合计几条 —— 一眼确认「全站已更新」 */
@@ -4040,7 +3997,7 @@ function copyRaw(){
         /* ★ 10-06 修正：同样先倒掉上一次遗留的响应，只收本轮抖音新返回的；
            若这一轮它一条都没发，再把旧的放回去兜底，避免读成空白。 */
         var prevFoll = netTake('following');
-        return harvestApiUnread({ maxRounds: 80, wait: 800 })
+        return harvestApiUnread({ maxRounds: 80, wait: 800, untilSec: acc.secUserId })
           .then(function (got) {
             /* ★ 10-06 修：始终并回开头倒掉的旧响应，不丢任何一份 */
             for (var pi = 0; pi &lt; prevFoll.length; pi++) NET.buf.push(prevFoll[pi]);
@@ -4145,7 +4102,6 @@ function copyRaw(){
     /* ★ 未读数只信任抖音接口 / 网页内存里的权威数据（not_seen_item_id_list_v2，和 App 同源）。
        以下两个按钮直接读这份数据，读完整个面板的未读数 / 未读清单都会按它更新。 */
     h += '&lt;label class="dyh-lb"&gt;📡 读抖音官方未读数（权威源）&lt;/label&gt;';
-    h += '&lt;button class="dyh-btn primary" data-act="read-fiber-unread"&gt;🧬 从网页内存直接读（推荐·最准）&lt;/button&gt;';
     h += '&lt;button class="dyh-btn primary" data-act="read-api-unread"&gt;🔌 从抖音接口读未读数（推荐·含直播号）&lt;/button&gt;';
 
     h += '&lt;button class="dyh-btn primary" data-act="save-settings"&gt;💾 保存&lt;/button&gt;';
@@ -4587,6 +4543,9 @@ function copyRaw(){
           '&lt;button class="dyh-btn gray" data-act="scan"&gt;🔁 再抓一轮（自动补剩下的）&lt;/button&gt;';
         if (r.left) h += '&lt;div class="dyh-tip"&gt;还有 ' + r.left + ' 个没抓到，点上面「再抓一轮」即可从断点补完，不会重复请求。&lt;/div&gt;';
         setBody(h);
+        /* ★ 10-06 改：抓完视频【自动】把抖音官方未读数也读进来，不用再点「从抖音接口读未读数」。
+           抓视频 + 读官方未读本来就是一条流水线（视频是明细、未读数是权威数量），拆成两步纯属多此一举。 */
+        setTimeout(function () { try { readApiUnread(); } catch (e) { } }, 900);
       });
       return;
     }
@@ -4675,7 +4634,6 @@ function copyRaw(){
       return;
     }
     if (act === 'read-api-unread') { readApiUnread(); return; }
-    if (act === 'read-fiber-unread') { readFiberUnread(); return; }
     if (act === 'play') {
       var pid = el.getAttribute('data-id');
       openInApp(pid);          // 只唤起抖音 App；网页端不跳转、不开新标签
@@ -4868,13 +4826,12 @@ function copyRaw(){
         }
       } else if (S.pendingAccScan) { S.pendingAccScan = null; save(); }
     } catch (e) { }
-    /* ★ 23:55：「读全部账号的官方未读数」被带到 /follow 之后自动续跑 */
+    /* ★ 23:55：「读全部账号的官方未读数」被带到 /follow 之后自动续跑（现在只走接口权威源，不再有内存直读分支） */
     try {
       if (S.pendingAllBadge &amp;&amp; Date.now() - S.pendingAllBadge.at &lt; 180000) {
-        var apiMode = !!S.pendingAllBadge.api, fibMode = !!S.pendingAllBadge.fiber;
         S.pendingAllBadge = null; save();
         if (onFollowPage()) setTimeout(function () {
-          try { if (fibMode) readFiberUnread(); else readApiUnread(); } catch (e) { }
+          try { readApiUnread(); } catch (e) { }
         }, 1500);
       } else if (S.pendingAllBadge) { S.pendingAllBadge = null; save(); }
     } catch (e) { }
@@ -4939,7 +4896,6 @@ function copyRaw(){
     collectFollowingUnread: collectFollowingUnread,
     harvestApiUnread: harvestApiUnread,
     readApiUnread: readApiUnread,
-    readFiberUnread: readFiberUnread,
     collectFiberUnread: collectFiberUnread,
     fiberOf: fiberOf,
     fiberRootOf: fiberRootOf,
