@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-06 02:10 · 未读数准确性大修：修掉「合并取最大值导致只看不减」「覆盖不全就清空其余账号权威数据」「读取前不清陈旧缓冲」三个让数字虚高/乱变的 bug；账号页新增「还差明细」缺口说明
+// @version      2026-10-06 11:52 · 接口读未读数「抓不到」修复：netKind 放宽匹配 + 响应体带未看字段即兜底捕获（路径/域名变了也能抓）+ 账号对象包一层也能解析 + 滚动补发 wheel 逼翻页 + 结果页显示「捕获 N 份响应」诊断
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -44,10 +44,16 @@
      ========================================================================== */
   /* wide = 接口扫描模式的截止时间戳（0 = 关）。平时完全不干活，不占资源。 */
   var NET = { buf: [], on: false, wide: 0, seen: {}, seenList: [] };
+  /* 关注列表未看字段（接口权威源）：只要响应体里出现这个串，就一定是关注列表接口。
+     用它做【兜底分类】，避免抖音换了 host / 路径前缀 / 加了版本号导致 netKind 漏抓。 */
+  var FOLLOW_BODY_RE = /not_seen_item_id_list/;
   function netKind(url) {
     if (!url) return '';
     if (url.indexOf('/aweme/v1/web/follow/') >= 0) return 'feed';
     if (url.indexOf('/aweme/v1/web/aweme/post/') >= 0) return 'post';
+    /* ★ 10-06 修：放宽匹配 —— 只要路径里出现 following/list 或 user/following 都算关注列表，
+       不再死磕 /aweme/v1/web/user/following/ 这个精确前缀（抖音换域名/加参数就抓不到） */
+    if (url.indexOf('following/list') >= 0 || url.indexOf('user/following') >= 0) return 'following';
     if (url.indexOf('/aweme/v1/web/user/following/') >= 0) return 'following';
     if (url.indexOf('/aweme/v1/web/history/') >= 0) return 'history';
     return '';
@@ -192,6 +198,10 @@
               r.clone().text().then(function (t) {
                 if (k) netPush(k, url, t);
                 else if (NET.wide > Date.now()) netWideRecord(url, t);
+                /* ★ 10-06 修：netKind 没认出来，但响应体里带关注列表未看字段 → 也抓。
+                   这是「从抖音接口读未读数」读不到的头号原因：抖音换了接口路径/域名，
+                   netKind 失配，响应被整条丢掉，于是永远读到 0 个号。 */
+                else if (t && FOLLOW_BODY_RE.test(t)) netPush('following', url, t);
               }).catch(function () { });
             }
           } catch (e) { }
@@ -221,6 +231,8 @@
                   if (self.status === 200) {
                     if (k) netPush(k, self.__dyUrl, self.responseText);
                     else if (NET.wide > Date.now()) netWideRecord(self.__dyUrl, self.responseText);
+                    /* ★ 10-06 修：同 fetch 分支 —— 响应体带未看字段也抓，避免路径失配漏抓 */
+                    else if (self.responseText && FOLLOW_BODY_RE.test(self.responseText)) netPush('following', self.__dyUrl, self.responseText);
                   }
                 } catch (e) { }
               });
@@ -241,8 +253,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-06 02:10 · 未读数准确性大修：修掉「合并取最大值导致只看不减」「覆盖不全就清空其余账号权威数据」「读取前不清陈旧缓冲」三个让数字虚高/乱变的 bug；账号页新增「还差明细」缺口说明';
-  var VER_SHORT = '10-06 02:10';
+  var VER = '2026-10-06 11:52 · 接口读未读数「抓不到」修复：netKind 放宽匹配 + 响应体带未看字段即兜底捕获（路径/域名变了也能抓）+ 账号对象包一层也能解析 + 滚动补发 wheel 逼翻页 + 结果页显示「捕获 N 份响应」诊断';
+  var VER_SHORT = '10-06 11:52';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -749,6 +761,20 @@
      —— 表现就是「只读到十几个号」「那个号一直对不上」。
      ★ 正解：每次只往下滚【一屏】，逐屏渲染、逐屏读。
        这在「追加渲染」和「虚拟滚动」两种模式下都成立。 */
+  /* 派发 wheel 事件：很多抖音版本左侧账号列表是「虚拟滚动 + 监听 wheel 翻页」，
+     scrollTop 改了也不翻页。补发 wheel 逼它去请求下一批 /following/list/。 */
+  function dispatchWheel(el) {
+    try {
+      if (window.WheelEvent) {
+        el.dispatchEvent(new window.WheelEvent('wheel', { bubbles: true, cancelable: true, view: window, deltaY: 700, deltaMode: 0 }));
+      } else {
+        var ev = document.createEvent('WheelEvent');
+        ev.initEvent('wheel', true, true);
+        el.dispatchEvent(ev);
+      }
+    } catch (e) { }
+  }
+
   function scrollFollowSidebar() {
     var moved = false;
     try {
@@ -768,6 +794,8 @@
         if (sc.scrollTop > before + 1) moved = true;
         else if (before > 0) sc.scrollTop = 0;         // 真到底了：回顶部，再走一轮（别漏顶上的号）
       }
+      /* ★ 10-06 修：无论原生滚动是否生效，都补发 wheel，确保虚拟滚动列表翻页 */
+      if (hit) dispatchWheel(hit);
       if (!moved) {
         var se = document.scrollingElement || document.documentElement;
         if (se) {
@@ -777,6 +805,7 @@
           if (se.scrollTop > b2 + 1) moved = true;
           else if (b2 > 0) window.scrollTo(0, 0);
         }
+        if (hit) dispatchWheel(hit);
       }
     } catch (e) { }
     return moved;
@@ -824,6 +853,23 @@
       for (var i = 0; i < node.length; i++) {
         if (node[i] && typeof node[i] === 'object' && (node[i].sec_uid || node[i].secUid)) return node;
       }
+      /* ★ 10-06 修：账号对象可能被包一层对象（{user:{sec_uid}} / {data:{sec_uid}}）。
+         解出来看看；若解包后是账号，就返回这层数组，交给 collectFollowingUnread 去解包。 */
+      for (var i3 = 0; i3 < node.length; i3++) {
+        var e0 = node[i3];
+        if (e0 && typeof e0 === 'object') {
+          var eu = (e0.user && (e0.user.sec_uid || e0.user.secUid)) ? e0.user
+            : (e0.data && (e0.data.sec_uid || e0.data.secUid)) ? e0.data : null;
+          if (eu) return node;
+        }
+      }
+      /* 也可能是多包了一层数组：递归找更深的账号数组 */
+      for (var i2 = 0; i2 < node.length; i2++) {
+        if (node[i2] && typeof node[i2] === 'object') {
+          var nested = findUserArray(node[i2], depth + 1);
+          if (nested) return nested;
+        }
+      }
       return null;
     }
     for (var k in node) {
@@ -846,6 +892,11 @@
         if (!arr) continue;
         for (j = 0; j < arr.length; j++) {
           var u = arr[j] || {};
+          /* ★ 10-06 修：账号对象可能被包一层（{user:{sec_uid}} / {data:{...}}），先解出来 */
+          if (!u.sec_uid && !u.secUid) {
+            if (u.user && (u.user.sec_uid || u.user.secUid)) u = u.user;
+            else if (u.data && (u.data.sec_uid || u.data.secUid)) u = u.data;
+          }
           var sec = u.sec_uid || u.secUid;
           if (!sec) continue;
           out.users++;
@@ -1383,13 +1434,28 @@
           '<br><span style="font-size:17px;color:#7A6A3F">第 ' + p.round + ' 屏（让它自己滚，别手动划）</span>';
       }
     }).then(function (acc) {
-      /* ★ 兜底：万一这一轮抖音【一条关注列表响应都没发】（例如已经停在列表底部不再翻页），
-         就把刚才倒掉的那份放回去解析 —— 有数据总好过读成一片空白。 */
-      if ((!acc.users) && prevFoll.length) {
-        for (var pi = 0; pi < prevFoll.length; pi++) NET.buf.push(prevFoll[pi]);
-        acc = collectFollowingUnread();
+      /* ★ 10-06 修：无论 harvest 滚到多少，都把开头倒掉的旧响应并回来，不丢任何一份
+         （旧写法只在 !acc.users 时才并回，会漏掉「滚动拿到部分、但旧响应里还有别的号」的情况）。 */
+      for (var pi = 0; pi < prevFoll.length; pi++) NET.buf.push(prevFoll[pi]);
+      /* 诊断：这一轮到底在缓冲里捕获到多少份关注列表响应、解析出多少号、几个带未看字段 */
+      var diagResp = 0, diagUsers = 0, diagField = 0;
+      for (var di = 0; di < NET.buf.length; di++) {
+        if (NET.buf[di].kind !== 'following') continue;
+        diagResp++;
+        var ua = findUserArray(NET.buf[di].json, 0);
+        if (ua) {
+          diagUsers += ua.length;
+          for (var ui = 0; ui < ua.length; ui++) {
+            var uo = ua[ui] || {};
+            if (!uo.sec_uid && !uo.secUid) {
+              if (uo.user && (uo.user.sec_uid || uo.user.secUid)) uo = uo.user;
+              else if (uo.data && (uo.data.sec_uid || uo.data.secUid)) uo = uo.data;
+            }
+            if (pullUnreadIds(uo)) diagField++;
+          }
+        }
       }
-      var map = acc.map || {};
+      var map = collectFollowingUnread().map || {};
       /* ★★ 读完就要把结果落到【每一个账号】：数量 + 未读视频清单 + 已看边界（一起更新） */
       var st = applyApiUnreadAll(map);
       var h = '<div class="dyh-back" data-act="home">← 返回</div>';
@@ -1401,8 +1467,15 @@
         '<div class="dyh-row"><b>本机已有明细</b><span>' + st.haveN + ' 条</span></div>' +
         '<div class="dyh-row"><b>还差明细</b><span>' + st.missN + ' 条</span></div>' +
         (st.revived ? '<div class="dyh-row"><b>改回未读</b><span>' + st.revived + ' 条（本机错标成已看的）</span></div>' : '') +
-        '<div class="dyh-row"><b>接口收到账号记录</b><span>' + acc.users + ' 条</span></div>' +
+        '<div class="dyh-row"><b>捕获关注列表响应</b><span>' + diagResp + ' 份 · 含 ' + diagUsers +
+          ' 条账号记录 · ' + diagField + ' 个带未看列表</span></div>' +
         '</div>';
+      /* 诊断提示：如果「捕获关注列表响应 = 0」，说明钩子没抓到抖音的接口，问题在捕获层而非解析层 */
+      if (!diagResp) {
+        h += '<div class="dyh-tip" style="color:#f53f3f">⚠ 这一轮没在缓冲里捕获到任何「关注列表」接口响应（捕获数=0）。' +
+          '可能原因：① 当前不在抖音「关注」页（先点左侧「关注」）；② 抖音换了接口地址；' +
+          '③ 页面刚加载、还没发请求 —— 等账号列表出来、手动把左侧账号列表往下滑几屏后再点一次。</div>';
+      }
       if (st.missN > 0) {
         h += '<div class="dyh-tip" style="color:#b88200">抖音说有 <b>' + st.sumN + '</b> 条没看，' +
           '但本机只存着 <b>' + st.haveN + '</b> 条的详情（标题/封面），还差 <b>' + st.missN + '</b> 条没抓回来。' +
@@ -3147,10 +3220,9 @@
         var prevFoll = netTake('following');
         return harvestApiUnread({ maxRounds: 80, wait: 800 })
           .then(function (got) {
-            if (got && (!got.users) && prevFoll.length) {
-              for (var pi = 0; pi < prevFoll.length; pi++) NET.buf.push(prevFoll[pi]);
-              got = collectFollowingUnread();
-            }
+            /* ★ 10-06 修：始终并回开头倒掉的旧响应，不丢任何一份 */
+            for (var pi = 0; pi < prevFoll.length; pi++) NET.buf.push(prevFoll[pi]);
+            if (!got.users) got = collectFollowingUnread();
             if (got && got.map) applyApiUnreadAll(got.map);   // 落：数量 + 未读清单 + 已看边界
             var apiV = apiUnreadOf(acc);
             open('accv');
