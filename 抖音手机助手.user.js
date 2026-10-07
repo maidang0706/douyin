@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 15:05 · 按真实截图对比修3个错：官方已读到时不掺本机残留(假未读归零)+同名不同号不再互吞+账号数按secUid去重(394→389)
+// @version      2026-10-07 15:25 · 按第2轮截图修：列表与总条数都按secUid去重(同名不同号不再重复显示/重复累加)，幽灵号不计入总数
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -253,8 +253,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 15:05 · 按真实截图对比修3个错：官方已读到时不掺本机残留(假未读归零)+同名不同号不再互吞+账号数按secUid去重(394→389)';
-  var VER_SHORT = '10-07 15:05';
+  var VER = '2026-10-07 15:25 · 按第2轮截图修：列表与总条数都按secUid去重(同名不同号不再重复显示/重复累加)，幽灵号不计入总数';
+  var VER_SHORT = '10-07 15:25';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -2996,9 +2996,16 @@
   }
   function catUnread(cat, um) {
     var n = 0, i;
-    for (i = 0; i < S.accounts.length; i++) {
-      var a = S.accounts[i];
-      if (cat !== ALL_CAT && catOf(a) !== cat) continue;
+    /* ★ 10-07 15:20：改用 catMembers()（已按 secUid 去重）求和，
+       旧写法直接遍历 S.accounts 累加 → 同名不同号（如两个「人际交往心理学」）
+       会被计两次，总条数凭空多出一截（实测 731 vs 抖音 718 左右）。 */
+    var mem = catMembers(cat, um), seenSum = {};
+    for (i = 0; i < mem.length; i++) {
+      var a = mem[i];
+      if (a._ghost) continue;                // ghost 不计入总数（见下方注释）
+      var k2 = a.secUserId || ('n:' + normName(a.name || ''));
+      if (seenSum[k2]) continue;             // 同secUid 只算一次
+      seenSum[k2] = 1;
       n += accUnread(a, um);
     }
     /* 抓到了视频、但【不在你的关注列表里】的作者（推荐流 / 广告 / 列表没刷新过）：
@@ -3018,10 +3025,17 @@
   // 一个分类下【当前】的成员（已按昵称关键字过滤）；未读多的排前面
   function catMembers(cat, um) {
     var kw = (MGR.kw || '').trim().toLowerCase(), out = [], i, a;
+    /* ★ 10-07 15:20按 secUid 去重：`S.accounts` 里可能存了同名不同号（两个真实号都叫
+       「人际交往心理学」），而ghostAuthors 又会另加一条 → 列表里同一行出现两次、
+       未读条数被重复累加（实测「人际交往心理学」两行各 9 未读，抖音只有 1 个号）。 */
+    var seenAcc = {};
     for (i = 0; i < S.accounts.length; i++) {
       a = S.accounts[i];
       if (cat !== ALL_CAT && catOf(a) !== cat) continue;
       if (kw && String(a.name || a.secUserId || '').toLowerCase().indexOf(kw) < 0) continue;
+      var key = a.secUserId || ('g:' + normName(a.name || ''));
+      if (seenAcc[key]) continue;      // 同secUid 已收录
+      seenAcc[key] = 1;
       out.push(a);
     }
     /* ★ 抓到视频却不在关注列表里的作者也要露出来（10-03 03:10）
@@ -3030,6 +3044,9 @@
       var gs = ghostAuthors(buildUnreadView());
       for (i = 0; i < gs.length; i++) {
         if (kw && String(gs[i].name || gs[i].secUserId || '').toLowerCase().indexOf(kw) < 0) continue;
+        var gk = gs[i].secUserId || ('g:' + normName(gs[i].name || ''));
+        if (seenAcc[gk]) continue;      // 已在关注列表里（同名）→ 不再重复加 ghost
+        seenAcc[gk] = 1;
         out.push(gs[i]);
       }
     }
