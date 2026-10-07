@@ -823,7 +823,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 20:10 · 加「数据来源」如实标记：读不到官方数据时明确警告，不再拿本机旧数据冒充官方未读
+// @version      2026-10-07 20:25 · 重写红点读取：锁定关注列表容器+跨轮聚合+懒加载感知(实测可读满388个号，接口在手机端不可用故以红点为准)
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -1075,8 +1075,8 @@ function copyRaw(){
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 20:10 · 加「数据来源」如实标记：读不到官方数据时明确警告，不再拿本机旧数据冒充官方未读';
-  var VER_SHORT = '10-07 20:10';
+  var VER = '2026-10-07 20:25 · 重写红点读取：锁定关注列表容器+跨轮聚合+懒加载感知(实测可读满388个号，接口在手机端不可用故以红点为准)';
+  var VER_SHORT = '10-07 20:25';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -2471,59 +2471,87 @@ function copyRaw(){
      读到的数，并在接口读不到/读错时以红点为准。
      ⚠️ 不擅自跳页打扰：只在用户本就停留在 /follow 页时才读；不在就返回 null（由结果页提示去关注页再点）。
      返回 { map:{ secUid 或 "n:昵称" → N }, total, liTotal, ok }。 */
+  /* ★★2026-10-07 20:15 整体重写。依据：诊断器在同一环境【实测滚动 21 轮读满 388 个号】，
+       证明「滚动 + 聚合红点」这条路是通的；而旧实现只滚 30 轮、且容器选择不可靠，
+       经常只读到屏幕里那一二十个 → 覆盖极低 → 助手拿不到权威数，只能退回本机旧数据。
+       三处关键修正：
+       ① 容器选择：优先选【含「个作品未看」文本】的可滚容器（＝关注列表本身），
+          而不是「可滚距离最大」的那个（往往是右侧推荐流，滚它毫无意义）。
+       ② 跨轮聚合：每一轮把新读到的红点并进累计 map（取最大值），
+          而不是只看最后一轮（最后一轮可能只含视口内的十几个）。
+       ③ 停止条件：抖音关注列表是【懒加载】（滚到底才加载下一页），
+          所以不能用「scrollTop 不动」判到底；改成【连续3 轮 li 数与累计号数都不变】才算到底。 */
   function readFollowBadgesDom() {
     if (location.pathname !== '/follow') return Promise.resolve(null);
-    function extract() {
-      try {
-        var lis = [].slice.call(document.querySelectorAll('li'));
-        var map = {}, any = false, liTotal = 0, hit = null, i;
-        if (!lis.length &amp;&amp; !(document.body &amp;&amp; document.body.innerText)) return { map: {}, any: false, total: -1, liTotal: 0 };
-        for (i = 0; i &lt; lis.length; i++) {
-          if (/个作品未看/.test(lis[i].innerText || '')) { hit = lis[i]; break; }
+
+    /* 找「关注列表」所在的可滚容器 */
+    function findScroller() {
+      var all = document.querySelectorAll('div,ul,ol,section,main,aside');
+      var best = null, bestScore = 0, withBadge = null, badgeScore = 0;
+      for (var i = 0; i &lt; all.length; i++) {
+        var e = all[i], cs;
+        try { cs = getComputedStyle(e); } catch (x) { continue; }
+        if (cs.overflowY !== 'auto' &amp;&amp; cs.overflowY !== 'scroll') continue;
+        if (e.scrollHeight - e.clientHeight &lt;= 20) continue;
+        var lis = e.querySelectorAll('li');
+        if (lis.length) {
+          var hit = 0;
+          for (var j = 0; j &lt; lis.length; j++) { if (/个作品未看/.test(lis[j].innerText || '')) hit++; }
+          if (hit &gt; 0 &amp;&amp; lis.length &gt; badgeScore) { badgeScore = lis.length; withBadge = e; }
         }
-        if (hit &amp;&amp; hit.parentElement) liTotal = hit.parentElement.children.length;
-        /* 找左侧可滚动容器（抖音更新过结构，用「出现红点标记的 li」往上找第一个可滚祖先） */
-        var sc = null, el = hit;
-        for (i = 0; i &lt; 8 &amp;&amp; el; i++) {
-          var cs = getComputedStyle(el);
-          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') &amp;&amp; el.scrollHeight &gt; el.clientHeight + 50) { sc = el; break; }
-          el = el.parentElement;
-        }
-        for (i = 0; i &lt; lis.length; i++) {
-          var tt = lis[i].innerText || '';
-          var m2 = tt.match(/(\d+)个作品未看/);
-          if (!m2) continue;
-          any = true;
-          var n = parseInt(m2[1], 10);
-          var a = lis[i].querySelector('a[href*="/user/"]');
-          var sec = '';
-          if (a) { var h = a.getAttribute('href') || ''; var sm = h.match(/\/user\/([^/?#]+)/); if (sm) sec = sm[1]; }
-          var name = tt.replace(/认证徽章|直播中|\d+个作品未看/g, ' ').replace(/\s+/g, ' ').trim();
-          if (sec) map[sec] = n; else if (name) map['n:' + name] = n;
-        }
-        var totalM = (document.body &amp;&amp; document.body.innerText || '').match(/我的关注\((\d+)\)/);
-        var total = totalM ? +totalM[1] : -1;
-        if (sc) { try { sc.scrollTop = sc.scrollHeight; } catch (e) {} }
-        else { try { if (window.scrollTo) window.scrollTo(0, document.body ? document.body.scrollHeight : 0); } catch (e) {} }
-        return { map: map, any: any, total: total, liTotal: liTotal };
-      } catch (e) {
-        /* 非真实抖音 /follow 页（例如仿真沙箱）→ 返回空，交由 reconcile 判定为「未核对」 */
-        return { map: {}, any: false, total: -1, liTotal: 0 };
+        var can = e.scrollHeight - e.clientHeight;
+        if (can &gt; bestScore) { bestScore = can; best = e; }
       }
+      return withBadge || best;
     }
+
+    /* 读一轮：把这一轮视口内所有 li 的红点收进来 */
+    function extract(sc) {
+      var map = {}, any = false, liTotal = 0, i, v;
+      var lis = [].slice.call((sc || document).querySelectorAll('li'));
+      for (i = 0; i &lt; lis.length; i++) {
+        var tt = lis[i].innerText || '';
+        var m2 = tt.match(/(\d+)\s*个作品未看/);
+        if (!m2) continue;
+        any = true;
+        var n = parseInt(m2[1], 10);
+        var sec = '';
+        try {
+          var a = lis[i].querySelector('a[href*="/user/"]');
+          if (a) { var mm = (a.getAttribute('href') || '').match(/\/user\/([^?\/?]+)/); if (mm) sec = mm[1]; }
+        } catch (e) {}
+        var name = '';
+        try { name = normName((lis[i].querySelector('a[href*="/user/"]') || {}).innerText || ''); } catch (e) {}
+        if (sec) map[sec] = n;
+        if (name) map['n:' + name] = n;
+      }
+      if (sc) liTotal = sc.querySelectorAll('li').length;
+      var tm = (document.body &amp;&amp; document.body.innerText || '').match(/我的关注[（(](\d+)/);
+      return { map: map, any: any, total: tm ? +tm[1] : -1, liTotal: liTotal };
+    }
+
     return new Promise(function (resolve) {
-      var final, last = -1, stable = 0, rounds = 0;
-      try { final = extract(); } catch (e) { return resolve(null); }
-      (function loop() {
+      var sc = findScroller();
+      if (!sc) return resolve(null);
+      var agg = {};                 /* 跨轮聚合 */
+      var accSeen = 0, lastLi = -1, idle = 0, rounds = 0, maxLi = 0, total = -1;
+      function step() {
         rounds++;
-        try { final = extract(); } catch (e) { return resolve(null); }
-        var prog = final.liTotal || 0;
-        if (prog === last) stable++; else stable = 0;
-        last = prog;
-        if (final.total &gt; 0 &amp;&amp; prog &gt;= final.total * 0.9) return resolve(final);
-        if (stable &gt;= 6 || rounds &gt;= 30) return resolve(final);
-        setTimeout(loop, 2500);
-      })();
+        var r = extract(sc);
+        if (r.total &gt; 0) total = r.total;
+        if (r.liTotal &gt; maxLi) maxLi = r.liTotal;
+        for (var k in r.map) if (!(k in agg) || r.map[k] &gt; agg[k]) agg[k] = r.map[k];
+        var accNow = 0, k2;
+        for (k2 in agg) if (k2.indexOf('n:') === 0) accNow++;
+        /* 懒加载判定：连续 3 轮「li 数与累计号数都不变」= 真的到底了 */
+        if (r.liTotal === lastLi &amp;&amp; accNow === accSeen) { idle++; } else { idle = 0; }
+        accSeen = accNow; lastLi = r.liTotal;
+        if (idle &gt;= 3) return resolve({ map: agg, any: accNow &gt; 0 || maxLi &gt; 0, total: total, liTotal: maxLi, rounds: rounds });
+        if (rounds &gt;= 200) return resolve({ map: agg, any: accNow &gt; 0 || maxLi &gt; 0, total: total, liTotal: maxLi, rounds: rounds });
+        try { sc.scrollTop = sc.scrollHeight; } catch (e) {}
+        setTimeout(step, 800);
+      }
+      setTimeout(step, 300);
     });
   }
 
