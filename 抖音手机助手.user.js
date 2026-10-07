@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 21:15 · 修「旧数据不被覆盖」：读到最新数据即整体覆盖(本轮未出现的号记n=0)，仅当本轮读到的号数<30 才保留旧值防误清
+// @version      2026-10-07 21:40 · 治「一直抓不到」：加时间预算(150s/60s到点必返回)+动态收工门槛(不再32秒静默等)+进度条与已用秒数显示
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -253,8 +253,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 21:15 · 修「旧数据不被覆盖」：读到最新数据即整体覆盖(本轮未出现的号记n=0)，仅当本轮读到的号数<30 才保留旧值防误清';
-  var VER_SHORT = '10-07 21:15';
+  var VER = '2026-10-07 21:40 · 治「一直抓不到」：加时间预算(150s/60s到点必返回)+动态收工门槛(不再32秒静默等)+进度条与已用秒数显示';
+  var VER_SHORT = '10-07 21:40';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -743,7 +743,18 @@
            是 0 自签请求，不受这个参数问题影响，且能拿到 v2 的**具体 id 清单**。
        所以：主源改为「关注页滚动收割」，再叠加【红点 DOM】做交叉兜底（实测可读满 388 个号）。
        自签接口函数已整体删除（原先 5 处引用一并清理）。 */
-    return harvestApiUnread({ maxRounds: 300, wait: 800, total: S.accounts.length })
+    /* ★ 21:30 传onTick 进度回调 + maxSeconds 时间预算：
+       原来只有 800ms 一次的静默等待，界面不动 → 用户以为「一直抓不到」；
+       现在每轮回报「已扫 N/389 个号、用时 Xs」，并在 150 秒强制收工返回已有结果。 */
+    return harvestApiUnread({
+      maxRounds: 300, wait: 800, maxSeconds: 150, total: S.accounts.length,
+      onTick: statusCb ? function (p) {
+        try {
+          statusCb({ phase: 'harvest', got: p.got, users: p.users, seen: p.seen,
+                     total: S.accounts.length, elapsed: p.elapsed, max: p.max });
+        } catch (e) { }
+      } : null
+    })
       .then(function (acc) {
         var m = (collectFollowingUnread().map) || {};
         applyApiUnreadAll(m);
@@ -1284,6 +1295,24 @@
     opts = opts || {};
     var acc = { map: {}, byName: {}, got: 0, users: 0, seen: 0, rounds: 0 };
     var lastSeen = -1, stable = 0, round = 0, maxRounds = opts.maxRounds || 400;
+    /* ★★ 2026-10-07 21:30 优化「一直抓不到」：
+       原来「连续 40 轮没进展才认栽」= 40 × 800ms = 32 秒**什么都不发生**，
+       加上前面正常滚动，一个 388 号的列表最坏能空转【5 分钟】（300 轮 × 800ms），
+       期间界面几乎不动 → 用户看到的就是「一直抓不到/卡住」。
+       现在：
+         ① 收工门槛按【账号规模】动态算，不再固定 40 轮；
+         ② 加一个【总时间预算】deadline，到点无论如何先返回已有结果（宁可少几个号，也别卡死）；
+         ③ 每轮回报进度（onTick），让界面能显示「已扫 N/M 个号」，用户知道它在动。 */
+    var WAIT = opts.wait || 800;
+    var MAX_SECONDS = opts.maxSeconds || 150;                    // 整体时间预算（秒）
+    var t0 = Date.now();
+    var overTime = function () { return (Date.now() - t0) > MAX_SECONDS * 1000; };
+    /* 没传 total 时（单号扫描）用不上覆盖度，靠 untilSec 提前收工；这里只兜时间 */
+    function settle() {
+      acc.timedOut = overTime();
+      acc.elapsed = Math.round((Date.now() - t0) / 1000);
+      return Promise.resolve(acc);
+    }
     function merge(got) {
       if (!got) return;
       var k;
@@ -1302,35 +1331,35 @@
       acc.got = Object.keys(acc.map).length;
     }
     function tick() {
-      if (opts.shouldStop && opts.shouldStop()) return Promise.resolve(acc);
-      if (round >= maxRounds) return Promise.resolve(acc);
+      if (opts.shouldStop && opts.shouldStop()) return settle();
+      if (round >= maxRounds) return settle();
+      /* ★ 21:30 时间预算到点 → 先返回已有结果（宁可少扫几个号，也不让用户干等） */
+      if (overTime()) return settle();
       round++;
       acc.rounds = round;
       merge(collectFollowingUnread());
       if (opts.onTick) {
         try {
-          opts.onTick({ round: round, got: acc.got, users: acc.users, seen: acc.seen });
+          opts.onTick({ round: round, got: acc.got, users: acc.users, seen: acc.seen,
+                        elapsed: Math.round((Date.now() - t0) / 1000), max: MAX_SECONDS });
         } catch (e) { }
       }
-      /* ★★ 覆盖度判定（2026-10-06 修正「对不上」的核心）：
-         以前只在「连续 8 轮没新增账号」就收工 —— 但 619 个号的关注列表要滚很多屏才能扫完，
-         前面几屏没扫到的号根本没被读到，它们的未读数就退回本机估算、和抖音对不上。
-         现在改为：扫到的账号数（seen）已经覆盖到【关注总数 92% 以上】才收工；
-         否则即使暂时没新增（虚拟滚动偶发卡顿），也继续滚，直到把列表扫完。
-         最多连续 idle 40 轮（约半分钟）还没进展才认栽，避免卡死不动。 */
-      /* 单号扫描（没传 total）时不做覆盖度判定，否则 target 退化为 acc.seen、
-         covered 恒为 1，会第一圈就返回、滚不到目标号 —— 退回 idle 40 轮 / maxRounds 收工。 */
+      /* ★★ 覆盖度判定：扫到的账号数覆盖到【关注总数 92%】即收工 */
       if (opts.total) {
         var covered = acc.seen / opts.total;
-        if (covered >= 0.92) return Promise.resolve(acc);
+        if (covered >= 0.92) return settle();
       }
       /* 单号扫描专用：一旦在缓冲里找到目标号，立即收工（不用等整列扫完） */
-      if (opts.untilSec && acc.map[opts.untilSec]) return Promise.resolve(acc);
+      if (opts.untilSec && acc.map[opts.untilSec]) return settle();
       if (acc.seen === lastSeen) { stable++; } else { stable = 0; }
       lastSeen = acc.seen;
-      if (stable >= 40) return Promise.resolve(acc);
+      /* ★★ 21:30 动态收工门槛：原来固定 40 轮（=40×800ms=32 秒静默等待），
+         加上正常滚动，388 个号的列表最坏能空转 5 分钟 → 用户看到的就是「一直抓不到」。
+         现在按已扫到的号数给耐心：扫得越多越肯等；一旦长时间零进展就快速收工。 */
+      var patience = Math.max(6, Math.min(30, Math.round((acc.seen || 1) / 8)));
+      if (stable >= patience) return settle();
       scrollFollowSidebar();
-      return sleep(opts.wait || 800).then(tick);
+      return sleep(WAIT).then(tick);
     }
     return tick();
   }
@@ -1659,8 +1688,16 @@
       if (!sc) return resolve(null);
       var agg = {};                 /* 跨轮聚合 */
       var accSeen = 0, lastLi = -1, idle = 0, rounds = 0, maxLi = 0, total = -1;
+      /* ★ 21:30 加时间预算：原来 200 轮 × 800ms = 最坏 160 秒静默等待，
+         也会被用户当成「一直抓不到」。现在 60 秒到点就返回已有结果。 */
+      var t0 = Date.now(), MAX_MS = 60000;
+      function finish() {
+        resolve({ map: agg, any: accSeen > 0 || maxLi > 0, total: total, liTotal: maxLi,
+                  rounds: rounds, elapsed: Math.round((Date.now() - t0) / 1000) });
+      }
       function step() {
         rounds++;
+        if (rounds >= 200 || (Date.now() - t0) > MAX_MS) return finish();
         var r = extract(sc);
         if (r.total > 0) total = r.total;
         if (r.liTotal > maxLi) maxLi = r.liTotal;
@@ -1670,8 +1707,7 @@
         /* 懒加载判定：连续 3 轮「li 数与累计号数都不变」= 真的到底了 */
         if (r.liTotal === lastLi && accNow === accSeen) { idle++; } else { idle = 0; }
         accSeen = accNow; lastLi = r.liTotal;
-        if (idle >= 3) return resolve({ map: agg, any: accNow > 0 || maxLi > 0, total: total, liTotal: maxLi, rounds: rounds });
-        if (rounds >= 200) return resolve({ map: agg, any: accNow > 0 || maxLi > 0, total: total, liTotal: maxLi, rounds: rounds });
+        if (idle >= 3) return finish();
         try { sc.scrollTop = sc.scrollHeight; } catch (e) {}
         setTimeout(step, 800);
       }
@@ -1743,11 +1779,24 @@
 
   function readApiUnread() {
     setBody('<div class="dyh-back" data-act="manage">← 返回</div>' +
-      '<div class="dyh-prog" id="dyh-prog">🔌 正在从抖音接口读未读数…<br>' +
-      '<span style="font-size:19px">直接调关注列表接口（覆盖你全部关注的号）</span></div>');
+      '<div class="dyh-prog" id="dyh-prog">📡 正在读抖音关注页的红点…<br>' +
+      '<span style="font-size:19px">在滚动读取你全部关注的号（约 20 秒，请不要切走）</span></div>');
     return syncUnreadAuthoritative(function (p) {
       var el = document.getElementById('dyh-prog');
-      if (el) el.innerHTML = '🔌 正在从抖音接口读未读数…<br><span style="font-size:19px">' +
+      if (!el) return;
+      /* ★ 21:30 把「正在做什么、已扫多少、还要多久」都显示出来。
+         原来只显示「已读到 N 个号」且长时间不动 → 用户以为卡住/抓不到。 */
+      if (p.phase === 'harvest') {
+        var pct = p.total ? Math.min(100, Math.round((p.seen || 0) / p.total * 100)) : 0;
+        el.innerHTML = '📡 正在滚动读取抖音关注页…<br>' +
+          '<span style="font-size:19px">已扫 <b>' + (p.seen || 0) + '</b> / ' + (p.total || '?') + ' 个号（' + pct + '%）' +
+          '<br>已用 ' + (p.elapsed || 0) + ' 秒' + (p.max ? ' / 最多 ' + p.max + ' 秒' : '') + '</span>' +
+          '<div class="dyh-item-m" style="margin-top:10px"><div style="flex:1;height:8px;background:#E5DAC0;border-radius:4px;overflow:hidden">' +
+          '<div style="width:' + pct + '%;height:100%;background:#fe2c55"></div></div></div>' +
+          '<span style="font-size:15px;color:#7A6A3F">到时间会自动收工，不会一直卡着</span>';
+        return;
+      }
+      el.innerHTML = '📡 正在读抖音关注页…<br><span style="font-size:19px">' +
         '已读到 <b>' + (p.got || 0) + '</b> 个号有未看清单' +
         (p.total ? ' · 接口共返回 <b>' + p.total + '</b> 个号' : '') + '</span>' +
         (p.pages ? '<br><span style="font-size:17px;color:#7A6A3F">第 ' + p.pages + ' 页（翻页中…）</span>' : '');
