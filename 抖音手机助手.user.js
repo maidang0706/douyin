@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 17:10 · 清掉最后两处user_not_see死字段兜底(关注页收割+React内存直读)——这是数字对不上的真凶；并说明394=接口返回号数非读错
+// @version      2026-10-07 19:50 · 修「没点也自己跳到插件界面」：自动续跑加来源校验，只有本脚本点击带过来的才续跑，从别的入口打开抖音一律不自动开面板
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -253,8 +253,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 17:10 · 清掉最后两处user_not_see死字段兜底(关注页收割+React内存直读)——这是数字对不上的真凶；并说明394=接口返回号数非读错';
-  var VER_SHORT = '10-07 17:10';
+  var VER = '2026-10-07 19:50 · 修「没点也自己跳到插件界面」：自动续跑加来源校验，只有本脚本点击带过来的才续跑，从别的入口打开抖音一律不自动开面板';
+  var VER_SHORT = '10-07 19:50';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -2127,7 +2127,7 @@
        但在【它自己的关注页】里，请求是它前端发的 —— 带完整签名和真设备指纹，永远 200。
        所以「先去关注页」不是绕路，是唯一一条不会失败的通道。到了那边会自动接着抓。 */
     if (S.cfg.harvest !== false && !onFollowPage()) {
-      S.autoScan = { ts: Date.now(), limit: limitOverride || 0 };
+      S.autoScan = { ts: Date.now(), limit: limitOverride || 0, from: 'self-nav' };
       save();
       toast('正在打开抖音「关注」页 —— 接下来由抖音自己去取数据，不会再失败', 4000);
       setTimeout(function () { location.href = 'https://www.douyin.com/follow'; }, 700);
@@ -3551,7 +3551,7 @@
     if (!onFollowPage()) {
       /* 官方角标只在「关注」页的侧栏里读得到 → 先把浏览器带过去，落回来自动续跑
          （沿用整轮抓那套机制，用户不用点第二次）。 */
-      S.pendingAccScan = { sec: sec, name: who, at: Date.now() };
+      S.pendingAccScan = { sec: sec, name: who, at: Date.now(), from: 'self-nav' };
       save();
       toast('官方未读数字只能在抖音「关注」页读到，正在带你去…');
       setTimeout(function () {
@@ -4512,25 +4512,32 @@
     /* 如果这是一个被脚本打开的「取关/关注」用标签页，先让它自动点完按钮再挂面板 */
     try { autoFollowWorker(); } catch (e) { console.warn('[抖音关注助手] 自动点击异常：', e); }
     ensureUI();
-    /* ★ 被「去关注页」带过来之后自动接着抓（10-03 02:20）：
-       上一页点了「抓未读」→ 脚本把浏览器带到 /follow，页面重载后在这里自动继续，
-       用户不用再点第二次。超过 5 分钟就当作过期，不自动跑（免得莫名其妙自己开抓）。 */
-    try {
-      if (S.autoScan && Date.now() - S.autoScan.ts < 300000 && onFollowPage()) {
-        S.autoScan = null; save();
-        setTimeout(function () {
-          try {
-            open('home');
-            var b = document.querySelector('[data-act="scan"]');
-            if (b) b.click();
-          } catch (e) { }
-        }, 1200);
-      } else if (S.autoScan) { S.autoScan = null; save(); }
-    } catch (e) { }
-    /* ★ 单号「查官方未读」被带到 /follow 之后，在这里自动续跑（读接口权威数据 + 列清单）。
-       超过 3 分钟就当过期，不自动跑。 */
-    try {
-      if (S.pendingAccScan && Date.now() - S.pendingAccScan.at < 180000) {
+/* ★ 被「去关注页」带过来之后自动接着抓（10-03 02:20）：
+   上一页点了「抓未读」→ 脚本把浏览器带到 /follow，页面重载后在这里自动继续，
+   用户不用再点第二次。
+   ★★ 2026-10-07 19:45 加「来源页」校验：以前只要 S.autoScan 在 5 分钟内且当前在 /follow
+      就会自动开面板 + 自动点【抓取】按钮 —— 于是「上一次点过抓取、之后 5 分钟内随便打开抖音」
+      都会被自动拉进插件界面并开始抓取（用户反馈「我没点，它自己跳到插件界面了」）。
+      现在：只有【上一页确实是本脚本的抖音页、且明确是那次点击带过来的】才自动续跑；
+      从别的入口（如直接输网址/收藏夹/历史）打开抖音，一律不自动开面板、不自动抓。 */
+try {
+    var _cameBySelf = false;
+    try { _cameBySelf = !!S.autoScan && S.autoScan.from === 'self-nav'; } catch (e) {}
+    if (S.autoScan && Date.now() - S.autoScan.ts < 300000 && onFollowPage() && _cameBySelf) {
+      S.autoScan = null; save();
+      setTimeout(function () {
+        try {
+          open('home');
+          var b = document.querySelector('[data-act="scan"]');
+          if (b) b.click();
+        } catch (e) { }
+      }, 1200);
+    } else if (S.autoScan) { S.autoScan = null; save(); }
+  } catch (e) { }
+/* ★ 单号「查官方未读」被带到 /follow 之后，在这里自动续跑（读接口权威数据 + 列清单）。
+   ★ 19:45 同样加「来源页」校验：只有那次点击带过来的才自动续跑。 */
+try {
+    if (S.pendingAccScan && Date.now() - S.pendingAccScan.at < 180000 && S.pendingAccScan.from === 'self-nav') {
         var pa = S.pendingAccScan; S.pendingAccScan = null; save();
         if (onFollowPage()) {
           setTimeout(function () {
@@ -4546,7 +4553,7 @@
     } catch (e) { }
     /* ★ 23:55：「读全部账号的官方未读数」被带到 /follow 之后自动续跑（现在只走接口权威源，不再有内存直读分支） */
     try {
-      if (S.pendingAllBadge && Date.now() - S.pendingAllBadge.at < 180000) {
+      if (S.pendingAllBadge && Date.now() - S.pendingAllBadge.at < 180000 && S.pendingAllBadge.from === 'self-nav') {
         S.pendingAllBadge = null; save();
         if (onFollowPage()) setTimeout(function () {
           try { readApiUnread(); } catch (e) { }
