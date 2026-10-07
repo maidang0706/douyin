@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 12:55 · 未读自动同步：打开面板即静默读抖音官方清单(超12h/未读过自动重读)，数字不再要手动点才准
+// @version      2026-10-07 15:05 · 按真实截图对比修3个错：官方已读到时不掺本机残留(假未读归零)+同名不同号不再互吞+账号数按secUid去重(394→389)
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -253,8 +253,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 12:55 · 未读自动同步：打开面板即静默读抖音官方清单(超12h/未读过自动重读)，数字不再要手动点才准';
-  var VER_SHORT = '10-07 12:55';
+  var VER = '2026-10-07 15:05 · 按真实截图对比修3个错：官方已读到时不掺本机残留(假未读归零)+同名不同号不再互吞+账号数按secUid去重(394→389)';
+  var VER_SHORT = '10-07 15:05';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -646,7 +646,7 @@
     opts = opts || {};
     var maxPages = opts.maxPages || 200;
     return getSelfSecUid().then(function (self) {
-      var map = {}, total = 0, pages = 0, offset = 0, maxTime = 0, pageErr = null;
+      var map = {}, total = 0, pages = 0, offset = 0, maxTime = 0, pageErr = null, seenSec = {};
       function fetchOne() {
         return dyGet(API_FOLLOWING, commonParams({
           user_id: '', sec_user_id: self, offset: String(offset),
@@ -675,7 +675,11 @@
             var u = list[i] || {};
             var sec = u.sec_uid || u.secUid;
             if (!sec) continue;
-            total++;
+            /* ★ 10-07 14:53：total 改为【按 secUid 去重】计数。
+               旧写法 total++ 无条件累加，某页超时跳过后 offset 硬推进 +20会重复读到同一批号，
+               于是「读到 394 个号」比实际「我的关注 389 人」还多（实测 394 > 389），
+               让人以为读多了。map[sec] 本来就是覆盖式，所以只有 total 虚高。 */
+            if (!seenSec[sec]) { seenSec[sec] = 1; total++; }
             var ids = pullUnreadIds(u);
             var n, src;
             if (ids) { n = ids.length; src = 'ids'; }
@@ -2818,13 +2822,21 @@
       if ((v.publishedAt || 0) > g.newest) g.newest = v.publishedAt || 0;
     }
     /* 同一个账号的两个 key 都登记同一个数 —— 谁查都查得到，但只数一次 */
-    var map = {};
+    var map = {}, nameCount = {};
     for (i = 0; i < order.length; i++) {
-      var g2 = groups[order[i]], n = g2.n;
-      if (g2.secUid) map[g2.secUid] = n;
-      var nn = normName(g2.name);
-      if (nn) map[nn] = Math.max(map[nn] || 0, n);
-      if (g2.name) map[g2.name] = Math.max(map[g2.name] || 0, n);
+      var g2 = groups[order[i]], nn2 = normName(g2.name);
+      if (nn2) { nameCount[nn2] = (nameCount[nn2] || 0) + 1; }
+    }
+    for (i = 0; i < order.length; i++) {
+      var g3 = groups[order[i]], n3 = g3.n;
+      if (g3.secUid) map[g3.secUid] = n3;
+      var nn3 = normName(g3.name);
+      /* ★ 10-07 14:53：昵称键只在【该昵称全局唯一】时才登记。
+         同名不同号（如两个 secUid 都叫「人际交往心理学」）若登记昵称键，
+         后一个会把前一个覆盖掉 / 取max 互吞 → 列表里出现「重复号且数字被放大」。
+         现在同名的一律不登记昵称键，只认 secUid 精确匹配。 */
+      if (nn3 && nameCount[nn3] === 1) map[nn3] = n3;
+      if (g3.name && nameCount[normName(g3.name)] === 1) map[g3.name] = n3;
     }
     return { map: map, groups: groups, order: order };
   }
@@ -2835,10 +2847,16 @@
   /* 一个账号有几个未读：本机明细（userid / 昵称 都能命中） */
   function localUnread(a, um) {
     if (!a) return 0;
+    /* ★ 10-07 14:53 修正（依据真实截图对比：抖音说「进橱窗」= 0 条未看，助手却显示 1）
+       原来这行 `if (a.name && um[a.name])` 用【昵称】查本机明细聚合 um，
+       而 um 的昵称键来自本机 videos[].account（自己写的名字，可能过期/重名），
+       于是官方明明 0 条的号仍被本机残留数据顶出一个假未读。
+       现在改为：只认 secUid 精确命中；昵称一律不查（宁可少算也不给假数）。 */
     if (a.secUserId && um[a.secUserId]) return um[a.secUserId];
-    if (a.name && um[a.name]) return um[a.name];
     var nn = normName(a.name);
-    return (nn && um[nn]) || 0;
+    /* 昵称兜底只在【该昵称唯一对应一个号】时才用，避免同名不同号张冠李戴 */
+    if (nn && um[nn] && !(a.secUserId && um[nn + '@unique'] !== 1)) return um[nn];
+    return 0;
   }
 
   
@@ -2876,7 +2894,27 @@
     if (a._ghost) return localUnread(a, um);          // 非关注的推荐号：抖音不会给它未读数
     var api = apiUnreadOf(a);
     if (api) return api.n;                            /* ⓪ 抖音关注列表接口给的未读 id 列表长度 = 官方未读数 */
-    return unreadVideosOf(a.secUserId, a).length;    /* 兜底：本机明细里未读的视频条数（受 accCursor 边界约束） */
+    /* ★ 10-07 14:53 修正（依据真实截图对比：抖音显示「N个作品未看」，助手数字却对不上）：
+       本轮【已经读到官方接口】时（任何一个号有官方数），没读到这个号就说明官方说它 0 条未看
+       —— 例如官方 v2 里没有的号，抖音 App 显示「进橱窗」即0 条。
+       旧写法直接退回 unreadVideosOf()（本机残留明细）→ 给出假未读（实测「阿柚不错哦」官方 0 却显示 1）。
+       现在：本轮有官方数据时，官方没提到的号一律报0，不掺本机残留值。
+       只有「官方接口整体没读到」（S.apiUnread 为空/全过期）才允许用本机兜底。 */
+    if (hasOfficialData()) return 0;
+    return unreadVideosOf(a.secUserId, a).length;    /* 兜底：本机明细里未读的视频条数（受 accCursor边界约束） */
+  }
+
+  /* 本轮是否已拿到官方接口未读数据（只要有任意一个号有官方数就算） */
+  function hasOfficialData() {
+    var ap = S.apiUnread;
+    if (!ap || typeof ap !== 'object') return false;
+    var now = Date.now(), k;
+    for (k in ap) {
+      if (!Object.prototype.hasOwnProperty.call(ap, k) || k === '__byName') continue;
+      var rec = ap[k];
+      if (rec && (!rec.at || now - rec.at <= API_UNREAD_VALID_MS)) return true;
+    }
+    return false;
   }
 
   /* 「全部未读」= 按账号把抖音给的数加总（和 App 的关注未读总数同一口径）
