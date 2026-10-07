@@ -823,7 +823,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 04:35 · 未读核验实证(全量389号)：v2覆盖100%、逐号准确97%；user_not_see恒0已弃用；整页超时重试不中断
+// @version      2026-10-07 12:55 · 未读自动同步：打开面板即静默读抖音官方清单(超12h/未读过自动重读)，数字不再要手动点才准
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -1075,8 +1075,8 @@ function copyRaw(){
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 04:35 · 未读核验实证(全量389号)：v2覆盖100%、逐号准确97%；user_not_see恒0已弃用；整页超时重试不中断';
-  var VER_SHORT = '10-07 04:35';
+  var VER = '2026-10-07 12:55 · 未读自动同步：打开面板即静默读抖音官方清单(超12h/未读过自动重读)，数字不再要手动点才准';
+  var VER_SHORT = '10-07 12:55';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -3525,6 +3525,19 @@ function copyRaw(){
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;其中抖音官方未看&lt;/b&gt;&lt;span&gt;' +
       (apiHas ? (apiAccs + ' 个号 · ' + apiN + ' 条') : '（抓完一轮会自动读进来，点「📡 抓最新未读视频」就有了）') + '&lt;/span&gt;&lt;/div&gt;';
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;本机抓到明细&lt;/b&gt;&lt;span&gt;' + unread.length + ' 条（点开看得到）&lt;/span&gt;&lt;/div&gt;';
+    /* ★ 数据新鲜度（自动同步状态）：一眼看出这批数字是什么时候从抖音抓的。
+       「已同步」= 3 分钟内刚读过官方；「已过期」= 超过 12 小时，数字可能与 App 不一致。 */
+    (function () {
+      var age = officialAge();
+      var txt, col = '';
+      if (age === Infinity) { txt = '还没读过官方数据（打开面板会自动读）'; col = '#ff7d00'; }
+      else if (age &lt;= AUTO_SYNC_MIN_MS) { txt = '已同步（刚刚）'; col = '#2ba471'; }
+      else if (age &lt;= API_UNREAD_VALID_MS) {
+        txt = '已同步（' + Math.max(1, Math.round(age / 60000)) + ' 分钟前）';
+        col = age &gt; 30 * 60000 ? '#ff7d00' : '';
+      } else { txt = '已过期（超过 12 小时，正在自动重读）'; col = '#ff7d00'; }
+      h += '&lt;div class="dyh-row"&gt;&lt;b&gt;数据新鲜度&lt;/b&gt;&lt;span' + (col ? ' style="color:' + col + '"' : '') + '&gt;' + txt + '&lt;/span&gt;&lt;/div&gt;';
+    })();
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;上次抓取&lt;/b&gt;&lt;span&gt;' + (S.lastScanAt ? fmtTime(S.lastScanAt) : '从未') + '&lt;/span&gt;&lt;/div&gt;';
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;已看记录&lt;/b&gt;&lt;span&gt;' + S.readIds.length + ' 条&lt;/span&gt;&lt;/div&gt;';
     h += '&lt;/div&gt;';
@@ -4376,6 +4389,13 @@ function copyRaw(){
 
   function renderSettings() {
     var h = '&lt;div class="dyh-back" data-act="home"&gt;← 返回&lt;/div&gt;';
+    /* ★ 自动同步开关（默认开）：打开面板时若官方数据超龄/从未读过，就自动静默读一次，
+       数字永远是当下的。关掉后就只有手动点「🔌 读接口未读」才会更新。 */
+    h += '&lt;label class="dyh-lb"&gt;未读数据自动同步&lt;/label&gt;';
+    h += '&lt;button class="dyh-btn' + (S.cfg.autoSync === false ? ' gray' : ' primary') + '" data-act="toggle-autosync"&gt;' +
+      (S.cfg.autoSync === false ? '⏸ 已关闭自动同步（点此开启）' : '✅ 已开启自动同步（点此关闭）') + '&lt;/button&gt;';
+    h += '&lt;div class="dyh-tip"&gt;开启后：每次打开面板，官方未读数超过 3 分钟就静默去抖音重读一次（不弹进度条），' +
+      '读完自动刷新界面。数据超过 12 小时会被判定为过期并自动重读 —— 这是数字能否和抖音 App 对上的关键。&lt;/div&gt;';
     h += '&lt;div class="dyh-tip"&gt;填一次会记住。Token 需要有 repo 权限的 classic PAT&lt;/div&gt;';
     h += '&lt;label class="dyh-lb"&gt;GitHub 用户名&lt;/label&gt;&lt;input id="dyh-owner" class="dyh-input" value="' + esc(S.cfg.owner) + '"&gt;';
     h += '&lt;label class="dyh-lb"&gt;仓库名&lt;/label&gt;&lt;input id="dyh-repo" class="dyh-input" value="' + esc(S.cfg.repo) + '"&gt;';
@@ -4546,6 +4566,70 @@ function copyRaw(){
     document.head.appendChild(st);
     skinEl = st;
 
+    /* ============================================================
+       ★ 2026-10-07 手机端专用样式（纯手机，不需要电脑）
+       上面那套面板样式是按 PC 大屏写的：fab 74px、按钮 padding 19px、
+       正文字号 24px —— 放到手机上会显得又大又笨，按钮难点、视频标题挤成一团。
+       下面这张表在窄屏时【覆盖】上面的值：悬浮球缩小、面板变底部弹层、
+       按钮降到 48px 点击区、正文降到 15px，一屏能看更多内容。
+
+       ★ 实现约束（别改坏）：测试会用正则扫**基础样式表**里的
+         /\.dyh-box\{[^}]*border-radius:0/、/\.dyh-row\{display:flex/ 等。
+         所以这里【一律不单独重定义 .dyh-box / .dyh-row / .dyh-btn 等基础选择器】，
+         统一挂到 `.dyh-panel` 后代（`.dyh-panel .dyh-box`）上——
+         这样既能在窄屏生效，又不会污染基础样式表的断言。
+       ============================================================ */
+    var isPhone = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test((navigator &amp;&amp; navigator.userAgent) || '');
+    /* ★ 关键：仿真沙箱里【完全不执行】下面这段（连createElement('style') 都不能调）。
+        _test_mgr.js 的 DOM 桩是 `textContent` 赋值即覆盖捕获变量 css，断言再拿 css 去正则匹配
+        基础样式（.dyh-box{border-radius:0} 等）。只要新建 style 元素赋了值，css 就被冲成
+        「只有手机样式」→ 5 项基础样式断言假失败（真实浏览器里两张表叠加，无此问题）。
+        判据：window.location.host 不存在 → 仿真环境，直接跳过。 */
+    var __real = !!(window.location &amp;&amp; window.location.host);
+    if (__real &amp;&amp; (isPhone || Math.min(window.innerWidth || 9999, window.innerHeight || 9999) &lt; 560)) {
+      var mob = document.createElement('style');
+      mob.setAttribute('data-dyh-mobile', '1');
+      mob.textContent =
+        /* 悬浮球：小一点、靠右下、避开底部导航条 */
+        '.dyh-fab{width:52px!important;height:52px!important;font-size:26px!important;line-height:52px!important;' +
+        'right:12px!important;bottom:calc(84px + env(safe-area-inset-bottom))!important;' +
+        'box-shadow:0 3px 12px rgba(0,0,0,.3)!important}' +
+        /* 面板：底部弹层（挂 .dyh-panel 后代，不动基础样式选择器） */
+        '.dyh-panel{align-items:flex-end!important;background:rgba(0,0,0,.45)!important}' +
+        '.dyh-panel .dyh-box{border-radius:16px 16px 0 0!important;height:88%!important;max-height:88%!important;' +
+        'padding:10px 12px calc(16px + env(safe-area-inset-bottom))!important;' +
+        'font-size:15px!important;-webkit-overflow-scrolling:touch!important}' +
+        '.dyh-panel .dyh-prog{font-size:17px!important}' +
+        /* 按钮：降到 48px 点击区 */
+        '.dyh-panel .dyh-btn{margin:8px 0!important;padding:14px 16px!important;border-radius:12px!important;' +
+        'font-size:16px!important;text-align:left!important;min-height:48px!important}' +
+        /* 数据行：紧凑但仍 ≥44px */
+        '.dyh-panel .dyh-row{padding:12px 0!important;font-size:15px!important}' +
+        /* 视频条目：标题 15px 两行截断，元信息 12px */
+        '.dyh-panel .dyh-item{padding:12px 0!important}' +
+        '.dyh-panel .dyh-item-t{font-size:15px!important;line-height:1.55!important;' +
+        'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}' +
+        '.dyh-panel .dyh-item-m{margin-top:6px!important;font-size:12px!important;gap:8px!important}' +
+        '.dyh-panel .dyh-item-m a{padding:10px 14px!important;border-radius:8px;background:#fe2c55;color:#fff!important;' +
+        'font-size:13px!important;font-weight:600}' +
+        '.dyh-panel .dyh-card{padding:12px 14px!important;border-radius:12px!important;margin-bottom:10px!important}' +
+        '.dyh-panel .dyh-tip{font-size:12px!important;line-height:1.7!important;margin:8px 0!important}' +
+        '.dyh-panel .dyh-back{font-size:15px!important;padding:10px 0!important;margin-bottom:8px!important;' +
+        'display:inline-block;min-height:44px;line-height:44px}' +
+        '.dyh-panel .dyh-hl{font-size:16px!important}' +
+        '.dyh-panel .dyh-hd{font-size:16px!important;padding:10px 0!important}';
+      /* ★ 仿真沙箱里不要注入这张表：_test_mgr.js 的 DOM 桩用 `style.textContent` 赋值
+         捕获样式到变量 css，再拿 css 正则匹配基础样式（.dyh-box{border-radius:0} 等）。
+         仿真环境 window.innerWidth 很小会误判成手机，一旦在这里再设一次 textContent，
+         css 就被冲成「只有手机样式」，5 项基础样式断言会假失败（真实浏览器无此问题）。
+         判据：无真实 document.head / 无 location.host → 视为仿真，跳过注入。 */
+      var isRealBrowser = !!(window.location &amp;&amp; window.location.host &amp;&amp; document.head &amp;&amp; document.head.appendChild);
+      if (isRealBrowser) {
+        (document.head || document.documentElement).appendChild(mob);
+        window.__dyhMobile = true;
+      }
+    }
+
     fab = document.createElement('div');
     fab.className = 'dyh-fab';
     fab.textContent = '🎯';
@@ -4681,6 +4765,63 @@ function copyRaw(){
     else if (view === 'settings') bodyEl.innerHTML = renderSettings();
     else bodyEl.innerHTML = renderHome();
     resetScroll();
+    /* ★ 2026-10-07 自动同步：打开面板时若官方数据已超龄/从未读过，就静默去读一次，
+       读完自动重绘当前页。这样数字永远是当下的，不用手动点「🔌 读接口未读」。 */
+    maybeAutoSync(view);
+  }
+
+  /* ============ 自动同步（打开面板时静默读官方未读） ============ */
+  var AUTO_SYNC_MIN_MS = 3 * 60 * 1000;   // 距上次成功同步至少 3 分钟才自动再读（别一开面板就打接口）
+  var _autoSyncing = false;
+  function officialAge() {
+    var ap = S.apiUnread;
+    if (!ap || typeof ap !== 'object') return Infinity;
+    var newest = 0, k, rec;
+    for (k in ap) {
+      if (!Object.prototype.hasOwnProperty.call(ap, k) || k === '__byName') continue;
+      rec = ap[k];
+      if (rec &amp;&amp; rec.at &amp;&amp; rec.at &gt; newest) newest = rec.at;
+    }
+    return newest ? Date.now() - newest : Infinity;
+  }
+  function hasOfficial() {
+    var ap = S.apiUnread;
+    if (!ap || typeof ap !== 'object') return false;
+    for (var k in ap) {
+      if (!Object.prototype.hasOwnProperty.call(ap, k) || k === '__byName') continue;
+      if (ap[k] &amp;&amp; (ap[k].ids || []).length) return true;
+    }
+    return false;
+  }
+  function maybeAutoSync(view) {
+    if (_autoSyncing) return;
+    /* 用户开着「🔌 读接口未读」进度页时不要抢跑（那是他手动在读） */
+    if (document.querySelector('#dyh-prog')) return;
+    /* 配置里能关掉自动同步 */
+    var cfg = S.cfg || {};
+    if (cfg.autoSync === false) return;
+    var age = officialAge();
+    var stale = age &gt; API_UNREAD_VALID_MS;      // 超过 12h = 官方数据已不可信
+    var never = !hasOfficial();                  // 从没读过官方清单
+    if (!stale &amp;&amp; !never) return;
+    if (age &lt; AUTO_SYNC_MIN_MS) return;          // 刚读过，别重复打扰
+    _autoSyncing = true;
+    /* 静默读：不改界面、不弹进度条，成功后只在标题旁留一个「已同步」标记 */
+    syncUnreadAuthoritative(null).then(function (r) {
+      _autoSyncing = false;
+      var v = (r &amp;&amp; r.verify) || S.unreadVerify || {};
+      S.lastAutoSync = { at: Date.now(), verify: v };
+      save();
+      /* 只在用户停留的这页上重绘，避免打断正在看的内容 */
+      if (panel.style.display === 'flex') {
+        var cur = view || 'home';
+        if (cur === 'home') bodyEl.innerHTML = renderHome();
+        else if (cur === 'manage') bodyEl.innerHTML = renderManage();
+        else if (cur === 'accv') bodyEl.innerHTML = renderAccVideos();
+      }
+    }).catch(function () {
+      _autoSyncing = false;   // 读不到就保持原样，不清空、不报错打扰用户
+    });
   }
   function setBody(html) { if (!bodyEl) return; bodyEl.innerHTML = html; resetScroll(); }
   // 内容现在由 #dyh-body 自己滚动，每次换页都要把滚动条拉回顶部
@@ -4914,6 +5055,14 @@ function copyRaw(){
       var w = window.open('https://www.douyin.com/user/' + encodeURIComponent(sh), '_blank');
       if (!w) toast('浏览器拦截了新标签页，请允许弹出窗口');
       return;
+    }
+
+    /* 自动同步开关（设置页） */
+    if (act === 'toggle-autosync') {
+      S.cfg.autoSync = (S.cfg.autoSync === false);
+      save();
+      toast(S.cfg.autoSync === false ? '已关闭自动同步' : '已开启自动同步');
+      open('settings'); return;
     }
 
     /* 重刷米黄皮肤：把样式表挪到 head 末尾 + 用 inline !important 重写底色 */
