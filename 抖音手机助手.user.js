@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 19:50 · 修「没点也自己跳到插件界面」：自动续跑加来源校验，只有本脚本点击带过来的才续跑，从别的入口打开抖音一律不自动开面板
+// @version      2026-10-07 20:10 · 加「数据来源」如实标记：读不到官方数据时明确警告，不再拿本机旧数据冒充官方未读
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -253,8 +253,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 19:50 · 修「没点也自己跳到插件界面」：自动续跑加来源校验，只有本脚本点击带过来的才续跑，从别的入口打开抖音一律不自动开面板';
-  var VER_SHORT = '10-07 19:50';
+  var VER = '2026-10-07 20:10 · 加「数据来源」如实标记：读不到官方数据时明确警告，不再拿本机旧数据冒充官方未读';
+  var VER_SHORT = '10-07 20:10';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -266,6 +266,14 @@
            'auto'  （先 scheme，1.2 秒没起来再补一次 intent —— 补的那下没手势，个别浏览器会弹框） */
       cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'xl', scanMode: 'auto', scanBatch: 60, openMode: 'scheme', harvest: true },
       selfSecUid: '',
+      /* ★ 2026-10-07 20:05：官方未读数据的「可信度」状态。
+         src='api'   = 从抖音官方接口读到（可信）
+             'dom'   = 在关注页读到页面自己写的红点（可信，同源）
+             'stale'= 读不到、显示的是旧数据（不可信，界面必须如实提示）
+             'guess' = 读不到、显示的是本机推算（不可信）
+         没有这个标记时，界面会把「本机旧数据」当成真的显示出来 —— 这就是
+         「数字看着有、却和抖音对不上」的最后一个原因。 */
+      unreadStatus: { src: '', at: 0, msg: '' },
       categories: ['朋友', '军事', '学习', '工作', '实时新闻', '钓鱼', '娱乐'],   // 用户自己建的分类，可增删改
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -806,6 +814,14 @@
       });
     }
     return viaApi().then(function (r) {
+      /* ★ 20:05 如实记录本轮数据来源与是否真的读到 */
+      var got = r && r.map ? Object.keys(r.map).length : 0;
+      S.unreadStatus = {
+        src: got > 0 ? 'api' : 'empty',
+        at: Date.now(),
+        msg: got > 0 ? ('官方接口读到 ' + got + ' 个号的未看清单')
+             : ('官方接口返回 0 个号（可能是被风控或参数失效）—— 下面的数字不是抖音的真实未读')
+      };
       return verifyAndFinish(r, false);
     }).catch(function (e) {
       /* 接口失败（未登录 / 接口变更 / 风控）→ 退回在关注页滚动收割（0 自签请求）兜底 */
@@ -814,9 +830,17 @@
           .then(function (acc) {
             var m = (collectFollowingUnread().map) || {};
             applyApiUnreadAll(m);
+            var g2 = Object.keys(m || {}).length;
+            S.unreadStatus = {
+              src: g2 > 0 ? 'dom' : 'stale',
+              at: Date.now(),
+              msg: g2 > 0 ? ('关注页红点读到 ' + g2 + ' 个号')
+                   : '接口和红点都没读到 —— 显示的是旧数据，不代表抖音真实未读'
+            };
             return verifyAndFinish({ map: m, total: S.accounts.length }, true);
           });
       }
+      S.unreadStatus = { src: 'stale', at: Date.now(), msg: '官方数据读取失败：' + ((e && e.message) || e) };
       throw e;   // 既没接口又没在关注页 → 如实报错，让上层提示去登录/去关注页
     });
   }
@@ -2728,12 +2752,32 @@
     h += '<div class="dyh-row"><b>其中抖音官方未看</b><span>' +
       (apiHas ? (apiAccs + ' 个号 · ' + apiN + ' 条') : '（抓完一轮会自动读进来，点「📡 抓最新未读视频」就有了）') + '</span></div>';
     h += '<div class="dyh-row"><b>本机抓到明细</b><span>' + unread.length + ' 条（点开看得到）</span></div>';
-    /* ★ 数据新鲜度（自动同步状态）：一眼看出这批数字是什么时候从抖音抓的。
-       「已同步」= 3 分钟内刚读过官方；「已过期」= 超过 12 小时，数字可能与 App 不一致。 */
+    /* ★ 数据来源与可信度（20:05）：最重要的一行——不许把「读不到的旧数据」当成真数显示。
+       诊断实测：手机 Via 里官方接口会「返回 0 个号」，此时若不提示，界面会拿本机旧数据
+       冒充官方未读 → 用户看到的数字就永远和抖音对不上。 */
+    (function () {
+      var st = S.unreadStatus || {};
+      var src = st.src || '', msg = st.msg || '';
+      var txt, col = '#ff7d00';
+      if (src === 'api') { txt = '✅ 官方接口（可信）· ' + (msg || ''); col = '#2ba471'; }
+      else if (src === 'dom') { txt = '✅ 关注页红点（可信）· ' + (msg || ''); col = '#2ba471'; }
+      else if (src === 'stale' || src === 'empty') { txt = '⚠ 未读到官方数据 · ' + (msg || '下面显示的是旧数据，不代表抖音真实未读'); col = '#e64340'; }
+      else { txt = '尚未读取官方未读（打开面板会自动读一次）'; col = '#ff7d00'; }
+      h += '<div class="dyh-row"><b>数据来源</b><span style="color:' + col + '">' + esc(txt) + '</span></div>';
+      if (src === 'stale' || src === 'empty') {
+        h += '<div class="dyh-card" style="background:#FFE9E8;border:1px solid #F5A9A6">' +
+          '<div class="dyh-tip" style="color:#C2372F;margin:0">' +
+          '⚠️ <b>下面的未读数字不是抖音的真实未读</b><br>' +
+          '原因：' + esc(msg || '官方接口读不到') + '。<br>' +
+          '请到抖音「关注」页点一次「📡 抓最新未读视频」；仍失败说明抖音在限制读取，' +
+          '此时以抖音 App 看到的数为准。</div></div>';
+      }
+    })();
+    /* 数据新鲜度（自动同步状态） */
     (function () {
       var age = officialAge();
       var txt, col = '';
-      if (age === Infinity) { txt = '还没读过官方数据（打开面板会自动读）'; col = '#ff7d00'; }
+      if (age === Infinity) { txt = '还没读过官方数据'; col = '#ff7d00'; }
       else if (age <= AUTO_SYNC_MIN_MS) { txt = '已同步（刚刚）'; col = '#2ba471'; }
       else if (age <= API_UNREAD_VALID_MS) {
         txt = '已同步（' + Math.max(1, Math.round(age / 60000)) + ' 分钟前）';
