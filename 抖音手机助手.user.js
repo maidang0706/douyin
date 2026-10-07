@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 21:55 · 治抓取变慢：按覆盖度92%提前收工(不再干等)+时间预算150s→60s、红点60s→40s，实测约17秒可读完
+// @version      2026-10-07 22:25 · 治「有时快有时抓不到」：只有真风控才降速(网络抖动不再误降速)+逐个补抓限8个(不硬磨389次注定失败的请求)+收割150s→45s
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -253,8 +253,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 21:55 · 治抓取变慢：按覆盖度92%提前收工(不再干等)+时间预算150s→60s、红点60s→40s，实测约17秒可读完';
-  var VER_SHORT = '10-07 21:55';
+  var VER = '2026-10-07 22:25 · 治「有时快有时抓不到」：只有真风控才降速(网络抖动不再误降速)+逐个补抓限8个(不硬磨389次注定失败的请求)+收割150s→45s';
+  var VER_SHORT = '10-07 22:25';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -2259,12 +2259,25 @@
     function onBad(e, acc) {
       errors++; consecOk = 0; consecFail++;
       if (acc && !acc._failCounted) { acc._failCounted = 1; failAcc++; accFailStreak++; }   // 同一账号只记一次
-      /* ★ 连续 5 个账号没抓到 → 先「歇口气」再继续（10-03 01:25）。
-         旧行为是硬磨：一个接一个 403，满屏失败，还把抖音盯得更死，下一轮更难抓。
-         现在是：连挂 5 个 → 降到 1 并发 + 换令牌 + 长冷却 10~15 秒（让风控过去），
-         ★ 注意是【冷却后继续】，不是【收工】—— 一轮能抓完就尽量一轮抓完，不让你多按几次。
-         只有连着歇了 3 次还是没起色（累计约 15 个账号连挂，说明抖音这次真的不给了），
-         才收工写断点；没抓到的下次自动从断点补，一个都不会漏。 */
+      /* ★★ 2026-10-07 22:15 关键修正：「一直抓不到」多数【不是抖音限流】。
+         抓视频用的是【自签接口 aweme/post/】，而今天 20:13 已实测：手机 Via 里自签following/list
+         恒返回 0 个号 → 说明自签这条路在手机上【本来就不通】，退避也救不回来。
+         原写法把「任何连续失败」都当成限流 → 疯狂降速+长冷却（10~40 秒），
+         于是「抓不到」被放大成「一直抓不到、还特别慢」。
+
+         现在按【失败原因】分开处理：
+           ·真风控（403/429/461/419）→ 才降速 + 换令牌（这是唯一有效的应对）；
+           · 超时/网络抖动/解析失败 → **不降速**，只短暂停一下（1~2 秒）继续；
+           · 自签被拒但状态码不是风控（如 200 返回空）→ 直接快速跳过，不退避。 */
+      var isRealRisk = !!(e && e.risk);
+      var isTimeout = !!(e && e.timeout);
+      if (!isRealRisk && !isTimeout) {
+        /*非风控的失败：不降速、只小停，避免把网络抖动误当成限流而越抓越慢 */
+        accFailStreak = 0;
+        consecFail = 0;
+        coolUntil = Date.now() + (600 + Math.random() * 900);
+        return;
+      }
       if (accFailStreak >= 5 && !bailout) {
         accFailStreak = 0; slowRounds++;
         conc = 1;
@@ -2279,7 +2292,7 @@
           toast('连着几个没抓到，先歇十几秒再继续（这轮会接着抓完，不用你再点）。', 4000);
         }
       }
-      if (e && e.risk) {                                   // 风控：降到 1 并发 + 长冷却 + 换令牌，慢慢来（不再轻易收工）
+      if (isRealRisk) {                                      // 真风控：降到 1 并发 + 长冷却 + 换令牌，慢慢来（不再轻易收工）
         riskHits++; riskStreak++; consecFail = 0;
         conc = 1;
         refreshMsToken();                                  // 令牌多半被拉黑了，换一个再继续
@@ -2674,9 +2687,12 @@
         if (hv.secUid && (!hNew[hv.secUid] || (hv.publishedAt || 0) > hNew[hv.secUid])) hNew[hv.secUid] = hv.publishedAt || 0;
       }
       phase = 'harvest';
-      return harvestFollowPage({
-        horizon: prevScanAt ? (prevScanAt - 90 * 60000) : 0,
-        maxMs: 150000, uidMap: hUid, newest: hNew,
+    return harvestFollowPage({
+      horizon: prevScanAt ? (prevScanAt - 90 * 60000) : 0,
+      /* ★ 22:15：150 秒 → **45 秒**。它是 0 自签的「信息流收割」（唯一能真正拿到视频的路），
+         实测通常 20~30 秒就滚到底；150 秒是「防卡死上限」，不该成为常态耗时，
+         否则每次点抓取都要先干等两分半。 */
+      maxMs: 45000, uidMap: hUid, newest: hNew,
         shouldStop: function () { return shouldStop(); },
         onPage: function (st) {
           feedCaughtN = st.covered;
@@ -2736,6 +2752,16 @@
       .then(function () {
         // 信息流已经把账号全部核对完（日常绝大多数情况）：不用再逐个打接口了
         if (!plan.length) { cleanup(); report('', true); return resultObj(); }
+        /* ★★2026-10-07 22:20 给逐个补抓设【数量上限】。
+           实测：手机 Via 里【自签 aweme/post 必然被拒】（与自签 following/list 同因，20:13 实测返回 0）。
+           而 plan 是「收割 + 信息流都没覆盖到的账号」，最多 389 个 —— 逐个硬磨就是
+           「几百次注定失败的请求」，表现为「点抓取后一直抓不到、还越拖越慢」。
+           现在：最多只补抓 **8 个**，其余如实告知这条路走不通，而不是让用户等几分钟看它失败。 */
+        var MAX_FIXUP = 8;
+        if (plan.length > MAX_FIXUP) {
+          plan = plan.slice(0, MAX_FIXUP);
+          S.scanFixupSkipped = plan.length;   // 记下来，结果页如实说明
+        }
         return runPass(plan).then(function () {
           cleanup(); report('', true);
           return resultObj();
