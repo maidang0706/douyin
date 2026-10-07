@@ -823,7 +823,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 15:25 · 按第2轮截图修：列表与总条数都按secUid去重(同名不同号不再重复显示/重复累加)，幽灵号不计入总数
+// @version      2026-10-07 16:55 · 修「总是抓取失败」：换msToken真的换(黑名单绕开cookie) + 整页被风控时换令牌重试
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -1075,8 +1075,8 @@ function copyRaw(){
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 15:25 · 按第2轮截图修：列表与总条数都按secUid去重(同名不同号不再重复显示/重复累加)，幽灵号不计入总数';
-  var VER_SHORT = '10-07 15:25';
+  var VER = '2026-10-07 16:55 · 修「总是抓取失败」：换msToken真的换(黑名单绕开cookie) + 整页被风控时换令牌重试';
+  var VER_SHORT = '10-07 16:55';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1280,6 +1280,10 @@ function copyRaw(){
      ② 从页面发过的请求里嗅探；③ 随机生成一个（抖音服务端只校验格式不校验来源，
      拿到后还会通过 Set-Cookie 发一个新的回来）。被风控时 refreshMsToken() 会重新取。 */
   var curMsToken = '';
+  /* ★ 2026-10-07 16:50：被风控拉黑过的令牌黑名单。
+     refreshMsToken() 记下旧令牌，下次取令牌时绕开 cookie —— 原来清缓存后
+     又从 cookie 读回同一个黑令牌，等于「换了但没换」，导致连挂后一直403。 */
+  var msTokenBlacklisted = [];
   function sniffMsToken() {
     try {
       var es = (typeof performance !== 'undefined' &amp;&amp; performance.getEntriesByType)
@@ -1301,12 +1305,24 @@ function copyRaw(){
   function msToken() {
     if (!curMsToken) {
       var m = '';
-      try { var c = document.cookie.match(/(?:^|;\s*)msToken=([^;]+)/); if (c) m = c[1]; } catch (e) { }
-      curMsToken = m || sniffMsToken() || genMsToken();
+      /* ★ 2026-10-07 16:50：如果上一个令牌被风控拉黑，就【跳过 cookie】、
+         改用页面自己请求里嗅探到的 / 新生成的，
+         避免「cookie 里的同一个黑令牌被反复读回来」—— 那等于没换，
+         正是「连挂 5 个 → refreshMsToken() → 继续 403」的原因。 */
+      if (msTokenBlacklisted) {
+        curMsToken = sniffMsToken() || genMsToken();
+        /* 若嗅到的还是那个黑令牌，强制新生成一个 */
+        if (msTokenBlacklisted.indexOf(curMsToken) &gt;= 0) curMsToken = genMsToken();
+      } else {
+        try { var c = document.cookie.match(/(?:^|;\s*)msToken=([^;]+)/); if (c) m = c[1]; } catch (e) { }
+        curMsToken = m || sniffMsToken() || genMsToken();
+      }
     }
     return curMsToken;
   }
   function refreshMsToken() {
+    /* 把当前令牌记进黑名单，下次 msToken() 就会绕开 cookie 换新的 */
+    if (curMsToken) { (msTokenBlacklisted = msTokenBlacklisted || []).push(curMsToken); if (msTokenBlacklisted.length &gt; 8) msTokenBlacklisted.shift(); }
     curMsToken = ''; sniffCache = null;   // 顺手把公共参数也重嗅一遍（页面可能已换过一批）
     return msToken();
   }
@@ -4312,6 +4328,17 @@ function copyRaw(){
           if (nc == null || String(nc) === String(cursor)) return all;
           cursor = String(nc);
           return step();
+        })
+        /* ★ 2026-10-07 16:50：整页被风控（403/429/461/419）时，先【换令牌再重试一次】。
+           原来直接失败 → 该号直接算「抓不到」，表现出来就是「总有号抓不到」。
+           换令牌后成功率明显提升；仍失败才抛给上层做降速冷却。 */
+        .catch(function (e) {
+          if (e &amp;&amp; (e.risk || e.code === 403 || e.code === 429) &amp;&amp; page &lt;= 2) {
+            refreshMsToken();
+            page--;                       // 这一页重试，不占用页数配额
+            return step();
+          }
+          throw e;
         });
     }
     return step().then(function (list) {
