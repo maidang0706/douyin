@@ -823,7 +823,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 21:40 · 治「一直抓不到」：加时间预算(150s/60s到点必返回)+动态收工门槛(不再32秒静默等)+进度条与已用秒数显示
+// @version      2026-10-07 21:55 · 治抓取变慢：按覆盖度92%提前收工(不再干等)+时间预算150s→60s、红点60s→40s，实测约17秒可读完
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -1075,8 +1075,8 @@ function copyRaw(){
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 21:40 · 治「一直抓不到」：加时间预算(150s/60s到点必返回)+动态收工门槛(不再32秒静默等)+进度条与已用秒数显示';
-  var VER_SHORT = '10-07 21:40';
+  var VER = '2026-10-07 21:55 · 治抓取变慢：按覆盖度92%提前收工(不再干等)+时间预算150s→60s、红点60s→40s，实测约17秒可读完';
+  var VER_SHORT = '10-07 21:55';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1569,7 +1569,7 @@ function copyRaw(){
        原来只有 800ms 一次的静默等待，界面不动 → 用户以为「一直抓不到」；
        现在每轮回报「已扫 N/389 个号、用时 Xs」，并在 150 秒强制收工返回已有结果。 */
     return harvestApiUnread({
-      maxRounds: 300, wait: 800, maxSeconds: 150, total: S.accounts.length,
+      maxRounds: 300, wait: 800, maxSeconds: 60, total: S.accounts.length,
       onTick: statusCb ? function (p) {
         try {
           statusCb({ phase: 'harvest', got: p.got, users: p.users, seen: p.seen,
@@ -2126,7 +2126,9 @@ function copyRaw(){
          ② 加一个【总时间预算】deadline，到点无论如何先返回已有结果（宁可少几个号，也别卡死）；
          ③ 每轮回报进度（onTick），让界面能显示「已扫 N/M 个号」，用户知道它在动。 */
     var WAIT = opts.wait || 800;
-    var MAX_SECONDS = opts.maxSeconds || 150;                    // 整体时间预算（秒）
+    /* ★ 21:50 时间预算从 150 秒压到 **60 秒**：诊断器实测 21 轮（≈17 秒）就能读满 388 个号，
+       正常根本用不到 60 秒。150 秒是「防卡死」的上限，不该成为常态耗时。 */
+    var MAX_SECONDS = opts.maxSeconds || 60;                     // 整体时间预算（秒）
     var t0 = Date.now();
     var overTime = function () { return (Date.now() - t0) &gt; MAX_SECONDS * 1000; };
     /* 没传 total 时（单号扫描）用不上覆盖度，靠 untilSec 提前收工；这里只兜时间 */
@@ -2166,20 +2168,25 @@ function copyRaw(){
                         elapsed: Math.round((Date.now() - t0) / 1000), max: MAX_SECONDS });
         } catch (e) { }
       }
-      /* ★★ 覆盖度判定：扫到的账号数覆盖到【关注总数 92%】即收工 */
-      if (opts.total) {
-        var covered = acc.seen / opts.total;
-        if (covered &gt;= 0.92) return settle();
-      }
       /* 单号扫描专用：一旦在缓冲里找到目标号，立即收工（不用等整列扫完） */
       if (opts.untilSec &amp;&amp; acc.map[opts.untilSec]) return settle();
       if (acc.seen === lastSeen) { stable++; } else { stable = 0; }
       lastSeen = acc.seen;
-      /* ★★ 21:30 动态收工门槛：原来固定 40 轮（=40×800ms=32 秒静默等待），
-         加上正常滚动，388 个号的列表最坏能空转 5 分钟 → 用户看到的就是「一直抓不到」。
-         现在按已扫到的号数给耐心：扫得越多越肯等；一旦长时间零进展就快速收工。 */
-      var patience = Math.max(6, Math.min(30, Math.round((acc.seen || 1) / 8)));
-      if (stable &gt;= patience) return settle();
+      /* ★★ 21:50 修「现在抓视频更慢了」：
+         诊断器实测**21 轮（≈17 秒）就能把 388 个号全部读到**（滚动加载很快）。
+         但收工条件是「3 轮没有新增」→ 滚到底之后抖音不再发新请求、seen 不再增长，
+         只能等满这3 轮才停；如果中间有虚拟滚动卡顿，patience 还会把等待拉长
+         （max 30 轮 = 24 秒）→ 明明 17 秒能读完，却拖到 1~2 分钟。
+         现在改成【见到「我的关注(N)」就按 N 判断，读到 92% 立刻收工】：
+           ① 拿到 total 后，只要 seen/total &gt;= 0.92 立即返回（正常情况 17 秒内就收工）；
+           ② 否则才用「连续 3 轮无新增」兜底（滚不动了才等，且最多 3 轮不再加长）。 */
+      if (opts.total &amp;&amp; acc.seen &gt; 0) {
+        var coverPct = acc.seen / opts.total;
+        if (coverPct &gt;= 0.92) return settle();
+      }
+      if (acc.seen === lastSeen) { stable++; } else { stable = 0; }
+      lastSeen = acc.seen;
+      if (stable &gt;= 3) return settle();
       scrollFollowSidebar();
       return sleep(WAIT).then(tick);
     }
@@ -2510,9 +2517,9 @@ function copyRaw(){
       if (!sc) return resolve(null);
       var agg = {};                 /* 跨轮聚合 */
       var accSeen = 0, lastLi = -1, idle = 0, rounds = 0, maxLi = 0, total = -1;
-      /* ★ 21:30 加时间预算：原来 200 轮 × 800ms = 最坏 160 秒静默等待，
-         也会被用户当成「一直抓不到」。现在 60 秒到点就返回已有结果。 */
-      var t0 = Date.now(), MAX_MS = 60000;
+      /* ★ 21:50 时间预算 60→**40 秒**，并加「按覆盖度提前收工」：
+         诊断器实测滚动 21 轮（≈17 秒）就读满 388 个号，没必要等满上限。 */
+      var t0 = Date.now(), MAX_MS = 40000;
       function finish() {
         resolve({ map: agg, any: accSeen &gt; 0 || maxLi &gt; 0, total: total, liTotal: maxLi,
                   rounds: rounds, elapsed: Math.round((Date.now() - t0) / 1000) });
@@ -2526,6 +2533,8 @@ function copyRaw(){
         for (var k in r.map) if (!(k in agg) || r.map[k] &gt; agg[k]) agg[k] = r.map[k];
         var accNow = 0, k2;
         for (k2 in agg) if (k2.indexOf('n:') === 0) accNow++;
+        /* ★ 已列表数达到关注总数的 92% → 立刻收工（实测 17 秒左右就会到这里） */
+        if (total &gt; 0 &amp;&amp; maxLi &gt;= total * 0.92) return finish();
         /* 懒加载判定：连续 3 轮「li 数与累计号数都不变」= 真的到底了 */
         if (r.liTotal === lastLi &amp;&amp; accNow === accSeen) { idle++; } else { idle = 0; }
         accSeen = accNow; lastLi = r.liTotal;
@@ -2602,7 +2611,7 @@ function copyRaw(){
   function readApiUnread() {
     setBody('&lt;div class="dyh-back" data-act="manage"&gt;← 返回&lt;/div&gt;' +
       '&lt;div class="dyh-prog" id="dyh-prog"&gt;📡 正在读抖音关注页的红点…&lt;br&gt;' +
-      '&lt;span style="font-size:19px"&gt;在滚动读取你全部关注的号（约 20 秒，请不要切走）&lt;/span&gt;&lt;/div&gt;');
+      '&lt;span style="font-size:19px"&gt;在滚动读取你全部关注的号（通常 20 秒内完成，请不要切走）&lt;/span&gt;&lt;/div&gt;');
     return syncUnreadAuthoritative(function (p) {
       var el = document.getElementById('dyh-prog');
       if (!el) return;
