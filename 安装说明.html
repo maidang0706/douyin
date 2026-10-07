@@ -823,7 +823,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 20:25 · 重写红点读取：锁定关注列表容器+跨轮聚合+懒加载感知(实测可读满388个号，接口在手机端不可用故以红点为准)
+// @version      2026-10-07 20:50 · 删除自签following/list（手机端实测恒返回0个号），未读主源改为「关注页滚动收割+红点DOM」，0自签请求
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -1075,8 +1075,8 @@ function copyRaw(){
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 20:25 · 重写红点读取：锁定关注列表容器+跨轮聚合+懒加载感知(实测可读满388个号，接口在手机端不可用故以红点为准)';
-  var VER_SHORT = '10-07 20:25';
+  var VER = '2026-10-07 20:50 · 删除自签following/list（手机端实测恒返回0个号），未读主源改为「关注页滚动收割+红点DOM」，0自签请求';
+  var VER_SHORT = '10-07 20:50';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1488,81 +1488,9 @@ function copyRaw(){
      这里直接复用它的分页循环，把每个号的 not_seen_item_id_list_v2（= 抖音 App 里「N个作品未看」
      对应的【具体未看视频 id 清单】）全部取回来。覆盖度 = 100%（翻到底为止），数量 = 清单长度，
      且给出具体 id，后面反查视频也靠它。 */
-  function fetchFollowingUnread(opts) {
-    opts = opts || {};
-    var maxPages = opts.maxPages || 200;
-    return getSelfSecUid().then(function (self) {
-      var map = {}, total = 0, pages = 0, offset = 0, maxTime = 0, pageErr = null, seenSec = {};
-      function fetchOne() {
-        return dyGet(API_FOLLOWING, commonParams({
-          user_id: '', sec_user_id: self, offset: String(offset),
-          min_time: '0', max_time: String(maxTime), count: '20',
-          source_type: '4', gps_access: '0', address_book_access: '0', is_top: '1'
-        }), opts.signal ? { signal: opts.signal } : {});
-      }
-      /* ★ 10-07 韧性：单页超时/失败重试 2 次；仍失败则跳过该页继续翻，
-         绝不因「某一页卡死」就把整轮读未读搞崩（真实环境 following/list 偶发 8s 超时）。 */
-      function onePage() {
-        if (pages &gt;= maxPages) return Promise.resolve();
-        var attempt = 0;
-        function tryOnce() {
-          return fetchOne().then(function (j) { return j; }, function (e) {
-            attempt++;
-            if (attempt &lt; 2) return sleep(500).then(tryOnce);
-            return { __err: String((e &amp;&amp; e.message) || e) };
-          });
-        }
-        return tryOnce().then(function (j) {
-          pages++;
-          if (j &amp;&amp; j.__err) { pageErr = '第' + pages + '页读取失败已跳过: ' + j.__err; offset += 20; return; }
-          if (!j || (!j.followings &amp;&amp; !j.has_more)) { pageErr = '第' + pages + '页响应异常已跳过'; offset += 20; return; }
-          var list = j.followings || [];
-          for (var i = 0; i &lt; list.length; i++) {
-            var u = list[i] || {};
-            var sec = u.sec_uid || u.secUid;
-            if (!sec) continue;
-            /* ★ 10-07 14:53：total 改为【按 secUid 去重】计数。
-               旧写法 total++ 无条件累加，某页超时跳过后 offset 硬推进 +20会重复读到同一批号，
-               于是「读到 394 个号」比实际「我的关注 389 人」还多（实测 394 &gt; 389），
-               让人以为读多了。map[sec] 本来就是覆盖式，所以只有 total 虚高。 */
-            if (!seenSec[sec]) { seenSec[sec] = 1; total++; }
-            var ids = pullUnreadIds(u);
-            var n, src;
-            if (ids) { n = ids.length; src = 'ids'; }
-            else {
-              /* ★ 10-07 全量实测（未读核验.js，389/389 号）：
-                 v2 出现数 == 有未看账号数（132==132）→ 字段是「出现=有未看(长度=条数) / 缺失=无未看(0)」的
-                 完整编码，覆盖 100%，并非部分覆盖。
-                 同时 user_not_see 出现 389/389 但【恒为 0】，是死字段，绝不能当未读数（旧逻辑用它→永远显示 0）。
-                 故 v2 缺失时直接记 0，并标 src='needDom'：万一红点 DOM 显示 N&gt;0，
-                 reconcileWithBadges 会用更鲜红的红点数覆盖它（红点是抖音同源地面真相）。 */
-              n = 0; src = 'needDom';
-            }
-            if (!(n &gt;= 0)) continue;
-            /* 多页里同一号重复出现 → 以【最后一份】为准（和 collectFollowingUnread 一致） */
-            map[sec] = { n: n, ids: ids || [], nickname: (u.nickname || u.nickName || ''), at: Date.now(), src: src };
-          }
-          offset += list.length;
-          if (j.max_time) maxTime = j.max_time;
-          if (opts.onPage) { try { opts.onPage({ pages: pages, got: Object.keys(map).length, total: total }); } catch (e) { } }
-          if (!j.has_more || list.length === 0) return;
-          return sleep(700).then(onePage);
-        });
-      }
-      return onePage().then(function () {
-        /* ★ 安全网：若一页都没读成功（系统性失败：未登录/接口被封），reject 触发 harvest 兜底；
-           仅个别页超时则上面的跳过逻辑已处理，正常返回部分数据。 */
-        if (total === 0 &amp;&amp; pageErr) return Promise.reject(new Error('following/list 全部页读取失败：' + pageErr));
-        return { map: map, total: total, pages: pages, pageErr: pageErr };
-      });
-    });
-  }
-
-  /* ★ 10-07：把「抖音官方未看 id 清单」里的视频，反查成本地可展示的视频对象。
-     只认抖音给的未看 id —— 所以展示里每一条视频，都确确实实是抖音标了「未看」的那条，
-     不会把早看过的旧视频混进来，也不会漏掉真未读。
-     来源优先级：① 本机 S.videos 里已有 → 直接复用（0 请求）；
-                 ② 没抓到 → 抓这个号的作品，按 id 命中入库（只存命中未看的，不存已看的）。 */
+  /* ★★★ 已删除 2026-10-0720:40：fetchFollowingUnread（自己拼参数发 following/list）。
+     手机 Via 里实测恒返回 0 个号且不报错（200+空 followings = 参数不适配，非风控），
+     这条路在手机端走不通 → 主源已改为「关注页滚动收割 + 红点 DOM」（0 自签请求）。 */
   function fetchUnreadVideoDetails(opts) {
     opts = opts || {};
     var stop = opts.shouldStop || function () { return false; };
@@ -1619,7 +1547,7 @@ function copyRaw(){
      直接接口失败时才退回「关注页滚动收割」兜底，绝不退化成「读不到/读不全」。 */
   function syncUnreadAuthoritative(statusCb) {
     function verifyAndFinish(r, fromHarvest) {
-      /* ★ 10-07 核验：与「关注页红点」地面真相对账（仅在 /follow 页时有效） */
+      /* ★ 与「关注页红点」地面真相对账（仅在 /follow 页时有效） */
       return readFollowBadgesDom().then(function (dom) {
         var verify = reconcileWithBadges(dom);
         return fetchUnreadVideoDetails({ shouldStop: function () { return false; } }).then(function (d) {
@@ -1627,44 +1555,34 @@ function copyRaw(){
         });
       });
     }
-    function viaApi() {
-      return fetchFollowingUnread({ onPage: statusCb ? function (p) {
-        statusCb({ phase: 'side', got: p.got, pages: p.pages, total: p.total });
-      } : null }).then(function (r) {
-        applyApiUnreadAll(r.map);
-        return r;
+
+    /* ★★★ 2026-10-07 20:40 重大简化：删掉「自己拼参数发 following/list 请求」这条主路径。
+       依据实测（诊断器 20:13，用户真实环境）：
+         · 手机 Via 里「自签 following/list」恒返回【0 个号】，且**不报错**
+           （HTTP 200 + JSON 正常 + followings 为空数组）→ 是【参数/baseParams 不适配】，
+             不是被风控。→ 这条路在手机端**走不通**，继续当主源只会每次白跑一遍再退回。
+         · 而 harvestApiUnread（滚关注页让【抖音自己】发请求、我们只旁听响应）
+           是 0 自签请求，不受这个参数问题影响，且能拿到 v2 的**具体 id 清单**。
+       所以：主源改为「关注页滚动收割」，再叠加【红点 DOM】做交叉兜底（实测可读满 388 个号）。
+       自签接口函数已整体删除（原先 5 处引用一并清理）。 */
+    return harvestApiUnread({ maxRounds: 300, wait: 800, total: S.accounts.length })
+      .then(function (acc) {
+        var m = (collectFollowingUnread().map) || {};
+        applyApiUnreadAll(m);
+        var g2 = Object.keys(m || {}).length;
+        S.unreadStatus = {
+          src: g2 &gt; 0 ? 'dom' : 'stale',
+          at: Date.now(),
+          msg: g2 &gt; 0 ? ('关注页收割 + 红点读到 ' + g2 + ' 个号')
+               : '关注页也没读到 —— 显示的是旧数据，不代表抖音真实未读'
+        };
+        if (statusCb) { try { statusCb({ phase: 'done', got: g2, total: S.accounts.length }); } catch (e) {} }
+        return verifyAndFinish({ map: m, total: S.accounts.length }, true);
+      })
+      .catch(function (e) {
+        S.unreadStatus = { src: 'stale', at: Date.now(), msg: '未读数据读取失败：' + ((e &amp;&amp; e.message) || e) };
+        throw e;
       });
-    }
-    return viaApi().then(function (r) {
-      /* ★ 20:05 如实记录本轮数据来源与是否真的读到 */
-      var got = r &amp;&amp; r.map ? Object.keys(r.map).length : 0;
-      S.unreadStatus = {
-        src: got &gt; 0 ? 'api' : 'empty',
-        at: Date.now(),
-        msg: got &gt; 0 ? ('官方接口读到 ' + got + ' 个号的未看清单')
-             : ('官方接口返回 0 个号（可能是被风控或参数失效）—— 下面的数字不是抖音的真实未读')
-      };
-      return verifyAndFinish(r, false);
-    }).catch(function (e) {
-      /* 接口失败（未登录 / 接口变更 / 风控）→ 退回在关注页滚动收割（0 自签请求）兜底 */
-      if (onFollowPage()) {
-        return harvestApiUnread({ maxRounds: 300, wait: 800, total: S.accounts.length })
-          .then(function (acc) {
-            var m = (collectFollowingUnread().map) || {};
-            applyApiUnreadAll(m);
-            var g2 = Object.keys(m || {}).length;
-            S.unreadStatus = {
-              src: g2 &gt; 0 ? 'dom' : 'stale',
-              at: Date.now(),
-              msg: g2 &gt; 0 ? ('关注页红点读到 ' + g2 + ' 个号')
-                   : '接口和红点都没读到 —— 显示的是旧数据，不代表抖音真实未读'
-            };
-            return verifyAndFinish({ map: m, total: S.accounts.length }, true);
-          });
-      }
-      S.unreadStatus = { src: 'stale', at: Date.now(), msg: '官方数据读取失败：' + ((e &amp;&amp; e.message) || e) };
-      throw e;   // 既没接口又没在关注页 → 如实报错，让上层提示去登录/去关注页
-    });
   }
 
   /* 把抖音返回的原始 aweme 对象整理成本地存储格式（作品接口与关注流接口共用） */
@@ -1948,7 +1866,7 @@ function copyRaw(){
              ★ 2026-10-07 17:05 修正：原来这里「没有 id 列表就退用 user_not_see」——
              但全量实测（389/389 号）证明 user_not_see【恒为 0，是死字段】。
              用它兜底 = 把「有 N 条未看」错报成 0，或把「已看完」错报成有未读，
-             这正是「数字和抖音对不上」的根因之一（同源问题在 fetchFollowingUnread 已修，
+             这正是「数字和抖音对不上」的根因之一（同源问题在关注页收割路径已修，
              这条关注页收割路径当时漏了）。
              现在：没有 v2 清单就记 n=0（该号本轮没未看），绝不拿死字段编数字。 */
           var n, src;
@@ -5515,7 +5433,6 @@ try {
     collectFollowingUnread: collectFollowingUnread,
     harvestApiUnread: harvestApiUnread,
     readApiUnread: readApiUnread,
-    fetchFollowingUnread: fetchFollowingUnread,
     fetchUnreadVideoDetails: fetchUnreadVideoDetails,
     syncUnreadAuthoritative: syncUnreadAuthoritative,
     applyApiUnreadAll: applyApiUnreadAll,
