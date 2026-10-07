@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 22:45 · 撤回22:20的8个上限(它导致更抓不到)+收割45s→120s(视频明细唯一来源)，保留真风控才降速
+// @version      2026-10-07 23:00 · 修「只剩62条未读」：覆盖判据从「有多少号有未读」改为「扫了多少关注号」(scanScanned)，没扫完绝不误清未读
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -253,8 +253,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 22:45 · 撤回22:20的8个上限(它导致更抓不到)+收割45s→120s(视频明细唯一来源)，保留真风控才降速';
-  var VER_SHORT = '10-07 22:45';
+  var VER = '2026-10-07 23:00 · 修「只剩62条未读」：覆盖判据从「有多少号有未读」改为「扫了多少关注号」(scanScanned)，没扫完绝不误清未读';
+  var VER_SHORT = '10-07 23:00';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -724,10 +724,15 @@
      落盘（数量+清单+边界）后再把「清单里的视频」反查成本地可展示对象。
      直接接口失败时才退回「关注页滚动收割」兜底，绝不退化成「读不到/读不全」。 */
   function syncUnreadAuthoritative(statusCb) {
-    function verifyAndFinish(r, fromHarvest) {
-      /* ★ 与「关注页红点」地面真相对账（仅在 /follow 页时有效） */
-      return readFollowBadgesDom().then(function (dom) {
+    function verifyAndFinish(r, fromHarvest, domPre) {
+      /* ★ 22:55：domPre = 落盘前已读过的那份红点 → 直接复用，
+         不重复滚动一次（原来会白跑 20~40 秒，用户以为卡住）。 */
+      var domTask = domPre ? Promise.resolve(domPre) : readFollowBadgesDom();
+      return domTask.then(function (dom) {
         var verify = reconcileWithBadges(dom);
+        if (dom && dom.liTotal) {
+          S.scanScanned = Math.max(Number(S.scanScanned || 0), Number(dom.liTotal || 0));
+        }
         return fetchUnreadVideoDetails({ shouldStop: function () { return false; } }).then(function (d) {
           return { map: r.map, total: r.total, details: d, verify: verify, fromHarvest: !!fromHarvest };
         });
@@ -746,32 +751,49 @@
     /* ★ 21:30 传onTick 进度回调 + maxSeconds 时间预算：
        原来只有 800ms 一次的静默等待，界面不动 → 用户以为「一直抓不到」；
        现在每轮回报「已扫 N/389 个号、用时 Xs」，并在 150 秒强制收工返回已有结果。 */
-    return harvestApiUnread({
-      maxRounds: 300, wait: 800, maxSeconds: 60, total: S.accounts.length,
-      onTick: statusCb ? function (p) {
-        try {
-          statusCb({ phase: 'harvest', got: p.got, users: p.users, seen: p.seen,
-                     total: S.accounts.length, elapsed: p.elapsed, max: p.max });
-        } catch (e) { }
-      } : null
-    })
-      .then(function (acc) {
+    /* ★★ 2026-10-07 22:55 顺序修正（关键）：
+       `applyApiUnreadAll` 要用 `S.scanScanned`（本轮扫到多少个关注号）判断本轮是否可信，
+       而红点 DOM 是「唯一能读满 388 个号」的那条路 → **必须先读红点、拿到覆盖度再落盘**。
+       原来顺序反了（先 applyApiUnreadAll、后 readFollowBadgesDom）→ 判据永远拿不到值，
+       误判「不可信」却又照样覆盖 → 388 个号被清零成 62 条。 */
+    function readBadgesFirst() {
+      return readFollowBadgesDom().then(function (dom) {
+        if (dom && dom.liTotal) {
+          S.scanScanned = Math.max(Number(S.scanScanned || 0), Number(dom.liTotal || 0));
+        }
+        return dom;
+      }).catch(function () { return null; });
+    }
+
+    return readBadgesFirst().then(function (dom0) {
+      return harvestApiUnread({
+        maxRounds: 300, wait: 800, maxSeconds: 60, total: S.accounts.length,
+        onTick: statusCb ? function (p) {
+          try {
+            statusCb({ phase: 'harvest', got: p.got, users: p.users, seen: p.seen,
+                       total: S.accounts.length, elapsed: p.elapsed, max: p.max });
+          } catch (e) { }
+        } : null
+      }).then(function (acc) {
         var m = (collectFollowingUnread().map) || {};
-        applyApiUnreadAll(m);
         var g2 = Object.keys(m || {}).length;
+        S.scanScanned = Math.max(Number(S.scanScanned || 0),
+                                 acc && acc.seen ? acc.seen : 0,
+                                 acc && acc.users ? acc.users : 0);
+        applyApiUnreadAll(m);
         S.unreadStatus = {
           src: g2 > 0 ? 'dom' : 'stale',
           at: Date.now(),
-          msg: g2 > 0 ? ('关注页收割 + 红点读到 ' + g2 + ' 个号')
-               : '关注页也没读到 —— 显示的是旧数据，不代表抖音真实未读'
+          msg: g2 > 0 ? ('关注页读到 ' + g2 + ' 个号有未看；本轮扫过 ' + S.scanScanned + ' / ' + S.accounts.length + ' 个关注号')
+               : '关注页没读到有未看的号（本轮扫过 ' + S.scanScanned + ' / ' + S.accounts.length + ' 个）'
         };
         if (statusCb) { try { statusCb({ phase: 'done', got: g2, total: S.accounts.length }); } catch (e) {} }
-        return verifyAndFinish({ map: m, total: S.accounts.length }, true);
-      })
-      .catch(function (e) {
-        S.unreadStatus = { src: 'stale', at: Date.now(), msg: '未读数据读取失败：' + ((e && e.message) || e) };
-        throw e;
+        return verifyAndFinish({ map: m, total: S.accounts.length }, true, dom0);
       });
+    }).catch(function (e) {
+      S.unreadStatus = { src: 'stale', at: Date.now(), msg: '未读数据读取失败：' + ((e && e.message) || e) };
+      throw e;
+    });
   }
 
   /* 把抖音返回的原始 aweme 对象整理成本地存储格式（作品接口与关注流接口共用） */
@@ -1418,18 +1440,42 @@
     if (!map) map = {};
     var mapKeys = [], mk;
     for (mk in map) { if (Object.prototype.hasOwnProperty.call(map, mk)) mapKeys.push(mk); }
-    /* 读到的号数太少 → 判定本轮不可信，整轮不覆盖（避免把一次限流误当成「全部已看完」） */
-    var TOO_FEW = 30;
-    var thisRoundTrustworthy = mapKeys.length >= TOO_FEW;
+    /* ★★★ 2026-10-07 22:55 修正一个把未读几乎清零的错误（用户实测「抓完只剩 62 条」）——
+       根因是 21:00 我写的这行：
+           var thisRoundTrustworthy = mapKeys.length >= 30;   // ✗错得离谱
+       【红点/收割只上报「有未看」的号】。用户看了一天视频后，有未看的号本来就只剩 1~2 个，
+       mapKeys.length 远小于 30 → 判定「本轮不可信」，
+       但下面第一遍循环**照样**用 map 里的值覆盖了 S.apiUnread，
+       而「本轮没出现的 388 个号」被 `cover0` 记成 n=0
+       → **388 个号的未读被清零，只剩 map 里那点（62 条）**。
+
+       现在改成**正确的判据**：本轮「总共扫了多少个号」（S.scanScanned 或 关注总数），
+       而不是「有多少个号有未看」。
+       -扫到 >= 92% 的关注号 → 本轮可信，没出现的号才算「官方说它没未看」→ 记 0；
+       - 否则（根本没扫完 / 采集失败）→ **整轮不覆盖**，旧数据原样保留，宁可显示旧的也不误清。 */
+    var SCANNED = Number(S.scanScanned || 0);
+    var TOTAL_ACC = Number(S.accounts && S.accounts.length ? S.accounts.length : 0);
+    var scannedEnough = (TOTAL_ACC > 0 && SCANNED >= Math.floor(TOTAL_ACC * 0.92));
+    /* 没传扫描数时（其他调用路径）保守处理：默认不覆盖，避免误清 */
+    var thisRoundTrustworthy = scannedEnough;
     if (!S.apiUnread || typeof S.apiUnread !== 'object') S.apiUnread = {};
     if (!S.apiUnread.__byName || typeof S.apiUnread.__byName !== 'object') S.apiUnread.__byName = {};
     if (!thisRoundTrustworthy && opts.forceCover !== true) {
-      /* 只做过期清理，保留旧值 */
+      /* 本轮不可信（没扫完或采集失败）→ 只清过期项，**保留全部旧值** */
       for (var _k0 in S.apiUnread) {
         if (!Object.prototype.hasOwnProperty.call(S.apiUnread, _k0) || _k0 === '__byName') continue;
         var _oe = S.apiUnread[_k0];
         if (_oe && _oe.at && now0 - _oe.at > API_UNREAD_VALID_MS) { delete S.apiUnread[_k0]; st.staleDropped++; }
       }
+      /* ★ 关键：不可信时**提前返回**，绝不能继续往下走「把没出现的号记成 0」——
+         这正是把 388 个号清零的那一步。 */
+      st.notTrusted = true;
+      st.scanned = SCANNED; st.totalAcc = TOTAL_ACC;
+      /* ★ 22:55 修正：**不提前 return**。
+         提前 return 会跳过后面的「撤回被误标已看的视频 / 划已看边界 / 统计明细」等必要流程
+         （实测导致 _test_newfeat 6 项失败：撤回已看、边界、列表凭据全失效）。
+         现在只把 notTrusted 记下来让流程继续往下走；真正「把没出现的号记成 0」那一步
+         会用 thisRoundTrustworthy 作闸门（见下方 cover0 分支）—— 不可信时那里只记 kept，不清零。 */
     }
 
     var k, i, allIds = {}, secids = {}, order = [];
