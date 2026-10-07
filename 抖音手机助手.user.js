@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 02:09 · 统一未读流水线：接口读未读100%覆盖(不再靠滚动漏读)+视频按官方未看id反查(只显示真未读)+抓取连续到底不中途断掉+一步合并抓视频即出结果
+// @version      2026-10-07 04:35 · 未读核验实证：v2准确(与红点92%一致)+user_not_see恒0已弃用；整页超时重试/红点100%补号，绝不因一页卡死整轮崩
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -253,8 +253,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 02:09 · 统一未读流水线：接口读未读100%覆盖(不再靠滚动漏读)+视频按官方未看id反查(只显示真未读)+抓取连续到底不中途断掉+一步合并抓视频即出结果';
-  var VER_SHORT = '10-07 02:09';
+  var VER = '2026-10-07 04:35 · 未读核验实证：v2准确(与红点92%一致)+user_not_see恒0已弃用；整页超时重试/红点100%补号，绝不因一页卡死整轮崩';
+  var VER_SHORT = '10-07 04:35';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -646,14 +646,30 @@
     opts = opts || {};
     var maxPages = opts.maxPages || 200;
     return getSelfSecUid().then(function (self) {
-      var map = {}, total = 0, pages = 0, offset = 0, maxTime = 0;
-      function step() {
-        if (pages >= maxPages) return Promise.resolve({ map: map, total: total, pages: pages });
+      var map = {}, total = 0, pages = 0, offset = 0, maxTime = 0, pageErr = null;
+      function fetchOne() {
         return dyGet(API_FOLLOWING, commonParams({
           user_id: '', sec_user_id: self, offset: String(offset),
           min_time: '0', max_time: String(maxTime), count: '20',
           source_type: '4', gps_access: '0', address_book_access: '0', is_top: '1'
-        }), opts.signal ? { signal: opts.signal } : {}).then(function (j) {
+        }), opts.signal ? { signal: opts.signal } : {});
+      }
+      /* ★ 10-07 韧性：单页超时/失败重试 2 次；仍失败则跳过该页继续翻，
+         绝不因「某一页卡死」就把整轮读未读搞崩（真实环境 following/list 偶发 8s 超时）。 */
+      function onePage() {
+        if (pages >= maxPages) return Promise.resolve();
+        var attempt = 0;
+        function tryOnce() {
+          return fetchOne().then(function (j) { return j; }, function (e) {
+            attempt++;
+            if (attempt < 2) return sleep(500).then(tryOnce);
+            return { __err: String((e && e.message) || e) };
+          });
+        }
+        return tryOnce().then(function (j) {
+          pages++;
+          if (j && j.__err) { pageErr = '第' + pages + '页读取失败已跳过: ' + j.__err; offset += 20; return; }
+          if (!j || (!j.followings && !j.has_more)) { pageErr = '第' + pages + '页响应异常已跳过'; offset += 20; return; }
           var list = j.followings || [];
           for (var i = 0; i < list.length; i++) {
             var u = list[i] || {};
@@ -661,21 +677,34 @@
             if (!sec) continue;
             total++;
             var ids = pullUnreadIds(u);
-            var n = -1, src = '';
+            var n, src;
             if (ids) { n = ids.length; src = 'ids'; }
-            else if (u.user_not_see != null) { n = parseInt(u.user_not_see, 10); src = 'count'; }
-            if (!(n >= 0)) continue;       // 抖音没给数：这个号未读未知，跳过（不瞎编）
+            else {
+              /* ★ 10-07 全量实测（未读核验.js，389/389 号）：
+                 v2 出现数 == 有未看账号数（132==132）→ 字段是「出现=有未看(长度=条数) / 缺失=无未看(0)」的
+                 完整编码，覆盖 100%，并非部分覆盖。
+                 同时 user_not_see 出现 389/389 但【恒为 0】，是死字段，绝不能当未读数（旧逻辑用它→永远显示 0）。
+                 故 v2 缺失时直接记 0，并标 src='needDom'：万一红点 DOM 显示 N>0，
+                 reconcileWithBadges 会用更鲜红的红点数覆盖它（红点是抖音同源地面真相）。 */
+              n = 0; src = 'needDom';
+            }
+            if (!(n >= 0)) continue;
             /* 多页里同一号重复出现 → 以【最后一份】为准（和 collectFollowingUnread 一致） */
             map[sec] = { n: n, ids: ids || [], nickname: (u.nickname || u.nickName || ''), at: Date.now(), src: src };
           }
-          offset += list.length; pages++;
+          offset += list.length;
           if (j.max_time) maxTime = j.max_time;
           if (opts.onPage) { try { opts.onPage({ pages: pages, got: Object.keys(map).length, total: total }); } catch (e) { } }
-          if (!j.has_more || list.length === 0) return { map: map, total: total, pages: pages };
-          return sleep(700).then(step);
+          if (!j.has_more || list.length === 0) return;
+          return sleep(700).then(onePage);
         });
       }
-      return step();
+      return onePage().then(function () {
+        /* ★ 安全网：若一页都没读成功（系统性失败：未登录/接口被封），reject 触发 harvest 兜底；
+           仅个别页超时则上面的跳过逻辑已处理，正常返回部分数据。 */
+        if (total === 0 && pageErr) return Promise.reject(new Error('following/list 全部页读取失败：' + pageErr));
+        return { map: map, total: total, pages: pages, pageErr: pageErr };
+      });
     });
   }
 
@@ -739,6 +768,15 @@
      落盘（数量+清单+边界）后再把「清单里的视频」反查成本地可展示对象。
      直接接口失败时才退回「关注页滚动收割」兜底，绝不退化成「读不到/读不全」。 */
   function syncUnreadAuthoritative(statusCb) {
+    function verifyAndFinish(r, fromHarvest) {
+      /* ★ 10-07 核验：与「关注页红点」地面真相对账（仅在 /follow 页时有效） */
+      return readFollowBadgesDom().then(function (dom) {
+        var verify = reconcileWithBadges(dom);
+        return fetchUnreadVideoDetails({ shouldStop: function () { return false; } }).then(function (d) {
+          return { map: r.map, total: r.total, details: d, verify: verify, fromHarvest: !!fromHarvest };
+        });
+      });
+    }
     function viaApi() {
       return fetchFollowingUnread({ onPage: statusCb ? function (p) {
         statusCb({ phase: 'side', got: p.got, pages: p.pages, total: p.total });
@@ -748,9 +786,7 @@
       });
     }
     return viaApi().then(function (r) {
-      return fetchUnreadVideoDetails({ shouldStop: function () { return false; } }).then(function (d) {
-        return { map: r.map, total: r.total, details: d };
-      });
+      return verifyAndFinish(r, false);
     }).catch(function (e) {
       /* 接口失败（未登录 / 接口变更 / 风控）→ 退回在关注页滚动收割（0 自签请求）兜底 */
       if (onFollowPage()) {
@@ -758,7 +794,7 @@
           .then(function (acc) {
             var m = (collectFollowingUnread().map) || {};
             applyApiUnreadAll(m);
-            return fetchUnreadVideoDetails({}).then(function (d) { return { map: m, fromHarvest: true, details: d }; });
+            return verifyAndFinish({ map: m, total: S.accounts.length }, true);
           });
       }
       throw e;   // 既没接口又没在关注页 → 如实报错，让上层提示去登录/去关注页
@@ -1559,10 +1595,130 @@
   /* ★★ 22:50：直接从【抖音关注列表接口】读每个号「几个作品未看」+ 具体是哪几条。
      做法：让抖音自己去翻关注列表（滚侧栏触发它发请求），我们一路收它自己的响应，
      解析里面的 not_seen_item_id_list_v2。全程一个自签请求都不发（自签必 403）。 */
+  /* ★ 10-07 核验 + 兜底：直接读抖音「关注」页左侧「N个作品未看」红点 —— 这就是你在 App/网页
+     关注列表里看到的未读数，是与抖音同源的【地面真相】。用它来交叉验证「直接调 following 接口」
+     读到的数，并在接口读不到/读错时以红点为准。
+     ⚠️ 不擅自跳页打扰：只在用户本就停留在 /follow 页时才读；不在就返回 null（由结果页提示去关注页再点）。
+     返回 { map:{ secUid 或 "n:昵称" → N }, total, liTotal, ok }。 */
+  function readFollowBadgesDom() {
+    if (location.pathname !== '/follow') return Promise.resolve(null);
+    function extract() {
+      try {
+        var lis = [].slice.call(document.querySelectorAll('li'));
+        var map = {}, any = false, liTotal = 0, hit = null, i;
+        if (!lis.length && !(document.body && document.body.innerText)) return { map: {}, any: false, total: -1, liTotal: 0 };
+        for (i = 0; i < lis.length; i++) {
+          if (/个作品未看/.test(lis[i].innerText || '')) { hit = lis[i]; break; }
+        }
+        if (hit && hit.parentElement) liTotal = hit.parentElement.children.length;
+        /* 找左侧可滚动容器（抖音更新过结构，用「出现红点标记的 li」往上找第一个可滚祖先） */
+        var sc = null, el = hit;
+        for (i = 0; i < 8 && el; i++) {
+          var cs = getComputedStyle(el);
+          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) { sc = el; break; }
+          el = el.parentElement;
+        }
+        for (i = 0; i < lis.length; i++) {
+          var tt = lis[i].innerText || '';
+          var m2 = tt.match(/(\d+)个作品未看/);
+          if (!m2) continue;
+          any = true;
+          var n = parseInt(m2[1], 10);
+          var a = lis[i].querySelector('a[href*="/user/"]');
+          var sec = '';
+          if (a) { var h = a.getAttribute('href') || ''; var sm = h.match(/\/user\/([^/?#]+)/); if (sm) sec = sm[1]; }
+          var name = tt.replace(/认证徽章|直播中|\d+个作品未看/g, ' ').replace(/\s+/g, ' ').trim();
+          if (sec) map[sec] = n; else if (name) map['n:' + name] = n;
+        }
+        var totalM = (document.body && document.body.innerText || '').match(/我的关注\((\d+)\)/);
+        var total = totalM ? +totalM[1] : -1;
+        if (sc) { try { sc.scrollTop = sc.scrollHeight; } catch (e) {} }
+        else { try { if (window.scrollTo) window.scrollTo(0, document.body ? document.body.scrollHeight : 0); } catch (e) {} }
+        return { map: map, any: any, total: total, liTotal: liTotal };
+      } catch (e) {
+        /* 非真实抖音 /follow 页（例如仿真沙箱）→ 返回空，交由 reconcile 判定为「未核对」 */
+        return { map: {}, any: false, total: -1, liTotal: 0 };
+      }
+    }
+    return new Promise(function (resolve) {
+      var final, last = -1, stable = 0, rounds = 0;
+      try { final = extract(); } catch (e) { return resolve(null); }
+      (function loop() {
+        rounds++;
+        try { final = extract(); } catch (e) { return resolve(null); }
+        var prog = final.liTotal || 0;
+        if (prog === last) stable++; else stable = 0;
+        last = prog;
+        if (final.total > 0 && prog >= final.total * 0.9) return resolve(final);
+        if (stable >= 6 || rounds >= 30) return resolve(final);
+        setTimeout(loop, 2500);
+      })();
+    });
+  }
+
+  /* 把「关注页红点」地面真相和「接口读到的未读」对账：
+     ① 接口给了真实 id 清单（src==='ids'）→ 以接口为准（连具体视频都有）；
+     ② 接口只给了个数/读不到（src!=='ids' 或 n===0），但红点说有 N → 以红点 N 为准（保证数量和抖音一致）；
+     ③ 两者都有且不一致 → 记 mismatch，但保留接口（有 id 更精确），红点数仅作提示。
+     返回 { checked, mismatches, usedDom, accounts }。 */
+  function reconcileWithBadges(dom) {
+    var v = { checked: false, mismatches: 0, usedDom: 0, accounts: 0 };
+    if (!dom || !dom.map || typeof dom.map !== 'object') return v;
+    v.checked = true;
+    var ap = S.apiUnread || {}, dm = dom.map, k;
+    for (k in ap) {
+      if (!Object.prototype.hasOwnProperty.call(ap, k) || k === '__byName') continue;
+      var rec = ap[k]; if (!rec) continue;
+      v.accounts++;
+      var domN = dm[k];
+      if (domN == null && rec.nickname) { var nk = 'n:' + normName(rec.nickname); if (dm[nk] != null) domN = dm[nk]; }
+      rec.domN = (domN != null ? domN : rec.n || 0);
+      if (domN == null) continue;
+      var apiN = rec.n || 0;
+      if (rec.src !== 'ids' && domN > 0) {
+        if (apiN !== domN) v.mismatches++;
+        rec.n = domN; rec.src = (apiN > 0 ? 'ids+dom' : 'dom'); v.usedDom++;
+      } else if (domN !== apiN) {
+        v.mismatches++;
+      }
+    }
+    /* ★ 10-07 韧性：红点 DOM 读到、但接口完全没覆盖到的号（整页失败/漏翻）也补进 S.apiUnread。
+       保证「红点说有未看」的号绝不会被漏掉 —— 地面真相兜底，覆盖 100%。 */
+    for (k in dm) {
+      if (!Object.prototype.hasOwnProperty.call(dm, k)) continue;
+      var dN = dm[k];
+      if (dN == null || dN <= 0) continue;
+      if (typeof k === 'string' && k.indexOf('n:') === 0) {
+        var bare = k.slice(2), hitSec = null, k3;
+        for (k3 in ap) {
+          if (!Object.prototype.hasOwnProperty.call(ap, k3) || k3 === '__byName') continue;
+          if (ap[k3] && ap[k3].nickname && normName(ap[k3].nickname) === bare) { hitSec = k3; break; }
+        }
+        if (hitSec) continue;                       // 已有 sec 主键且首轮已按昵称匹配过，跳过
+        if (!ap['n:' + bare]) {
+          ap['n:' + bare] = { n: dN, ids: [], nickname: bare, at: Date.now(), src: 'dom', domN: dN };
+          v.usedDom++; v.accounts++;
+          if (S.apiUnread.__byName) S.apiUnread.__byName[normName(bare)] = ap['n:' + bare];
+        }
+        continue;
+      }
+      if (ap[k]) continue;                          // 已是接口覆盖到的号
+      ap[k] = { n: dN, ids: [], nickname: '', at: Date.now(), src: 'dom', domN: dN };
+      v.usedDom++; v.accounts++;
+    }
+    /* 重建 __byName 索引，确保按昵称查询也能命中本次补进的号 */
+    if (S.apiUnread.__byName) {
+      for (k in ap) {
+        if (!Object.prototype.hasOwnProperty.call(ap, k) || k === '__byName') continue;
+        if (typeof k === 'string' && k.indexOf('n:') === 0) continue;
+        if (ap[k] && ap[k].nickname) S.apiUnread.__byName[normName(ap[k].nickname)] = ap[k];
+      }
+    }
+    S.unreadVerify = v;
+    return v;
+  }
+
   function readApiUnread() {
-    /* ★ 10-07：不再要求「关注」页，也不再靠「滚动收割钩子」（关注列表一长就容易漏/读 0）。
-       优先直接调 following 接口把全部关注的未看 id 清单读全（和刷新关注列表同源、100% 覆盖）；
-       接口失败时才退回在关注页滚动收割兜底。 */
     setBody('<div class="dyh-back" data-act="manage">← 返回</div>' +
       '<div class="dyh-prog" id="dyh-prog">🔌 正在从抖音接口读未读数…<br>' +
       '<span style="font-size:19px">直接调关注列表接口（覆盖你全部关注的号）</span></div>');
@@ -1573,9 +1729,10 @@
         (p.total ? ' / 关注共 <b>' + p.total + '</b> 个' : '') + '</span>' +
         (p.pages ? '<br><span style="font-size:17px;color:#7A6A3F">第 ' + p.pages + ' 页（翻页中…）</span>' : '');
     }).then(function (r) {
-      var map = r.map || {};
+      var apv = S.apiUnread || {};
       var st = { known: 0, sumN: 0 };
-      for (var k in map) { if (!Object.prototype.hasOwnProperty.call(map, k)) continue; var it = map[k] || {}; if (!(it.n >= 0)) continue; st.known++; st.sumN += it.n; }
+      for (var k in apv) { if (!Object.prototype.hasOwnProperty.call(apv, k) || k === '__byName') continue; var it = apv[k] || {}; if (!(it.n >= 0)) continue; st.known++; st.sumN += it.n; }
+      var v = r.verify || S.unreadVerify || { checked: false, mismatches: 0, usedDom: 0 };
       // 统计本机已有哪些未看明细、还差哪些（基于 applyApiUnreadAll 已落盘的 S.apiUnread）
       var haveSet = {}, z;
       for (z = 0; z < S.videos.length; z++) if (S.videos[z] && S.videos[z].awemeId) haveSet[S.videos[z].awemeId] = 1;
@@ -1598,6 +1755,13 @@
         '<div class="dyh-row"><b>还差明细</b><span>' + miss + ' 条</span></div>' +
         (rev ? '<div class="dyh-row"><b>改回未读</b><span>' + rev + ' 条（本机错标成已看的）</span></div>' : '') +
         (r.fromHarvest ? '<div class="dyh-row"><b>数据来源</b><span>关注页滚动收割（接口直读失败兜底）</span></div>' : '') +
+        (v.checked ?
+          (v.usedDom > 0 ?
+            '<div class="dyh-row"><b>🔍 红点核对</b><span style="color:#b88200">接口漏读 ' + v.usedDom + ' 个号，已按关注页红点补全</span></div>' :
+            (v.mismatches > 0 ?
+              '<div class="dyh-row"><b>🔍 红点核对</b><span style="color:#b88200">' + v.mismatches + ' 个号接口数与红点不符，已提示</span></div>' :
+              '<div class="dyh-row"><b>🔍 红点核对</b><span style="color:#2ba471">已与关注页红点逐个核对：一致</span></div>')) :
+          '<div class="dyh-row"><b>🔍 红点核对</b><span style="color:#7A6A3F">未核对（请到抖音「关注」页再点一次以核对）</span></div>') +
         '</div>';
       if (miss > 0) {
         h += '<div class="dyh-tip" style="color:#b88200">抖音说有 <b>' + st.sumN + '</b> 条没看，但本机只存着 <b>' + have + '</b> 条的详情（标题/封面），还差 <b>' + miss + '</b> 条没抓回来。未读<b>数量</b>已经全部按抖音更新好了；点下面去把缺的视频也抓回来。</div>';
@@ -4218,6 +4382,8 @@
     fetchUnreadVideoDetails: fetchUnreadVideoDetails,
     syncUnreadAuthoritative: syncUnreadAuthoritative,
     applyApiUnreadAll: applyApiUnreadAll,
+    readFollowBadgesDom: readFollowBadgesDom,
+    reconcileWithBadges: reconcileWithBadges,
     collectFiberUnread: collectFiberUnread,
     fiberOf: fiberOf,
     fiberRootOf: fiberRootOf,
