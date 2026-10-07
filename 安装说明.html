@@ -823,7 +823,7 @@ function copyRaw(){
 <textarea id="srcline" readonly style="display:none">// ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 23:00 · 修「只剩62条未读」：覆盖判据从「有多少号有未读」改为「扫了多少关注号」(scanScanned)，没扫完绝不误清未读
+// @version      2026-10-07 23:55 · 回退到19:50稳定基线(撤销今晚21:00-23:00全部改动)+唯一修正：自签接口返回0个号时主动降级走关注页红点(旧代码不抛错导致兜底永不执行)
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -1075,8 +1075,8 @@ function copyRaw(){
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 23:00 · 修「只剩62条未读」：覆盖判据从「有多少号有未读」改为「扫了多少关注号」(scanScanned)，没扫完绝不误清未读';
-  var VER_SHORT = '10-07 23:00';
+  var VER = '2026-10-07 23:55 · 回退到19:50稳定基线(撤销今晚21:00-23:00全部改动)+唯一修正：自签接口返回0个号时主动降级走关注页红点(旧代码不抛错导致兜底永不执行)';
+  var VER_SHORT = '10-07 23:55';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1088,14 +1088,6 @@ function copyRaw(){
            'auto'  （先 scheme，1.2 秒没起来再补一次 intent —— 补的那下没手势，个别浏览器会弹框） */
       cfg: { owner: 'maidang0706', repo: 'douyin', branch: 'main', token: '', scanLimit: 0, scanConc: 6, scanBudget: 12, uiScale: 'xl', scanMode: 'auto', scanBatch: 60, openMode: 'scheme', harvest: true },
       selfSecUid: '',
-      /* ★ 2026-10-07 20:05：官方未读数据的「可信度」状态。
-         src='api'   = 从抖音官方接口读到（可信）
-             'dom'   = 在关注页读到页面自己写的红点（可信，同源）
-             'stale'= 读不到、显示的是旧数据（不可信，界面必须如实提示）
-             'guess' = 读不到、显示的是本机推算（不可信）
-         没有这个标记时，界面会把「本机旧数据」当成真的显示出来 —— 这就是
-         「数字看着有、却和抖音对不上」的最后一个原因。 */
-      unreadStatus: { src: '', at: 0, msg: '' },
       categories: ['朋友', '军事', '学习', '工作', '实时新闻', '钓鱼', '娱乐'],   // 用户自己建的分类，可增删改
       accounts: [],      // [{name, secUserId, category}]
       videos: [],        // [{awemeId, account, title, url, publishTime, publishedAt, thumbnail}]
@@ -1488,9 +1480,81 @@ function copyRaw(){
      这里直接复用它的分页循环，把每个号的 not_seen_item_id_list_v2（= 抖音 App 里「N个作品未看」
      对应的【具体未看视频 id 清单】）全部取回来。覆盖度 = 100%（翻到底为止），数量 = 清单长度，
      且给出具体 id，后面反查视频也靠它。 */
-  /* ★★★ 已删除 2026-10-0720:40：fetchFollowingUnread（自己拼参数发 following/list）。
-     手机 Via 里实测恒返回 0 个号且不报错（200+空 followings = 参数不适配，非风控），
-     这条路在手机端走不通 → 主源已改为「关注页滚动收割 + 红点 DOM」（0 自签请求）。 */
+  function fetchFollowingUnread(opts) {
+    opts = opts || {};
+    var maxPages = opts.maxPages || 200;
+    return getSelfSecUid().then(function (self) {
+      var map = {}, total = 0, pages = 0, offset = 0, maxTime = 0, pageErr = null, seenSec = {};
+      function fetchOne() {
+        return dyGet(API_FOLLOWING, commonParams({
+          user_id: '', sec_user_id: self, offset: String(offset),
+          min_time: '0', max_time: String(maxTime), count: '20',
+          source_type: '4', gps_access: '0', address_book_access: '0', is_top: '1'
+        }), opts.signal ? { signal: opts.signal } : {});
+      }
+      /* ★ 10-07 韧性：单页超时/失败重试 2 次；仍失败则跳过该页继续翻，
+         绝不因「某一页卡死」就把整轮读未读搞崩（真实环境 following/list 偶发 8s 超时）。 */
+      function onePage() {
+        if (pages &gt;= maxPages) return Promise.resolve();
+        var attempt = 0;
+        function tryOnce() {
+          return fetchOne().then(function (j) { return j; }, function (e) {
+            attempt++;
+            if (attempt &lt; 2) return sleep(500).then(tryOnce);
+            return { __err: String((e &amp;&amp; e.message) || e) };
+          });
+        }
+        return tryOnce().then(function (j) {
+          pages++;
+          if (j &amp;&amp; j.__err) { pageErr = '第' + pages + '页读取失败已跳过: ' + j.__err; offset += 20; return; }
+          if (!j || (!j.followings &amp;&amp; !j.has_more)) { pageErr = '第' + pages + '页响应异常已跳过'; offset += 20; return; }
+          var list = j.followings || [];
+          for (var i = 0; i &lt; list.length; i++) {
+            var u = list[i] || {};
+            var sec = u.sec_uid || u.secUid;
+            if (!sec) continue;
+            /* ★ 10-07 14:53：total 改为【按 secUid 去重】计数。
+               旧写法 total++ 无条件累加，某页超时跳过后 offset 硬推进 +20会重复读到同一批号，
+               于是「读到 394 个号」比实际「我的关注 389 人」还多（实测 394 &gt; 389），
+               让人以为读多了。map[sec] 本来就是覆盖式，所以只有 total 虚高。 */
+            if (!seenSec[sec]) { seenSec[sec] = 1; total++; }
+            var ids = pullUnreadIds(u);
+            var n, src;
+            if (ids) { n = ids.length; src = 'ids'; }
+            else {
+              /* ★ 10-07 全量实测（未读核验.js，389/389 号）：
+                 v2 出现数 == 有未看账号数（132==132）→ 字段是「出现=有未看(长度=条数) / 缺失=无未看(0)」的
+                 完整编码，覆盖 100%，并非部分覆盖。
+                 同时 user_not_see 出现 389/389 但【恒为 0】，是死字段，绝不能当未读数（旧逻辑用它→永远显示 0）。
+                 故 v2 缺失时直接记 0，并标 src='needDom'：万一红点 DOM 显示 N&gt;0，
+                 reconcileWithBadges 会用更鲜红的红点数覆盖它（红点是抖音同源地面真相）。 */
+              n = 0; src = 'needDom';
+            }
+            if (!(n &gt;= 0)) continue;
+            /* 多页里同一号重复出现 → 以【最后一份】为准（和 collectFollowingUnread 一致） */
+            map[sec] = { n: n, ids: ids || [], nickname: (u.nickname || u.nickName || ''), at: Date.now(), src: src };
+          }
+          offset += list.length;
+          if (j.max_time) maxTime = j.max_time;
+          if (opts.onPage) { try { opts.onPage({ pages: pages, got: Object.keys(map).length, total: total }); } catch (e) { } }
+          if (!j.has_more || list.length === 0) return;
+          return sleep(700).then(onePage);
+        });
+      }
+      return onePage().then(function () {
+        /* ★ 安全网：若一页都没读成功（系统性失败：未登录/接口被封），reject 触发 harvest 兜底；
+           仅个别页超时则上面的跳过逻辑已处理，正常返回部分数据。 */
+        if (total === 0 &amp;&amp; pageErr) return Promise.reject(new Error('following/list 全部页读取失败：' + pageErr));
+        return { map: map, total: total, pages: pages, pageErr: pageErr };
+      });
+    });
+  }
+
+  /* ★ 10-07：把「抖音官方未看 id 清单」里的视频，反查成本地可展示的视频对象。
+     只认抖音给的未看 id —— 所以展示里每一条视频，都确确实实是抖音标了「未看」的那条，
+     不会把早看过的旧视频混进来，也不会漏掉真未读。
+     来源优先级：① 本机 S.videos 里已有 → 直接复用（0 请求）；
+                 ② 没抓到 → 抓这个号的作品，按 id 命中入库（只存命中未看的，不存已看的）。 */
   function fetchUnreadVideoDetails(opts) {
     opts = opts || {};
     var stop = opts.shouldStop || function () { return false; };
@@ -1546,75 +1610,59 @@ function copyRaw(){
      落盘（数量+清单+边界）后再把「清单里的视频」反查成本地可展示对象。
      直接接口失败时才退回「关注页滚动收割」兜底，绝不退化成「读不到/读不全」。 */
   function syncUnreadAuthoritative(statusCb) {
-    function verifyAndFinish(r, fromHarvest, domPre) {
-      /* ★ 22:55：domPre = 落盘前已读过的那份红点 → 直接复用，
-         不重复滚动一次（原来会白跑 20~40 秒，用户以为卡住）。 */
-      var domTask = domPre ? Promise.resolve(domPre) : readFollowBadgesDom();
-      return domTask.then(function (dom) {
+    function verifyAndFinish(r, fromHarvest) {
+      /* ★ 10-07 核验：与「关注页红点」地面真相对账（仅在 /follow 页时有效） */
+      return readFollowBadgesDom().then(function (dom) {
         var verify = reconcileWithBadges(dom);
-        if (dom &amp;&amp; dom.liTotal) {
-          S.scanScanned = Math.max(Number(S.scanScanned || 0), Number(dom.liTotal || 0));
-        }
         return fetchUnreadVideoDetails({ shouldStop: function () { return false; } }).then(function (d) {
           return { map: r.map, total: r.total, details: d, verify: verify, fromHarvest: !!fromHarvest };
         });
       });
     }
-
-    /* ★★★ 2026-10-07 20:40 重大简化：删掉「自己拼参数发 following/list 请求」这条主路径。
-       依据实测（诊断器 20:13，用户真实环境）：
-         · 手机 Via 里「自签 following/list」恒返回【0 个号】，且**不报错**
-           （HTTP 200 + JSON 正常 + followings 为空数组）→ 是【参数/baseParams 不适配】，
-             不是被风控。→ 这条路在手机端**走不通**，继续当主源只会每次白跑一遍再退回。
-         · 而 harvestApiUnread（滚关注页让【抖音自己】发请求、我们只旁听响应）
-           是 0 自签请求，不受这个参数问题影响，且能拿到 v2 的**具体 id 清单**。
-       所以：主源改为「关注页滚动收割」，再叠加【红点 DOM】做交叉兜底（实测可读满 388 个号）。
-       自签接口函数已整体删除（原先 5 处引用一并清理）。 */
-    /* ★ 21:30 传onTick 进度回调 + maxSeconds 时间预算：
-       原来只有 800ms 一次的静默等待，界面不动 → 用户以为「一直抓不到」；
-       现在每轮回报「已扫 N/389 个号、用时 Xs」，并在 150 秒强制收工返回已有结果。 */
-    /* ★★ 2026-10-07 22:55 顺序修正（关键）：
-       `applyApiUnreadAll` 要用 `S.scanScanned`（本轮扫到多少个关注号）判断本轮是否可信，
-       而红点 DOM 是「唯一能读满 388 个号」的那条路 → **必须先读红点、拿到覆盖度再落盘**。
-       原来顺序反了（先 applyApiUnreadAll、后 readFollowBadgesDom）→ 判据永远拿不到值，
-       误判「不可信」却又照样覆盖 → 388 个号被清零成 62 条。 */
-    function readBadgesFirst() {
-      return readFollowBadgesDom().then(function (dom) {
-        if (dom &amp;&amp; dom.liTotal) {
-          S.scanScanned = Math.max(Number(S.scanScanned || 0), Number(dom.liTotal || 0));
-        }
-        return dom;
-      }).catch(function () { return null; });
+    function viaApi() {
+      return fetchFollowingUnread({ onPage: statusCb ? function (p) {
+        statusCb({ phase: 'side', got: p.got, pages: p.pages, total: p.total });
+      } : null }).then(function (r) {
+        applyApiUnreadAll(r.map);
+        return r;
+      });
+    }
+        /* 关注页兜底：0 自签请求，靠抖音自己翻页 + 我们旁听响应。
+       前面实测：手机 Via 里【自签 following/list 恒返回 0 个号】，且它不抛异常，
+       所以旧代码会直接走 .then 分支 → 这条兜底【永远不执行】→ 未读数全靠本机旧数据。
+       现在：只要没读到任何号（got=0），就主动降级走这条兜底。 */
+    function viaFollowHarvest(reason) {
+      if (!onFollowPage()) return Promise.resolve(null);
+      return harvestApiUnread({ maxRounds: 300, wait: 800, total: S.accounts.length })
+        .then(function (acc) {
+          var m = (collectFollowingUnread().map) || {};
+          applyApiUnreadAll(m);
+          S.unreadStatus = {
+            src: Object.keys(m).length &gt; 0 ? 'dom' : 'stale', at: Date.now(),
+            msg: Object.keys(m).length &gt; 0
+              ? ('关注页读到 ' + Object.keys(m).length + ' 个号有未看（' + reason + '）')
+              : ('自签接口与关注页都没读到 —— 下面显示的不是抖音真实未读（' + reason + '）')
+          };
+          return verifyAndFinish({ map: m, total: S.accounts.length }, true);
+        });
     }
 
-    return readBadgesFirst().then(function (dom0) {
-      return harvestApiUnread({
-        maxRounds: 300, wait: 800, maxSeconds: 60, total: S.accounts.length,
-        onTick: statusCb ? function (p) {
-          try {
-            statusCb({ phase: 'harvest', got: p.got, users: p.users, seen: p.seen,
-                       total: S.accounts.length, elapsed: p.elapsed, max: p.max });
-          } catch (e) { }
-        } : null
-      }).then(function (acc) {
-        var m = (collectFollowingUnread().map) || {};
-        var g2 = Object.keys(m || {}).length;
-        S.scanScanned = Math.max(Number(S.scanScanned || 0),
-                                 acc &amp;&amp; acc.seen ? acc.seen : 0,
-                                 acc &amp;&amp; acc.users ? acc.users : 0);
-        applyApiUnreadAll(m);
-        S.unreadStatus = {
-          src: g2 &gt; 0 ? 'dom' : 'stale',
-          at: Date.now(),
-          msg: g2 &gt; 0 ? ('关注页读到 ' + g2 + ' 个号有未看；本轮扫过 ' + S.scanScanned + ' / ' + S.accounts.length + ' 个关注号')
-               : '关注页没读到有未看的号（本轮扫过 ' + S.scanScanned + ' / ' + S.accounts.length + ' 个）'
-        };
-        if (statusCb) { try { statusCb({ phase: 'done', got: g2, total: S.accounts.length }); } catch (e) {} }
-        return verifyAndFinish({ map: m, total: S.accounts.length }, true, dom0);
+    return viaApi().then(function (r) {
+      var got = r &amp;&amp; r.map ? Object.keys(r.map).length : 0;
+      if (got &gt; 0) {
+        S.unreadStatus = { src: 'api', at: Date.now(), msg: '官方接口读到 ' + got + ' 个号有未看' };
+        return verifyAndFinish(r, false);
+      }
+      /* ★ 自签返回 0 个号：不算成功，降级到关注页（这是手机端唯一实测能读到的路） */
+      return viaFollowHarvest('自签接口返回 0 个号').then(function (fb) {
+        return fb || verifyAndFinish(r, false);
       });
     }).catch(function (e) {
-      S.unreadStatus = { src: 'stale', at: Date.now(), msg: '未读数据读取失败：' + ((e &amp;&amp; e.message) || e) };
-      throw e;
+      /* 接口抛错（未登录 / 接口变更 / 风控）→ 同样退回关注页滚动收割 */
+      return viaFollowHarvest('接口报错：' + ((e &amp;&amp; e.message) || e)).then(function (fb) {
+        if (fb) return fb;
+      throw e;   // 既没接口又没在关注页 → 如实报错，让上层提示去登录/去关注页
+      });
     });
   }
 
@@ -1899,7 +1947,7 @@ function copyRaw(){
              ★ 2026-10-07 17:05 修正：原来这里「没有 id 列表就退用 user_not_see」——
              但全量实测（389/389 号）证明 user_not_see【恒为 0，是死字段】。
              用它兜底 = 把「有 N 条未看」错报成 0，或把「已看完」错报成有未读，
-             这正是「数字和抖音对不上」的根因之一（同源问题在关注页收割路径已修，
+             这正是「数字和抖音对不上」的根因之一（同源问题在 fetchFollowingUnread 已修，
              这条关注页收割路径当时漏了）。
              现在：没有 v2 清单就记 n=0（该号本轮没未看），绝不拿死字段编数字。 */
           var n, src;
@@ -2139,26 +2187,6 @@ function copyRaw(){
     opts = opts || {};
     var acc = { map: {}, byName: {}, got: 0, users: 0, seen: 0, rounds: 0 };
     var lastSeen = -1, stable = 0, round = 0, maxRounds = opts.maxRounds || 400;
-    /* ★★ 2026-10-07 21:30 优化「一直抓不到」：
-       原来「连续 40 轮没进展才认栽」= 40 × 800ms = 32 秒**什么都不发生**，
-       加上前面正常滚动，一个 388 号的列表最坏能空转【5 分钟】（300 轮 × 800ms），
-       期间界面几乎不动 → 用户看到的就是「一直抓不到/卡住」。
-       现在：
-         ① 收工门槛按【账号规模】动态算，不再固定 40 轮；
-         ② 加一个【总时间预算】deadline，到点无论如何先返回已有结果（宁可少几个号，也别卡死）；
-         ③ 每轮回报进度（onTick），让界面能显示「已扫 N/M 个号」，用户知道它在动。 */
-    var WAIT = opts.wait || 800;
-    /* ★ 21:50 时间预算从 150 秒压到 **60 秒**：诊断器实测 21 轮（≈17 秒）就能读满 388 个号，
-       正常根本用不到 60 秒。150 秒是「防卡死」的上限，不该成为常态耗时。 */
-    var MAX_SECONDS = opts.maxSeconds || 60;                     // 整体时间预算（秒）
-    var t0 = Date.now();
-    var overTime = function () { return (Date.now() - t0) &gt; MAX_SECONDS * 1000; };
-    /* 没传 total 时（单号扫描）用不上覆盖度，靠 untilSec 提前收工；这里只兜时间 */
-    function settle() {
-      acc.timedOut = overTime();
-      acc.elapsed = Math.round((Date.now() - t0) / 1000);
-      return Promise.resolve(acc);
-    }
     function merge(got) {
       if (!got) return;
       var k;
@@ -2177,40 +2205,35 @@ function copyRaw(){
       acc.got = Object.keys(acc.map).length;
     }
     function tick() {
-      if (opts.shouldStop &amp;&amp; opts.shouldStop()) return settle();
-      if (round &gt;= maxRounds) return settle();
-      /* ★ 21:30 时间预算到点 → 先返回已有结果（宁可少扫几个号，也不让用户干等） */
-      if (overTime()) return settle();
+      if (opts.shouldStop &amp;&amp; opts.shouldStop()) return Promise.resolve(acc);
+      if (round &gt;= maxRounds) return Promise.resolve(acc);
       round++;
       acc.rounds = round;
       merge(collectFollowingUnread());
       if (opts.onTick) {
         try {
-          opts.onTick({ round: round, got: acc.got, users: acc.users, seen: acc.seen,
-                        elapsed: Math.round((Date.now() - t0) / 1000), max: MAX_SECONDS });
+          opts.onTick({ round: round, got: acc.got, users: acc.users, seen: acc.seen });
         } catch (e) { }
       }
-      /* 单号扫描专用：一旦在缓冲里找到目标号，立即收工（不用等整列扫完） */
-      if (opts.untilSec &amp;&amp; acc.map[opts.untilSec]) return settle();
-      if (acc.seen === lastSeen) { stable++; } else { stable = 0; }
-      lastSeen = acc.seen;
-      /* ★★ 21:50 修「现在抓视频更慢了」：
-         诊断器实测**21 轮（≈17 秒）就能把 388 个号全部读到**（滚动加载很快）。
-         但收工条件是「3 轮没有新增」→ 滚到底之后抖音不再发新请求、seen 不再增长，
-         只能等满这3 轮才停；如果中间有虚拟滚动卡顿，patience 还会把等待拉长
-         （max 30 轮 = 24 秒）→ 明明 17 秒能读完，却拖到 1~2 分钟。
-         现在改成【见到「我的关注(N)」就按 N 判断，读到 92% 立刻收工】：
-           ① 拿到 total 后，只要 seen/total &gt;= 0.92 立即返回（正常情况 17 秒内就收工）；
-           ② 否则才用「连续 3 轮无新增」兜底（滚不动了才等，且最多 3 轮不再加长）。 */
-      if (opts.total &amp;&amp; acc.seen &gt; 0) {
-        var coverPct = acc.seen / opts.total;
-        if (coverPct &gt;= 0.92) return settle();
+      /* ★★ 覆盖度判定（2026-10-06 修正「对不上」的核心）：
+         以前只在「连续 8 轮没新增账号」就收工 —— 但 619 个号的关注列表要滚很多屏才能扫完，
+         前面几屏没扫到的号根本没被读到，它们的未读数就退回本机估算、和抖音对不上。
+         现在改为：扫到的账号数（seen）已经覆盖到【关注总数 92% 以上】才收工；
+         否则即使暂时没新增（虚拟滚动偶发卡顿），也继续滚，直到把列表扫完。
+         最多连续 idle 40 轮（约半分钟）还没进展才认栽，避免卡死不动。 */
+      /* 单号扫描（没传 total）时不做覆盖度判定，否则 target 退化为 acc.seen、
+         covered 恒为 1，会第一圈就返回、滚不到目标号 —— 退回 idle 40 轮 / maxRounds 收工。 */
+      if (opts.total) {
+        var covered = acc.seen / opts.total;
+        if (covered &gt;= 0.92) return Promise.resolve(acc);
       }
+      /* 单号扫描专用：一旦在缓冲里找到目标号，立即收工（不用等整列扫完） */
+      if (opts.untilSec &amp;&amp; acc.map[opts.untilSec]) return Promise.resolve(acc);
       if (acc.seen === lastSeen) { stable++; } else { stable = 0; }
       lastSeen = acc.seen;
-      if (stable &gt;= 3) return settle();
+      if (stable &gt;= 40) return Promise.resolve(acc);
       scrollFollowSidebar();
-      return sleep(WAIT).then(tick);
+      return sleep(opts.wait || 800).then(tick);
     }
     return tick();
   }
@@ -2246,58 +2269,15 @@ function copyRaw(){
     if (!S.apiUnread || typeof S.apiUnread !== 'object') S.apiUnread = {};
     if (!S.apiUnread.__byName || typeof S.apiUnread.__byName !== 'object') S.apiUnread.__byName = {};
 
-    /* ★★ 2026-10-07 21:00 关键修正（用户指出「没有覆盖之前的数据」）：
-       旧逻辑【只清 12 小时以上的旧记录】→ 12 小时以内读到的旧数据会一直留在 S.apiUnread 里
-       （st.kept++ 就是「保留旧数据」的计数）。
-       后果实测：今天 12:33 读到「132 个号 732 条」，19:57 抖音真实未读只剩「1 个号 99 条」，
-       但那731 条**旧数据照样被显示** → 数字和抖音对不上，而且越用越乱。
-
-       现在改成【读到本轮 map 就以它为准整体覆盖】：
-         ① 本轮 map 里出现的号 → 直接写入本轮值（原有）；
-         ② 本轮 map 里【没出现】的号（且本轮确实读到了足够多的号）→ 判定为「官方说它 0 条未看」，
-            记 n=0（不是保留旧值！）。这才符合「官方清单是完整编码：出现=有未看 / 缺失=无未读」的实测结论。
-         ③ 只有当本轮 map【读到的号数很少】（明显是失败/被限流），才整轮保留旧值并如实标记 ——避免把失败当0。
-       保留「12 小时过期清理」仅作为本地缓存卫生，不再作为「保留旧值」的理由。 */
-    var now0 = Date.now();
-    if (!map) map = {};
-    var mapKeys = [], mk;
-    for (mk in map) { if (Object.prototype.hasOwnProperty.call(map, mk)) mapKeys.push(mk); }
-    /* ★★★ 2026-10-07 22:55 修正一个把未读几乎清零的错误（用户实测「抓完只剩 62 条」）——
-       根因是 21:00 我写的这行：
-           var thisRoundTrustworthy = mapKeys.length &gt;= 30;   // ✗错得离谱
-       【红点/收割只上报「有未看」的号】。用户看了一天视频后，有未看的号本来就只剩 1~2 个，
-       mapKeys.length 远小于 30 → 判定「本轮不可信」，
-       但下面第一遍循环**照样**用 map 里的值覆盖了 S.apiUnread，
-       而「本轮没出现的 388 个号」被 `cover0` 记成 n=0
-       → **388 个号的未读被清零，只剩 map 里那点（62 条）**。
-
-       现在改成**正确的判据**：本轮「总共扫了多少个号」（S.scanScanned 或 关注总数），
-       而不是「有多少个号有未看」。
-       -扫到 &gt;= 92% 的关注号 → 本轮可信，没出现的号才算「官方说它没未看」→ 记 0；
-       - 否则（根本没扫完 / 采集失败）→ **整轮不覆盖**，旧数据原样保留，宁可显示旧的也不误清。 */
-    var SCANNED = Number(S.scanScanned || 0);
-    var TOTAL_ACC = Number(S.accounts &amp;&amp; S.accounts.length ? S.accounts.length : 0);
-    var scannedEnough = (TOTAL_ACC &gt; 0 &amp;&amp; SCANNED &gt;= Math.floor(TOTAL_ACC * 0.92));
-    /* 没传扫描数时（其他调用路径）保守处理：默认不覆盖，避免误清 */
-    var thisRoundTrustworthy = scannedEnough;
-    if (!S.apiUnread || typeof S.apiUnread !== 'object') S.apiUnread = {};
-    if (!S.apiUnread.__byName || typeof S.apiUnread.__byName !== 'object') S.apiUnread.__byName = {};
-    if (!thisRoundTrustworthy &amp;&amp; opts.forceCover !== true) {
-      /* 本轮不可信（没扫完或采集失败）→ 只清过期项，**保留全部旧值** */
-      for (var _k0 in S.apiUnread) {
-        if (!Object.prototype.hasOwnProperty.call(S.apiUnread, _k0) || _k0 === '__byName') continue;
-        var _oe = S.apiUnread[_k0];
-        if (_oe &amp;&amp; _oe.at &amp;&amp; now0 - _oe.at &gt; API_UNREAD_VALID_MS) { delete S.apiUnread[_k0]; st.staleDropped++; }
+    /* 超过 12 小时的旧记录先清掉 —— 保留归保留，但不能让它赖着冒充今天的数 */
+    var _now0 = Date.now(), _k0;
+    for (_k0 in S.apiUnread) {
+      if (!Object.prototype.hasOwnProperty.call(S.apiUnread, _k0)) continue;
+      if (_k0 === '__byName') continue;
+      var _oe = S.apiUnread[_k0];
+      if (_oe &amp;&amp; _oe.at &amp;&amp; _now0 - _oe.at &gt; API_UNREAD_VALID_MS) {
+        delete S.apiUnread[_k0]; st.staleDropped++;
       }
-      /* ★ 关键：不可信时**提前返回**，绝不能继续往下走「把没出现的号记成 0」——
-         这正是把 388 个号清零的那一步。 */
-      st.notTrusted = true;
-      st.scanned = SCANNED; st.totalAcc = TOTAL_ACC;
-      /* ★ 22:55 修正：**不提前 return**。
-         提前 return 会跳过后面的「撤回被误标已看的视频 / 划已看边界 / 统计明细」等必要流程
-         （实测导致 _test_newfeat 6 项失败：撤回已看、边界、列表凭据全失效）。
-         现在只把 notTrusted 记下来让流程继续往下走；真正「把没出现的号记成 0」那一步
-         会用 thisRoundTrustworthy 作闸门（见下方 cover0 分支）—— 不可信时那里只记 kept，不清零。 */
     }
 
     var k, i, allIds = {}, secids = {}, order = [];
@@ -2315,22 +2295,13 @@ function copyRaw(){
       secids[k] = ids0;
       for (i = 0; i &lt; ids0.length; i++) allIds[String(ids0[i])] = 1;
     }
-    /* ★★ 21:00：本轮 map 里没出现的号，在本轮可信时一律记n=0（官方完整编码：缺失=无未看），
-       旧逻辑是 st.kept++（保留旧值）→ 旧未读永远赖着不走，是「数字对不上」的直接原因。 */
+    /* 数一数「本轮没读到、但上次的数还在」的号，同时重建 __byName 索引
+       （旧索引条目可能还指着刚被过期清掉的 rec，必须重挂一遍） */
     S.apiUnread.__byName = {};
     for (k in S.apiUnread) {
       if (!Object.prototype.hasOwnProperty.call(S.apiUnread, k)) continue;
       if (k === '__byName') continue;
-      if (order.indexOf(k) &lt; 0) {
-        if (thisRoundTrustworthy) {
-          /* 本轮读到足够多的号 → 这个号本轮没出现 = 官方说它没有未看，记 0 */
-          var _old = S.apiUnread[k] || {};
-          S.apiUnread[k] = { n: 0, ids: [], nickname: _old.nickname || '', at: now0, src: 'cover0' };
-          st.known++; st.coverZero = (st.coverZero || 0) + 1;
-        } else {
-          st.kept++;                     // 本轮不可信（读得太少）→ 保留旧值
-        }
-      }
+      if (order.indexOf(k) &lt; 0) st.kept++;
       var _e0 = S.apiUnread[k];
       if (_e0 &amp;&amp; _e0.nickname) S.apiUnread.__byName[normName(_e0.nickname)] = _e0;
     }
@@ -2499,96 +2470,59 @@ function copyRaw(){
      读到的数，并在接口读不到/读错时以红点为准。
      ⚠️ 不擅自跳页打扰：只在用户本就停留在 /follow 页时才读；不在就返回 null（由结果页提示去关注页再点）。
      返回 { map:{ secUid 或 "n:昵称" → N }, total, liTotal, ok }。 */
-  /* ★★2026-10-07 20:15 整体重写。依据：诊断器在同一环境【实测滚动 21 轮读满 388 个号】，
-       证明「滚动 + 聚合红点」这条路是通的；而旧实现只滚 30 轮、且容器选择不可靠，
-       经常只读到屏幕里那一二十个 → 覆盖极低 → 助手拿不到权威数，只能退回本机旧数据。
-       三处关键修正：
-       ① 容器选择：优先选【含「个作品未看」文本】的可滚容器（＝关注列表本身），
-          而不是「可滚距离最大」的那个（往往是右侧推荐流，滚它毫无意义）。
-       ② 跨轮聚合：每一轮把新读到的红点并进累计 map（取最大值），
-          而不是只看最后一轮（最后一轮可能只含视口内的十几个）。
-       ③ 停止条件：抖音关注列表是【懒加载】（滚到底才加载下一页），
-          所以不能用「scrollTop 不动」判到底；改成【连续3 轮 li 数与累计号数都不变】才算到底。 */
   function readFollowBadgesDom() {
     if (location.pathname !== '/follow') return Promise.resolve(null);
-
-    /* 找「关注列表」所在的可滚容器 */
-    function findScroller() {
-      var all = document.querySelectorAll('div,ul,ol,section,main,aside');
-      var best = null, bestScore = 0, withBadge = null, badgeScore = 0;
-      for (var i = 0; i &lt; all.length; i++) {
-        var e = all[i], cs;
-        try { cs = getComputedStyle(e); } catch (x) { continue; }
-        if (cs.overflowY !== 'auto' &amp;&amp; cs.overflowY !== 'scroll') continue;
-        if (e.scrollHeight - e.clientHeight &lt;= 20) continue;
-        var lis = e.querySelectorAll('li');
-        if (lis.length) {
-          var hit = 0;
-          for (var j = 0; j &lt; lis.length; j++) { if (/个作品未看/.test(lis[j].innerText || '')) hit++; }
-          if (hit &gt; 0 &amp;&amp; lis.length &gt; badgeScore) { badgeScore = lis.length; withBadge = e; }
+    function extract() {
+      try {
+        var lis = [].slice.call(document.querySelectorAll('li'));
+        var map = {}, any = false, liTotal = 0, hit = null, i;
+        if (!lis.length &amp;&amp; !(document.body &amp;&amp; document.body.innerText)) return { map: {}, any: false, total: -1, liTotal: 0 };
+        for (i = 0; i &lt; lis.length; i++) {
+          if (/个作品未看/.test(lis[i].innerText || '')) { hit = lis[i]; break; }
         }
-        var can = e.scrollHeight - e.clientHeight;
-        if (can &gt; bestScore) { bestScore = can; best = e; }
-      }
-      return withBadge || best;
-    }
-
-    /* 读一轮：把这一轮视口内所有 li 的红点收进来 */
-    function extract(sc) {
-      var map = {}, any = false, liTotal = 0, i, v;
-      var lis = [].slice.call((sc || document).querySelectorAll('li'));
-      for (i = 0; i &lt; lis.length; i++) {
-        var tt = lis[i].innerText || '';
-        var m2 = tt.match(/(\d+)\s*个作品未看/);
-        if (!m2) continue;
-        any = true;
-        var n = parseInt(m2[1], 10);
-        var sec = '';
-        try {
+        if (hit &amp;&amp; hit.parentElement) liTotal = hit.parentElement.children.length;
+        /* 找左侧可滚动容器（抖音更新过结构，用「出现红点标记的 li」往上找第一个可滚祖先） */
+        var sc = null, el = hit;
+        for (i = 0; i &lt; 8 &amp;&amp; el; i++) {
+          var cs = getComputedStyle(el);
+          if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') &amp;&amp; el.scrollHeight &gt; el.clientHeight + 50) { sc = el; break; }
+          el = el.parentElement;
+        }
+        for (i = 0; i &lt; lis.length; i++) {
+          var tt = lis[i].innerText || '';
+          var m2 = tt.match(/(\d+)个作品未看/);
+          if (!m2) continue;
+          any = true;
+          var n = parseInt(m2[1], 10);
           var a = lis[i].querySelector('a[href*="/user/"]');
-          if (a) { var mm = (a.getAttribute('href') || '').match(/\/user\/([^?\/?]+)/); if (mm) sec = mm[1]; }
-        } catch (e) {}
-        var name = '';
-        try { name = normName((lis[i].querySelector('a[href*="/user/"]') || {}).innerText || ''); } catch (e) {}
-        if (sec) map[sec] = n;
-        if (name) map['n:' + name] = n;
+          var sec = '';
+          if (a) { var h = a.getAttribute('href') || ''; var sm = h.match(/\/user\/([^/?#]+)/); if (sm) sec = sm[1]; }
+          var name = tt.replace(/认证徽章|直播中|\d+个作品未看/g, ' ').replace(/\s+/g, ' ').trim();
+          if (sec) map[sec] = n; else if (name) map['n:' + name] = n;
+        }
+        var totalM = (document.body &amp;&amp; document.body.innerText || '').match(/我的关注\((\d+)\)/);
+        var total = totalM ? +totalM[1] : -1;
+        if (sc) { try { sc.scrollTop = sc.scrollHeight; } catch (e) {} }
+        else { try { if (window.scrollTo) window.scrollTo(0, document.body ? document.body.scrollHeight : 0); } catch (e) {} }
+        return { map: map, any: any, total: total, liTotal: liTotal };
+      } catch (e) {
+        /* 非真实抖音 /follow 页（例如仿真沙箱）→ 返回空，交由 reconcile 判定为「未核对」 */
+        return { map: {}, any: false, total: -1, liTotal: 0 };
       }
-      if (sc) liTotal = sc.querySelectorAll('li').length;
-      var tm = (document.body &amp;&amp; document.body.innerText || '').match(/我的关注[（(](\d+)/);
-      return { map: map, any: any, total: tm ? +tm[1] : -1, liTotal: liTotal };
     }
-
     return new Promise(function (resolve) {
-      var sc = findScroller();
-      if (!sc) return resolve(null);
-      var agg = {};                 /* 跨轮聚合 */
-      var accSeen = 0, lastLi = -1, idle = 0, rounds = 0, maxLi = 0, total = -1;
-      /* ★ 21:50 时间预算 60→**40 秒**，并加「按覆盖度提前收工」：
-         诊断器实测滚动 21 轮（≈17 秒）就读满 388 个号，没必要等满上限。 */
-      var t0 = Date.now(), MAX_MS = 40000;
-      function finish() {
-        resolve({ map: agg, any: accSeen &gt; 0 || maxLi &gt; 0, total: total, liTotal: maxLi,
-                  rounds: rounds, elapsed: Math.round((Date.now() - t0) / 1000) });
-      }
-      function step() {
+      var final, last = -1, stable = 0, rounds = 0;
+      try { final = extract(); } catch (e) { return resolve(null); }
+      (function loop() {
         rounds++;
-        if (rounds &gt;= 200 || (Date.now() - t0) &gt; MAX_MS) return finish();
-        var r = extract(sc);
-        if (r.total &gt; 0) total = r.total;
-        if (r.liTotal &gt; maxLi) maxLi = r.liTotal;
-        for (var k in r.map) if (!(k in agg) || r.map[k] &gt; agg[k]) agg[k] = r.map[k];
-        var accNow = 0, k2;
-        for (k2 in agg) if (k2.indexOf('n:') === 0) accNow++;
-        /* ★ 已列表数达到关注总数的 92% → 立刻收工（实测 17 秒左右就会到这里） */
-        if (total &gt; 0 &amp;&amp; maxLi &gt;= total * 0.92) return finish();
-        /* 懒加载判定：连续 3 轮「li 数与累计号数都不变」= 真的到底了 */
-        if (r.liTotal === lastLi &amp;&amp; accNow === accSeen) { idle++; } else { idle = 0; }
-        accSeen = accNow; lastLi = r.liTotal;
-        if (idle &gt;= 3) return finish();
-        try { sc.scrollTop = sc.scrollHeight; } catch (e) {}
-        setTimeout(step, 800);
-      }
-      setTimeout(step, 300);
+        try { final = extract(); } catch (e) { return resolve(null); }
+        var prog = final.liTotal || 0;
+        if (prog === last) stable++; else stable = 0;
+        last = prog;
+        if (final.total &gt; 0 &amp;&amp; prog &gt;= final.total * 0.9) return resolve(final);
+        if (stable &gt;= 6 || rounds &gt;= 30) return resolve(final);
+        setTimeout(loop, 2500);
+      })();
     });
   }
 
@@ -2656,24 +2590,11 @@ function copyRaw(){
 
   function readApiUnread() {
     setBody('&lt;div class="dyh-back" data-act="manage"&gt;← 返回&lt;/div&gt;' +
-      '&lt;div class="dyh-prog" id="dyh-prog"&gt;📡 正在读抖音关注页的红点…&lt;br&gt;' +
-      '&lt;span style="font-size:19px"&gt;在滚动读取你全部关注的号（通常 20 秒内完成，请不要切走）&lt;/span&gt;&lt;/div&gt;');
+      '&lt;div class="dyh-prog" id="dyh-prog"&gt;🔌 正在从抖音接口读未读数…&lt;br&gt;' +
+      '&lt;span style="font-size:19px"&gt;直接调关注列表接口（覆盖你全部关注的号）&lt;/span&gt;&lt;/div&gt;');
     return syncUnreadAuthoritative(function (p) {
       var el = document.getElementById('dyh-prog');
-      if (!el) return;
-      /* ★ 21:30 把「正在做什么、已扫多少、还要多久」都显示出来。
-         原来只显示「已读到 N 个号」且长时间不动 → 用户以为卡住/抓不到。 */
-      if (p.phase === 'harvest') {
-        var pct = p.total ? Math.min(100, Math.round((p.seen || 0) / p.total * 100)) : 0;
-        el.innerHTML = '📡 正在滚动读取抖音关注页…&lt;br&gt;' +
-          '&lt;span style="font-size:19px"&gt;已扫 &lt;b&gt;' + (p.seen || 0) + '&lt;/b&gt; / ' + (p.total || '?') + ' 个号（' + pct + '%）' +
-          '&lt;br&gt;已用 ' + (p.elapsed || 0) + ' 秒' + (p.max ? ' / 最多 ' + p.max + ' 秒' : '') + '&lt;/span&gt;' +
-          '&lt;div class="dyh-item-m" style="margin-top:10px"&gt;&lt;div style="flex:1;height:8px;background:#E5DAC0;border-radius:4px;overflow:hidden"&gt;' +
-          '&lt;div style="width:' + pct + '%;height:100%;background:#fe2c55"&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;' +
-          '&lt;span style="font-size:15px;color:#7A6A3F"&gt;到时间会自动收工，不会一直卡着&lt;/span&gt;';
-        return;
-      }
-      el.innerHTML = '📡 正在读抖音关注页…&lt;br&gt;&lt;span style="font-size:19px"&gt;' +
+      if (el) el.innerHTML = '🔌 正在从抖音接口读未读数…&lt;br&gt;&lt;span style="font-size:19px"&gt;' +
         '已读到 &lt;b&gt;' + (p.got || 0) + '&lt;/b&gt; 个号有未看清单' +
         (p.total ? ' · 接口共返回 &lt;b&gt;' + p.total + '&lt;/b&gt; 个号' : '') + '&lt;/span&gt;' +
         (p.pages ? '&lt;br&gt;&lt;span style="font-size:17px;color:#7A6A3F"&gt;第 ' + p.pages + ' 页（翻页中…）&lt;/span&gt;' : '');
@@ -3127,25 +3048,12 @@ function copyRaw(){
     function onBad(e, acc) {
       errors++; consecOk = 0; consecFail++;
       if (acc &amp;&amp; !acc._failCounted) { acc._failCounted = 1; failAcc++; accFailStreak++; }   // 同一账号只记一次
-      /* ★★ 2026-10-07 22:15 关键修正：「一直抓不到」多数【不是抖音限流】。
-         抓视频用的是【自签接口 aweme/post/】，而今天 20:13 已实测：手机 Via 里自签following/list
-         恒返回 0 个号 → 说明自签这条路在手机上【本来就不通】，退避也救不回来。
-         原写法把「任何连续失败」都当成限流 → 疯狂降速+长冷却（10~40 秒），
-         于是「抓不到」被放大成「一直抓不到、还特别慢」。
-
-         现在按【失败原因】分开处理：
-           ·真风控（403/429/461/419）→ 才降速 + 换令牌（这是唯一有效的应对）；
-           · 超时/网络抖动/解析失败 → **不降速**，只短暂停一下（1~2 秒）继续；
-           · 自签被拒但状态码不是风控（如 200 返回空）→ 直接快速跳过，不退避。 */
-      var isRealRisk = !!(e &amp;&amp; e.risk);
-      var isTimeout = !!(e &amp;&amp; e.timeout);
-    if (!isRealRisk &amp;&amp; !isTimeout) {
-      /* 非风控的失败（超时/网络抖动/解析失败）：【不降速】，只小停一下继续。
-         ★ 22:40 修正：原来这里还把 accFailStreak/consecFail 清零 → 「连续失败」永远不累积，
-         于是真出现连续异常时也不会升级应对。现在【保留计数】但【不降速】。 */
-      coolUntil = Date.now() + (600 + Math.random() * 900);
-      return;
-    }
+      /* ★ 连续 5 个账号没抓到 → 先「歇口气」再继续（10-03 01:25）。
+         旧行为是硬磨：一个接一个 403，满屏失败，还把抖音盯得更死，下一轮更难抓。
+         现在是：连挂 5 个 → 降到 1 并发 + 换令牌 + 长冷却 10~15 秒（让风控过去），
+         ★ 注意是【冷却后继续】，不是【收工】—— 一轮能抓完就尽量一轮抓完，不让你多按几次。
+         只有连着歇了 3 次还是没起色（累计约 15 个账号连挂，说明抖音这次真的不给了），
+         才收工写断点；没抓到的下次自动从断点补，一个都不会漏。 */
       if (accFailStreak &gt;= 5 &amp;&amp; !bailout) {
         accFailStreak = 0; slowRounds++;
         conc = 1;
@@ -3160,7 +3068,7 @@ function copyRaw(){
           toast('连着几个没抓到，先歇十几秒再继续（这轮会接着抓完，不用你再点）。', 4000);
         }
       }
-      if (isRealRisk) {                                      // 真风控：降到 1 并发 + 长冷却 + 换令牌，慢慢来（不再轻易收工）
+      if (e &amp;&amp; e.risk) {                                   // 风控：降到 1 并发 + 长冷却 + 换令牌，慢慢来（不再轻易收工）
         riskHits++; riskStreak++; consecFail = 0;
         conc = 1;
         refreshMsToken();                                  // 令牌多半被拉黑了，换一个再继续
@@ -3555,13 +3463,9 @@ function copyRaw(){
         if (hv.secUid &amp;&amp; (!hNew[hv.secUid] || (hv.publishedAt || 0) &gt; hNew[hv.secUid])) hNew[hv.secUid] = hv.publishedAt || 0;
       }
       phase = 'harvest';
-    return harvestFollowPage({
-      horizon: prevScanAt ? (prevScanAt - 90 * 60000) : 0,
-      /* ★★ 22:40【撤回 22:15 的 45 秒】：它是 0 自签的「关注页收割」，
-         **是当前唯一能拿到【视频明细】的路**（抄抖音自己 aweme_list 响应）。
-         45 秒可能滚不完 → 抄到的视频变少 → 表现为「更抓不到」。
-         恢复到 120 秒（比最早的 150 秒少，但足够滚完一个关注流）。 */
-      maxMs: 120000, uidMap: hUid, newest: hNew,
+      return harvestFollowPage({
+        horizon: prevScanAt ? (prevScanAt - 90 * 60000) : 0,
+        maxMs: 150000, uidMap: hUid, newest: hNew,
         shouldStop: function () { return shouldStop(); },
         onPage: function (st) {
           feedCaughtN = st.covered;
@@ -3621,15 +3525,6 @@ function copyRaw(){
       .then(function () {
         // 信息流已经把账号全部核对完（日常绝大多数情况）：不用再逐个打接口了
         if (!plan.length) { cleanup(); report('', true); return resultObj(); }
-        /* ══ 2026-10-07 22:40【撤回 22:20 的错误限制】══════════════════════
-         22:20 我加了「逐个补抓最多 8 个」并写明理由是「自签 aweme/post 必然被拒」——
-         **这个判断是错的**，而且它直接造成了「更抓不到」：
-           · 视频明细的唯一来源就是 fetchUnreadVideoDetails → fetchAccountWorks(aweme/post)，
-             它【必须】靠这个自签接口；而我在它之外又加了个「只准抓 8 个」的天花板，
-           · 于是 389 个号里只有 8 个有机会拿到视频 → **用户看到的就是「抓得更少了」。
-         诊断器的实测（20:13 那个「接口返回 0 个号」）只针对 following/list 那个**读数**接口，
-         **不能推广成「aweme/post 也一定不通」** —— 这是我过度推广结论、砍错了地方。
-         现在撤回：不再限 8 个，恢复按实际需要逐个补抓（风控降速逻辑仍然保留，那是另一回事）。 */
         return runPass(plan).then(function () {
           cleanup(); report('', true);
           return resultObj();
@@ -3678,32 +3573,12 @@ function copyRaw(){
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;其中抖音官方未看&lt;/b&gt;&lt;span&gt;' +
       (apiHas ? (apiAccs + ' 个号 · ' + apiN + ' 条') : '（抓完一轮会自动读进来，点「📡 抓最新未读视频」就有了）') + '&lt;/span&gt;&lt;/div&gt;';
     h += '&lt;div class="dyh-row"&gt;&lt;b&gt;本机抓到明细&lt;/b&gt;&lt;span&gt;' + unread.length + ' 条（点开看得到）&lt;/span&gt;&lt;/div&gt;';
-    /* ★ 数据来源与可信度（20:05）：最重要的一行——不许把「读不到的旧数据」当成真数显示。
-       诊断实测：手机 Via 里官方接口会「返回 0 个号」，此时若不提示，界面会拿本机旧数据
-       冒充官方未读 → 用户看到的数字就永远和抖音对不上。 */
-    (function () {
-      var st = S.unreadStatus || {};
-      var src = st.src || '', msg = st.msg || '';
-      var txt, col = '#ff7d00';
-      if (src === 'api') { txt = '✅ 官方接口（可信）· ' + (msg || ''); col = '#2ba471'; }
-      else if (src === 'dom') { txt = '✅ 关注页红点（可信）· ' + (msg || ''); col = '#2ba471'; }
-      else if (src === 'stale' || src === 'empty') { txt = '⚠ 未读到官方数据 · ' + (msg || '下面显示的是旧数据，不代表抖音真实未读'); col = '#e64340'; }
-      else { txt = '尚未读取官方未读（打开面板会自动读一次）'; col = '#ff7d00'; }
-      h += '&lt;div class="dyh-row"&gt;&lt;b&gt;数据来源&lt;/b&gt;&lt;span style="color:' + col + '"&gt;' + esc(txt) + '&lt;/span&gt;&lt;/div&gt;';
-      if (src === 'stale' || src === 'empty') {
-        h += '&lt;div class="dyh-card" style="background:#FFE9E8;border:1px solid #F5A9A6"&gt;' +
-          '&lt;div class="dyh-tip" style="color:#C2372F;margin:0"&gt;' +
-          '⚠️ &lt;b&gt;下面的未读数字不是抖音的真实未读&lt;/b&gt;&lt;br&gt;' +
-          '原因：' + esc(msg || '官方接口读不到') + '。&lt;br&gt;' +
-          '请到抖音「关注」页点一次「📡 抓最新未读视频」；仍失败说明抖音在限制读取，' +
-          '此时以抖音 App 看到的数为准。&lt;/div&gt;&lt;/div&gt;';
-      }
-    })();
-    /* 数据新鲜度（自动同步状态） */
+    /* ★ 数据新鲜度（自动同步状态）：一眼看出这批数字是什么时候从抖音抓的。
+       「已同步」= 3 分钟内刚读过官方；「已过期」= 超过 12 小时，数字可能与 App 不一致。 */
     (function () {
       var age = officialAge();
       var txt, col = '';
-      if (age === Infinity) { txt = '还没读过官方数据'; col = '#ff7d00'; }
+      if (age === Infinity) { txt = '还没读过官方数据（打开面板会自动读）'; col = '#ff7d00'; }
       else if (age &lt;= AUTO_SYNC_MIN_MS) { txt = '已同步（刚刚）'; col = '#2ba471'; }
       else if (age &lt;= API_UNREAD_VALID_MS) {
         txt = '已同步（' + Math.max(1, Math.round(age / 60000)) + ' 分钟前）';
@@ -5591,6 +5466,7 @@ try {
     collectFollowingUnread: collectFollowingUnread,
     harvestApiUnread: harvestApiUnread,
     readApiUnread: readApiUnread,
+    fetchFollowingUnread: fetchFollowingUnread,
     fetchUnreadVideoDetails: fetchUnreadVideoDetails,
     syncUnreadAuthoritative: syncUnreadAuthoritative,
     applyApiUnreadAll: applyApiUnreadAll,
