@@ -53,17 +53,32 @@
 
   /* ---------- ① 滚动读取抖音页面自己写的红点 ---------- */
   function findScroller() {
+    /* 抖音关注页有多个可滚动容器（左侧关注列表 / 右侧推荐流 / 整个窗口）。
+       ★ 2026-10-07 20:00 修正：原来只取「可滚距离最大」的那个，往往是右侧推荐流，
+       于是左边的关注列表根本没滚到 → 只能读到屏幕里那60 个（实测 60/389 = 15%）。
+       现在：优先选【含有「个作品未看」文本】的那个容器（那就是关注列表），找不到再退回最大可滚的。 */
     var all = document.querySelectorAll('div,ul,ol,section,main,aside');
-    var best = null, bestScore = 0;
+    var best = null, bestScore = 0, withBadge = null, badgeScore = 0;
     for (var i = 0; i < all.length; i++) {
       var e = all[i];
       var cs;
       try { cs = getComputedStyle(e); } catch (x) { continue; }
       if (cs.overflowY !== 'auto' && cs.overflowY !== 'scroll') continue;
       var can = e.scrollHeight - e.clientHeight;
+      if (can <= 20) continue;                       // 滚不动的不用
+      /* 找「含未看文字」的容器 —— 关注列表所在 */
+      var lis = e.querySelectorAll('li');
+      if (lis.length) {
+        var hit = 0;
+        for (var j = 0; j < lis.length; j++) { if (/个作品未看/.test(lis[j].innerText || '')) hit++; }
+        if (hit > 0 && lis.length > badgeScore) { badgeScore = lis.length; withBadge = e; }
+      }
       if (can > bestScore) { bestScore = can; best = e; }
     }
-    return best;
+    var pick = withBadge || best;
+    if (withBadge) say('  （已定位到【关注列表】容器，含' + withBadge.querySelectorAll('li').length + ' 个 li）');
+    else if (best) say('  ⚠ 没找到含「个作品未看」的容器，退回最大可滚容器 —— 建议先手动在页面上点一下关注列表');
+    return pick;
   }
 
   function readBadgesOnce() {
@@ -95,24 +110,32 @@
   async function scanBadges() {
     say('滚动读取抖音页面自己写的「N个作品未看」…');
     var agg = {}, maxLi = 0, rounds = 0, sc = findScroller();
-    if (!sc) { say('⚠ 没找到可滚动容器（请确认已在抖音「关注」页）'); return null; }
-    for (; rounds < 300; rounds++) {
+    if (!sc) { say('⚠ 没找到可滚动容器（请确认已在抖音「关注」页，并先手动点一下左侧关注列表）'); return null; }
+    var idle = 0, lastLi = 0;
+    for (; rounds < 400; rounds++) {
       var r = readBadgesOnce();
+      /* 累计「见过的li 总数」与「有未看的号数」，两者任一增长就认为还有新东西 */
       maxLi = Math.max(maxLi, r.liTotal);
       for (var k in r.map) if (!(k in agg) || r.map[k] > agg[k]) agg[k] = r.map[k];
+      var accNow = 0, sumNow = 0;
+      for (var k0 in agg) if (k0.indexOf('n:') === 0) { accNow++; sumNow += agg[k0]; }
+      say('  轮' + rounds + '：列表 ' + r.liTotal + ' 个 · 累计有未看 ' + accNow + ' 个号 / ' + sumNow + ' 条');
+      /* 懒加载判定：连续 3 轮「li数没变且已见号数没变」才停 */
+      if (r.liTotal === lastLi && accNow === (scanBadges._acc || 0)) { idle++; } else { idle = 0; }
+      scanBadges._acc = accNow;
+      lastLi = r.liTotal;
+      if (idle >= 3) break;
       try { sc.scrollTop = sc.scrollHeight; } catch (e) {}
-      await sleep(650);
-      var after = sc.scrollTop;
-      await sleep(350);
-      if (Math.abs(sc.scrollTop - after) < 2) { rounds++; if (rounds > 2) break; }
+      await sleep(800);
     }
-    /* 统计有未读的账号数 */
     var accSet = {};
-    for (var k2 in agg) { if (k2.indexOf('n:') === 0) accSet[k2] = agg[k2]; }
+    for (var k2 in agg) if (k2.indexOf('n:') === 0) accSet[k2] = agg[k2];
     var cnt = 0, sum = 0;
     for (var k3 in accSet) { cnt++; sum += accSet[k3]; }
-    say('  滚动轮数 ' + rounds + ' · 列表约 ' + maxLi + ' 个 · 有未看 ' + cnt + ' 个号 / 共 ' + sum + ' 条');
-    return { map: agg, accounts: cnt, sum: sum, liTotal: maxLi, rounds: rounds };
+    var totalLi = lastLi || maxLi;
+    say('  ★ 完成：滚动 ' + rounds + ' 轮 · 关注列表共 ' + totalLi + ' 个 · 有未看 ' + cnt + ' 个号 / 共 ' + sum + ' 条');
+    if (totalLi < 200) say('  ⚠ 只滚到 ' + totalLi + ' 个（你的关注约 389 个）—— 说明列表没滚到底，红点数据不完整');
+    return { map: agg, accounts: cnt, sum: sum, liTotal: totalLi, rounds: rounds };
   }
 
   /* ---------- ② 读官方接口 v2 ---------- */
@@ -162,15 +185,23 @@
       var url = 'https://www.douyin.com/aweme/v1/web/user/following/list/?' + qs.join('&');
       var ctrl = new AbortController();
       var tm = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 9000);
-      var page = null;
+      var page = null, why = '';
       try {
-        var r = await fetch(url, { credentials: 'include', headers: { 'accept': 'application/json, text/plain, */*' }, signal: ctrl.signal });
+        var r = await fetch(url, { credentials: 'include', headers: { 'accept': 'application/json, text/plain, */*', 'Referer': 'https://www.douyin.com/' }, signal: ctrl.signal });
         clearTimeout(tm);
         var t = await r.text();
-        if (r.status === 200 && t) page = JSON.parse(t);
-      } catch (e) { clearTimeout(tm); }
+        if (r.status === 200 && t) { try { page = JSON.parse(t); } catch (e) { why = 'JSON 解析失败: ' + t.slice(0, 120); } }
+        else why = 'HTTP ' + r.status + ' · 响应前120字: ' + t.slice(0, 120);
+      } catch (e) { clearTimeout(tm); why = '请求异常: ' + (e && e.message); }
       pages++;
-      if (!page) { say('  第' + pages + '页失败（跳过）'); offset += 20; continue; }
+      if (!page) {
+        say('  ✖ 第' + pages + '页 → ' + (why || '未知原因'));
+        if (pages === 1) {
+          say('  【关键】第一页就失败 = 接口读不到。若上面是 HTTP 403/444 → 被风控；');
+          say('  若返回 200 但 followings 为空 → 参数不对（当前页面没先跑过关注接口，baseParams 嗅探不到）。');
+        }
+        offset += 20; continue;
+      }
       var list = page.followings || [];
       for (var i = 0; i < list.length; i++) {
         var u = list[i] || {}; var sec = u.sec_uid || u.secUid; if (!sec) continue;
