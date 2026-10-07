@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 20:50 · 删除自签following/list（手机端实测恒返回0个号），未读主源改为「关注页滚动收割+红点DOM」，0自签请求
+// @version      2026-10-07 21:15 · 修「旧数据不被覆盖」：读到最新数据即整体覆盖(本轮未出现的号记n=0)，仅当本轮读到的号数<30 才保留旧值防误清
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -253,8 +253,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 20:50 · 删除自签following/list（手机端实测恒返回0个号），未读主源改为「关注页滚动收割+红点DOM」，0自签请求';
-  var VER_SHORT = '10-07 20:50';
+  var VER = '2026-10-07 21:15 · 修「旧数据不被覆盖」：读到最新数据即整体覆盖(本轮未出现的号记n=0)，仅当本轮读到的号数<30 才保留旧值防误清';
+  var VER_SHORT = '10-07 21:15';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1366,14 +1366,33 @@
     if (!S.apiUnread || typeof S.apiUnread !== 'object') S.apiUnread = {};
     if (!S.apiUnread.__byName || typeof S.apiUnread.__byName !== 'object') S.apiUnread.__byName = {};
 
-    /* 超过 12 小时的旧记录先清掉 —— 保留归保留，但不能让它赖着冒充今天的数 */
-    var _now0 = Date.now(), _k0;
-    for (_k0 in S.apiUnread) {
-      if (!Object.prototype.hasOwnProperty.call(S.apiUnread, _k0)) continue;
-      if (_k0 === '__byName') continue;
-      var _oe = S.apiUnread[_k0];
-      if (_oe && _oe.at && _now0 - _oe.at > API_UNREAD_VALID_MS) {
-        delete S.apiUnread[_k0]; st.staleDropped++;
+    /* ★★ 2026-10-07 21:00 关键修正（用户指出「没有覆盖之前的数据」）：
+       旧逻辑【只清 12 小时以上的旧记录】→ 12 小时以内读到的旧数据会一直留在 S.apiUnread 里
+       （st.kept++ 就是「保留旧数据」的计数）。
+       后果实测：今天 12:33 读到「132 个号 732 条」，19:57 抖音真实未读只剩「1 个号 99 条」，
+       但那731 条**旧数据照样被显示** → 数字和抖音对不上，而且越用越乱。
+
+       现在改成【读到本轮 map 就以它为准整体覆盖】：
+         ① 本轮 map 里出现的号 → 直接写入本轮值（原有）；
+         ② 本轮 map 里【没出现】的号（且本轮确实读到了足够多的号）→ 判定为「官方说它 0 条未看」，
+            记 n=0（不是保留旧值！）。这才符合「官方清单是完整编码：出现=有未看 / 缺失=无未读」的实测结论。
+         ③ 只有当本轮 map【读到的号数很少】（明显是失败/被限流），才整轮保留旧值并如实标记 ——避免把失败当0。
+       保留「12 小时过期清理」仅作为本地缓存卫生，不再作为「保留旧值」的理由。 */
+    var now0 = Date.now();
+    if (!map) map = {};
+    var mapKeys = [], mk;
+    for (mk in map) { if (Object.prototype.hasOwnProperty.call(map, mk)) mapKeys.push(mk); }
+    /* 读到的号数太少 → 判定本轮不可信，整轮不覆盖（避免把一次限流误当成「全部已看完」） */
+    var TOO_FEW = 30;
+    var thisRoundTrustworthy = mapKeys.length >= TOO_FEW;
+    if (!S.apiUnread || typeof S.apiUnread !== 'object') S.apiUnread = {};
+    if (!S.apiUnread.__byName || typeof S.apiUnread.__byName !== 'object') S.apiUnread.__byName = {};
+    if (!thisRoundTrustworthy && opts.forceCover !== true) {
+      /* 只做过期清理，保留旧值 */
+      for (var _k0 in S.apiUnread) {
+        if (!Object.prototype.hasOwnProperty.call(S.apiUnread, _k0) || _k0 === '__byName') continue;
+        var _oe = S.apiUnread[_k0];
+        if (_oe && _oe.at && now0 - _oe.at > API_UNREAD_VALID_MS) { delete S.apiUnread[_k0]; st.staleDropped++; }
       }
     }
 
@@ -1392,13 +1411,22 @@
       secids[k] = ids0;
       for (i = 0; i < ids0.length; i++) allIds[String(ids0[i])] = 1;
     }
-    /* 数一数「本轮没读到、但上次的数还在」的号，同时重建 __byName 索引
-       （旧索引条目可能还指着刚被过期清掉的 rec，必须重挂一遍） */
+    /* ★★ 21:00：本轮 map 里没出现的号，在本轮可信时一律记n=0（官方完整编码：缺失=无未看），
+       旧逻辑是 st.kept++（保留旧值）→ 旧未读永远赖着不走，是「数字对不上」的直接原因。 */
     S.apiUnread.__byName = {};
     for (k in S.apiUnread) {
       if (!Object.prototype.hasOwnProperty.call(S.apiUnread, k)) continue;
       if (k === '__byName') continue;
-      if (order.indexOf(k) < 0) st.kept++;
+      if (order.indexOf(k) < 0) {
+        if (thisRoundTrustworthy) {
+          /* 本轮读到足够多的号 → 这个号本轮没出现 = 官方说它没有未看，记 0 */
+          var _old = S.apiUnread[k] || {};
+          S.apiUnread[k] = { n: 0, ids: [], nickname: _old.nickname || '', at: now0, src: 'cover0' };
+          st.known++; st.coverZero = (st.coverZero || 0) + 1;
+        } else {
+          st.kept++;                     // 本轮不可信（读得太少）→ 保留旧值
+        }
+      }
       var _e0 = S.apiUnread[k];
       if (_e0 && _e0.nickname) S.apiUnread.__byName[normName(_e0.nickname)] = _e0;
     }
