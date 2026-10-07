@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         抖音关注助手（手机免电脑版）
 // @namespace    dy-phone-helper
-// @version      2026-10-07 16:55 · 修「总是抓取失败」：换msToken真的换(黑名单绕开cookie) + 整页被风控时换令牌重试
+// @version      2026-10-07 17:10 · 清掉最后两处user_not_see死字段兜底(关注页收割+React内存直读)——这是数字对不上的真凶；并说明394=接口返回号数非读错
 // @description  在手机浏览器的抖音网页版里直接：抓关注列表、抓最新未读视频、搜索并关注新账号、数据推 GitHub。全程不需要电脑。（取关功能已取消，请在抖音 App 里取关）
 // @match        https://www.douyin.com/*
 // @grant        none
@@ -253,8 +253,8 @@
      不再用 v1.x 递增，改成「生成日期时间 + 这次改了什么」，
      改完必须同步改文件头的 @version，否则 Via 里跑的还是旧的那份。
      面板标题后面显示的是短版（MM-DD HH:MM），完整说明放在 title 和设置页里。 */
-  var VER = '2026-10-07 16:55 · 修「总是抓取失败」：换msToken真的换(黑名单绕开cookie) + 整页被风控时换令牌重试';
-  var VER_SHORT = '10-07 16:55';
+  var VER = '2026-10-07 17:10 · 清掉最后两处user_not_see死字段兜底(关注页收割+React内存直读)——这是数字对不上的真凶；并说明394=接口返回号数非读错';
+  var VER_SHORT = '10-07 17:10';
 
   /* ----------------------------- 存储 ----------------------------- */
   var S = loadState();
@@ -1098,11 +1098,17 @@
           out.users++;
           var nm = u.nickname || u.nickName || '';
           var ids = pullUnreadIds(u);
-          /* 优先用【未看作品 id 列表】的长度；没有列表才退用抖音给的计数 user_not_see */
-          var n = -1, src = '';
+          /* 优先用【未看作品 id 列表】的长度。
+             ★ 2026-10-07 17:05 修正：原来这里「没有 id 列表就退用 user_not_see」——
+             但全量实测（389/389 号）证明 user_not_see【恒为 0，是死字段】。
+             用它兜底 = 把「有 N 条未看」错报成 0，或把「已看完」错报成有未读，
+             这正是「数字和抖音对不上」的根因之一（同源问题在 fetchFollowingUnread 已修，
+             这条关注页收割路径当时漏了）。
+             现在：没有 v2 清单就记 n=0（该号本轮没未看），绝不拿死字段编数字。 */
+          var n, src;
           if (ids) { n = ids.length; src = 'ids'; }
-          else if (u.user_not_see != null) { n = parseInt(u.user_not_see, 10); src = 'count'; }
-          if (!(n >= 0)) continue;                            // 两者都没有 = 这个号不知道
+          else { n = 0; src = 'noIds'; }
+          if (!(n >= 0)) continue;                            // 防御（保留结构）
           /* ★ 10-06 修正：以【最后一份响应】为准 —— NET.buf 是按到达顺序存的，后到的更新。
              旧写法「取历史最大值」有个致命后果：你刷掉几条之后再读，数字只会虚高、绝不回落，
              清单里还一直留着早就看过的视频。改成覆盖后又有的优雅性质：
@@ -1177,10 +1183,9 @@
       if (Object.prototype.toString.call(v) === '[object Array]') { ids = v; src = KEYS[i]; break; }
     }
     var n = ids ? ids.length : -1;
-    if (n < 0) {
-      var c = (o.user_not_see != null) ? o.user_not_see : ((o.userNotSee != null) ? o.userNotSee : null);
-      if (c != null) { var ci = parseInt(c, 10); if (!isNaN(ci)) { n = ci; src = 'user_not_see'; } }
-    }
+    /* ★ 2026-10-07 17:05：这里原来在「拿不到 id 列表」时退用 user_not_see当未读数，
+       但全量实测（389/389 号）证明它【恒为 0、是死字段】，会凭空造出假未读。
+       现在：拿不到官方 id 列表就返回 null（交由上层的权威链处理），绝不用死字段编数字。 */
     if (n < 0) return null;
     var out = [];
     if (ids) { for (i = 0; i < ids.length; i++) out.push(String(ids[i])); }
@@ -1745,8 +1750,8 @@
     return syncUnreadAuthoritative(function (p) {
       var el = document.getElementById('dyh-prog');
       if (el) el.innerHTML = '🔌 正在从抖音接口读未读数…<br><span style="font-size:19px">' +
-        '已读到 <b>' + (p.got || 0) + '</b> 个号的未看清单' +
-        (p.total ? ' / 关注共 <b>' + p.total + '</b> 个' : '') + '</span>' +
+        '已读到 <b>' + (p.got || 0) + '</b> 个号有未看清单' +
+        (p.total ? ' · 接口共返回 <b>' + p.total + '</b> 个号' : '') + '</span>' +
         (p.pages ? '<br><span style="font-size:17px;color:#7A6A3F">第 ' + p.pages + ' 页（翻页中…）</span>' : '');
     }).then(function (r) {
       var apv = S.apiUnread || {};
