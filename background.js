@@ -61,6 +61,7 @@ async function capture(videos) {
         cover: v.cover || '',
         url: v.url || 'https://www.douyin.com/video/' + v.id,
         createTime: v.createTime || Math.floor(now / 1000),
+        cat: v.cat || '未分类',
         seenAt: now,
         read: false,
       };
@@ -123,6 +124,39 @@ async function clearRead() {
   return true;
 }
 
+// 账号标识：优先用 authorId，缺失时退化为 "n:" + 昵称
+function accountKeyOf(v) {
+  return (v && v.authorId) ? v.authorId : ('n:' + (v.author || '未知作者'));
+}
+
+// 把某个账号的全部未读标记为已读
+async function markAccountRead(key) {
+  const store = await getVideos();
+  const now = Date.now();
+  for (const k in store) {
+    const v = store[k];
+    if (accountKeyOf(v) === key) {
+      v.read = true;
+      if (!v.readAt) v.readAt = now;
+    }
+  }
+  await saveVideos(store);
+  await updateBadge(store);
+  return true;
+}
+
+// 为某个账号设置/修改分类（会同步到该账号下的所有视频）
+async function setAccountCat(key, cat) {
+  const store = await getVideos();
+  const c = cat || '未分类';
+  for (const k in store) {
+    const v = store[k];
+    if (accountKeyOf(v) === key) v.cat = c;
+  }
+  await saveVideos(store);
+  return true;
+}
+
 async function cleanup() {
   const settings = await getSettings();
   const days = Number(settings.keepReadDays) || 7;
@@ -169,6 +203,8 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       case 'MARK_READ': return await markRead(msg.id);
       case 'MARK_ALL_READ': return await markAllRead();
       case 'CLEAR_READ': return await clearRead();
+      case 'MARK_ACCOUNT_READ': return await markAccountRead(msg.key);
+      case 'SET_ACCOUNT_CAT': return await setAccountCat(msg.key, msg.cat);
       case 'GET_SETTINGS': return await getSettings();
       case 'SET_SETTINGS': return await saveSettings(msg.settings);
       case 'SCAN_NOW': return await forwardScanNow();

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         抖音关注未读视频助手（手机版 / Via 等油猴浏览器）
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.0.0
-// @description  在手机浏览器（Via 等支持用户脚本的浏览器）上，抓取抖音「关注」页里关注的账号发布的未读视频，悬浮面板集中查看、标记已读。
+// @version      1.1.0
+// @description  在手机浏览器（Via 等支持用户脚本的浏览器）上，抓取抖音「关注」页里关注的账号发布的未读视频，按「分类 → 账号」分组展示，每个账号显示未读数量，可标记已读 / 改分类。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -119,6 +119,7 @@
         data[v.id] = {
           id: v.id, author: v.author, authorId: v.authorId, desc: v.desc,
           cover: v.cover, url: v.url, createTime: v.createTime,
+          cat: v.cat || '未分类',
           seenAt: now, read: false,
         };
         added++;
@@ -147,6 +148,22 @@
     const data = loadData(); const out = {};
     for (const k in data) { if (!data[k].read) out[k] = data[k]; }
     saveData(out); updateBadge(); render();
+  }
+
+  // 账号标识：优先用 authorId，缺失时退化为 "n:" + 昵称
+  function accKey(v) { return (v && v.authorId) ? v.authorId : ('n:' + (v.author || '未知作者')); }
+
+  // 把某个账号的全部未读标记为已读
+  function markAccountRead(key) {
+    const data = loadData(); const now = Date.now();
+    for (const k in data) { if (accKey(data[k]) === key) { data[k].read = true; if (!data[k].readAt) data[k].readAt = now; } }
+    saveData(data); updateBadge(); render();
+  }
+  // 为某个账号设置/修改分类（同步到该账号下所有视频）
+  function setAccountCat(key, cat) {
+    const data = loadData(); const c = cat || '未分类';
+    for (const k in data) { if (accKey(data[k]) === key) data[k].cat = c; }
+    saveData(data); render();
   }
 
   /* ---------------- 接口劫持（主世界可直接 patch） ---------------- */
@@ -273,6 +290,22 @@
     background:#2a2d40;color:#fff;}
   .dyBtn.primary{background:#fe2c55;font-weight:600;}
   .dyBtn.ghost{background:transparent;border:1px solid #3a3d52;}
+  .dySummary{padding:8px 14px;font-size:12px;color:#9aa0b5;background:#1f2233;border-bottom:1px solid #262a3b;}
+  .dyCatHd{padding:8px 14px;font-size:12px;font-weight:700;color:#fe2c55;background:#161823;position:sticky;top:0;z-index:1;border-bottom:1px solid #262a3b;}
+  .dyAcc{border-bottom:1px solid #262a3b;}
+  .dyAccHd{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;}
+  .dyAvatar{width:34px;height:34px;border-radius:50%;background:#fe2c55;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 34px;font-size:15px;}
+  .dyAccName{flex:1;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .dyAccCount{background:#fe2c55;color:#fff;border-radius:10px;padding:1px 9px;font-size:12px;font-weight:700;min-width:20px;text-align:center;}
+  .dyAccActions{display:flex;gap:6px;}
+  .dyMini{background:#2a2d40;color:#fff;border:none;border-radius:6px;padding:5px 9px;font-size:11px;cursor:pointer;}
+  .dyMini.cat{background:transparent;border:1px solid #3a3d52;color:#9aa0b5;}
+  .dyAccBody{padding:0 14px 12px;}
+  .dyThumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  .dyThumbWrap{position:relative;display:block;border-radius:6px;overflow:hidden;background:#2a2d40;}
+  .dyThumbWrap img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block;}
+  .dyPh2{width:100%;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#fe2c55,#f0385e);color:#fff;font-size:18px;}
+  .dyThumbMk{position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:4px;font-size:10px;padding:2px 5px;cursor:pointer;}
   `;
 
   function buildUI() {
@@ -293,6 +326,7 @@
       '<div class="dyHd"><b>抖音关注 · 未读</b><button class="dyClose" id="dyClose">×</button></div>' +
       '<div class="dyStatus"><span><span class="dot" id="dyDot"></span><span id="dyStatusText">未记录</span></span>' +
       '<span id="dyCount"></span></div>' +
+      '<div class="dySummary" id="dySummary"></div>' +
       '<div class="dyList" id="dyList"></div>' +
       '<div class="dyFt">' +
       '<button class="dyBtn primary" id="dyRec">开始记录</button>' +
@@ -347,11 +381,74 @@
     if (d < 86400) return Math.floor(d / 3600) + ' 小时前';
     return Math.floor(d / 86400) + ' 天前';
   }
+  function buildGroups(unread) {
+    const cats = {};
+    for (const v of unread) {
+      const key = accKey(v);
+      const cat = v.cat || '未分类';
+      if (!cats[cat]) cats[cat] = {};
+      if (!cats[cat][key]) cats[cat][key] = { key: key, name: v.author || '未知作者', authorId: v.authorId || '', items: [], latest: 0 };
+      cats[cat][key].items.push(v);
+      cats[cat][key].latest = Math.max(cats[cat][key].latest, v.createTime || 0);
+    }
+    const result = {};
+    for (const c in cats) {
+      result[c] = Object.values(cats[c]).sort(function (a, b) { return (b.items.length - a.items.length) || ((b.latest || 0) - (a.latest || 0)); });
+    }
+    const names = Object.keys(result).sort(function (a, b) {
+      if (a === '未分类') return 1; if (b === '未分类') return -1;
+      return a.localeCompare(b, 'zh');
+    });
+    return { cats: result, names: names };
+  }
+
+  function renderAccount(acc) {
+    const wrap = document.createElement('div'); wrap.className = 'dyAcc';
+    const hd = document.createElement('div'); hd.className = 'dyAccHd';
+    const av = document.createElement('div'); av.className = 'dyAvatar'; av.textContent = (acc.name || '?').slice(0, 1);
+    const name = document.createElement('div'); name.className = 'dyAccName'; name.textContent = acc.name;
+    const cnt = document.createElement('div'); cnt.className = 'dyAccCount'; cnt.textContent = acc.items.length;
+    const actions = document.createElement('div'); actions.className = 'dyAccActions';
+    const bAll = document.createElement('button'); bAll.className = 'dyMini'; bAll.textContent = '全部已读';
+    bAll.addEventListener('click', function (e) { e.stopPropagation(); markAccountRead(acc.key); });
+    const bCat = document.createElement('button'); bCat.className = 'dyMini cat'; bCat.textContent = '分类';
+    bCat.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const c = window.prompt('为该账号设置分类（如：美食 / 科技）：', '未分类');
+      if (c != null) setAccountCat(acc.key, (c.trim() || '未分类'));
+    });
+    actions.appendChild(bAll); actions.appendChild(bCat);
+    hd.appendChild(av); hd.appendChild(name); hd.appendChild(cnt); hd.appendChild(actions);
+    const body = document.createElement('div'); body.className = 'dyAccBody';
+    const grid = document.createElement('div'); grid.className = 'dyThumbs';
+    acc.items.forEach(function (v) {
+      const a = document.createElement('a'); a.className = 'dyThumbWrap'; a.href = v.url; a.target = '_blank'; a.rel = 'noopener'; a.title = (v.desc || v.author || '');
+      if (v.cover) {
+        const img = document.createElement('img'); img.loading = 'lazy'; img.referrerPolicy = 'no-referrer'; img.src = v.cover; img.alt = v.author;
+        img.onerror = function () { const ph = document.createElement('div'); ph.className = 'dyPh2'; ph.textContent = '▶'; img.replaceWith(ph); };
+        a.appendChild(img);
+      } else {
+        const ph = document.createElement('div'); ph.className = 'dyPh2'; ph.textContent = '▶'; a.appendChild(ph);
+      }
+      const mk = document.createElement('button'); mk.className = 'dyThumbMk'; mk.textContent = '✓'; mk.title = '标记已读';
+      mk.addEventListener('click', function (e) { e.stopPropagation(); e.preventDefault(); markRead(v.id); });
+      a.appendChild(mk);
+      grid.appendChild(a);
+    });
+    body.appendChild(grid);
+    hd.addEventListener('click', function () { body.style.display = (body.style.display === 'none') ? '' : 'none'; });
+    wrap.appendChild(hd); wrap.appendChild(body);
+    return wrap;
+  }
+
   function render() {
     if (!listEl) return;
     updateRecUI();
     const unread = getUnread();
     panel.querySelector('#dyCount').textContent = '未读 ' + unread.length;
+    const accCount = new Set(unread.map(accKey)).size;
+    const sumEl = panel.querySelector('#dySummary');
+    if (sumEl) sumEl.textContent = unread.length ? (accCount + ' 个账号有未读 · 共 ' + unread.length + ' 条') : '没有未读视频';
     listEl.innerHTML = '';
     if (!unread.length) {
       const e = document.createElement('div');
@@ -360,36 +457,16 @@
       listEl.appendChild(e);
       return;
     }
-    unread.forEach(function (v) {
-      const card = document.createElement('div');
-      card.className = 'dyCard';
-      if (v.cover) {
-        const img = document.createElement('img');
-        img.className = 'dyThumb'; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
-        img.src = v.cover; img.alt = v.author;
-        img.onerror = function () {
-          const ph = document.createElement('div'); ph.className = 'dyPh'; ph.textContent = '▶';
-          img.replaceWith(ph);
-        };
-        card.appendChild(img);
-      } else {
-        const ph = document.createElement('div'); ph.className = 'dyPh'; ph.textContent = '▶';
-        card.appendChild(ph);
-      }
-      const meta = document.createElement('div'); meta.className = 'dyMeta';
-      const au = document.createElement('div'); au.className = 'dyAuthor'; au.textContent = v.author || '未知作者';
-      const de = document.createElement('div'); de.className = 'dyDesc'; de.textContent = v.desc || '(无文案)';
-      const tm = document.createElement('div'); tm.className = 'dyTime'; tm.textContent = timeAgo(v.createTime);
-      const links = document.createElement('div');
-      const open = document.createElement('a'); open.className = 'dyOpen'; open.href = v.url;
-      open.target = '_blank'; open.rel = 'noopener'; open.textContent = '打开';
-      const mk = document.createElement('button'); mk.className = 'dyMk'; mk.textContent = '标记已读';
-      mk.addEventListener('click', function () { markRead(v.id); });
-      links.appendChild(open); links.appendChild(mk);
-      meta.appendChild(au); meta.appendChild(de); meta.appendChild(tm); meta.appendChild(links);
-      card.appendChild(meta);
-      listEl.appendChild(card);
-    });
+    const g = buildGroups(unread);
+    for (const cat of g.names) {
+      const accounts = g.cats[cat];
+      let cAcc = 0, cUnread = 0;
+      accounts.forEach(function (a) { cAcc++; cUnread += a.items.length; });
+      const catHd = document.createElement('div'); catHd.className = 'dyCatHd';
+      catHd.textContent = cat + ' · ' + cAcc + ' 个账号 / ' + cUnread + ' 条未读';
+      listEl.appendChild(catHd);
+      accounts.forEach(function (acc) { listEl.appendChild(renderAccount(acc)); });
+    }
   }
 
   /* ---------------- 启动 ---------------- */

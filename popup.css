@@ -197,6 +197,126 @@ body {
   opacity: 0.6;
   text-align: right;
 }
+.summary {
+  padding: 8px 14px;
+  font-size: 12px;
+  color: #9aa0b5;
+  background: #1f2233;
+  border-bottom: 1px solid #262a3b;
+}
+.cat-hd {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fe2c55;
+  background: #161823;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid #262a3b;
+}
+.acc {
+  border-bottom: 1px solid #262a3b;
+}
+.acc-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+.avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #fe2c55;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  flex: 0 0 34px;
+  font-size: 15px;
+}
+.acc-name {
+  flex: 1;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.acc-count {
+  background: #fe2c55;
+  color: #fff;
+  border-radius: 10px;
+  padding: 1px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 20px;
+  text-align: center;
+}
+.acc-actions {
+  display: flex;
+  gap: 6px;
+}
+.mini-btn {
+  background: #2a2d40;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.mini-btn.cat {
+  background: transparent;
+  border: 1px solid #3a3d52;
+  color: #9aa0b5;
+}
+.acc-body {
+  padding: 0 14px 12px;
+}
+.thumbs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.thumb-wrap {
+  position: relative;
+  display: block;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #2a2d40;
+}
+.thumb-wrap img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  display: block;
+}
+.thumb-ph {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #fe2c55, #f0385e);
+  color: #fff;
+  font-size: 18px;
+}
+.thumb-mk {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 2px 5px;
+  cursor: pointer;
+}
 ::-webkit-scrollbar {
   width: 8px;
 }
