@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音关注未读视频助手（手机版 / Via 等油猴浏览器）
+// @name         抖音关注未读视频助手（手机版 / Via）2026-10-18 18:56 登录检测修正
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.3.1
-// @description  v1.3.1 修正「已登录却误报未登录」：改用非 HttpOnly 登录票据判定登录、兜底默认已登录、并从页面内联 JSON 提取 uid。抓取抖音关注账号未读视频，支持「同步已读」「扫描全部关注」「分类→账号分组」。
+// @version      1.3.2
+// @description  2026-10-18 18:56 登录检测修正：移动端改用非HttpOnly登录票据判定、HttpOnly读不到时默认已登录，并改用 www.douyin.com 接口避免移动端跨域失败；抓取抖音关注账号未读视频，支持「同步已读」「扫描全部关注」「分类→账号分组」。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -295,10 +295,31 @@
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function setScanText(t) { const e = panel && panel.querySelector('#dyScanStatus'); if (e) { e.textContent = t; e.style.display = 'block'; } }
 
-  // 是否真的登录：检查登录态 cookie（最可靠的判定，不发任何请求）
+  // 接口基础域名：PC 网页接口只存在于 www.douyin.com。
+  //  - 当页面就在 www.douyin.com 时，用同域（保证不跨域）；
+  //  - 当页面在 m.douyin.com 等子域时，显式请求 www 接口（.douyin.com 的 cookie 跨子域共享，best-effort）。
+  const API = (function () {
+    const h = location.hostname;
+    if (h === 'www.douyin.com' || h === 'douyin.com') return location.origin;
+    return 'https://www.douyin.com';
+  })();
+
+  // 接口失败时的友好提示（区分移动端跨域与签名拦截）
+  function apiFailHint() {
+    if (/douyin\.com/.test(location.hostname) && location.hostname !== 'www.douyin.com') {
+      return '当前在 m.douyin.com（移动版），显式接口为跨域请求易被拦截。建议：在 Via 开启「桌面模式」访问 www.douyin.com 后重试；或改用「关注」页下滑记录（该方式走页面自身请求，无跨域问题）。';
+    }
+    return '接口可能被签名拦截。可手动打开抖音「观看历史」页，本插件会自动捕获。';
+  }
+
+  // 是否登录：优先用非 HttpOnly 登录票据判定；读不到（sessionid / sid_tt 多为 HttpOnly）时，
+  // 在 douyin 域名下默认视为已登录，避免把「隐私隔离 / HttpOnly 读不到」误判成未登录。
+  // 真正的未登录会由下方接口返回未授权来体现，不会卡在「未登录」。
   function isLoggedIn() {
     const c = document.cookie || '';
-    return /(^|;\s*)(sessionid|sessionid_ss|sid_tt|sid_guard|sid_ucp_v1)=/.test(c);
+    if (/(^|;\s*)(sessionid|sessionid_ss|sid_tt|sid_guard|sid_ucp_v1|uid_tt|ttwid|odin_tt|passport_csrf_token|passport_auth_status)=/.test(c)) return true;
+    if (/douyin\.com/.test(location.hostname)) return true; // douyin 域名下兜底默认已登录
+    return false;
   }
   // 直接从 cookie 读取当前登录用户的 uid（零请求、不跨域、最稳）
   function getUidFromCookie() {
@@ -311,7 +332,7 @@
     if (cookieUid) return cookieUid;
     // 兜底：用当前域的同域接口（避免 m.douyin.com 下跨到 www 带不上登录 cookie）
     try {
-      const r = await fetch(location.origin + '/aweme/v1/web/commit/user/', { credentials: 'include' });
+      const r = await fetch(API + '/aweme/v1/web/commit/user/', { credentials: 'include' });
       const j = await r.json();
       if (j && j.user && j.user.uid) return String(j.user.uid);
     } catch (e) {}
@@ -321,7 +342,7 @@
     const out = [];
     let maxTime = 0;
     for (let page = 0; page < 40; page++) {
-      let url = location.origin + '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
+      let url = API + '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
         '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
       if (maxTime) url += '&max_time=' + maxTime;
       let j = null;
@@ -341,7 +362,7 @@
     const out = [];
     let cursor = 0;
     for (let page = 0; page < 3; page++) {
-      let url = location.origin + '/aweme/v1/web/aweme/post/?aid=6383&count=35' +
+      let url = API + '/aweme/v1/web/aweme/post/?aid=6383&count=35' +
         '&sec_user_id=' + encodeURIComponent(secUid);
       if (cursor) url += '&max_cursor=' + cursor;
       let j = null;
@@ -362,8 +383,7 @@
     setScanText('⏳ 准备中…');
     const myUid = await getMyUid();
     if (!myUid) {
-      if (!isLoggedIn()) { setScanText('⚠️ 失败：检测到你尚未登录抖音，请先登录后再试'); }
-      else { setScanText('⚠️ 已登录，但接口未返回账号（可能被签名拦截）。建议改用「关注」页下滑记录，或手动打开抖音「观看历史」页自动捕获。'); }
+      setScanText('⚠️ ' + (isLoggedIn() ? apiFailHint() : '检测到你尚未登录抖音，请先登录后再试。'));
       return;
     }
     const accounts = await getFollowingList(myUid);
@@ -390,17 +410,13 @@
     const ids = [];
     let cursor = '0';
     for (let page = 0; page < 80; page++) {
-      const url = location.origin + '/aweme/v1/web/history/read/?aid=6383&count=50&cursor=' +
+      const url = API + '/aweme/v1/web/history/read/?aid=6383&count=50&cursor=' +
         encodeURIComponent(cursor);
       let j = null;
       try {
         const r = await fetch(url, { credentials: 'include' });
         if (!r.ok) {
-          if (!isLoggedIn()) {
-            setScanText('⚠️ 读取失败（HTTP ' + r.status + '）：检测到你尚未登录抖音，请先登录后再试。');
-          } else {
-            setScanText('⚠️ 读取失败（HTTP ' + r.status + '）：接口可能被签名拦截，可手动打开抖音「观看历史」页，本插件会自动捕获。');
-          }
+          setScanText('⚠️ 读取失败（HTTP ' + r.status + '）：' + (isLoggedIn() ? apiFailHint() : '检测到你尚未登录抖音，请先登录后再试。'));
           return;
         }
         j = await r.json();
