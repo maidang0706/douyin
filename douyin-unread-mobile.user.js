@@ -295,9 +295,23 @@
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function setScanText(t) { const e = panel && panel.querySelector('#dyScanStatus'); if (e) { e.textContent = t; e.style.display = 'block'; } }
 
+  // 是否真的登录：检查登录态 cookie（最可靠的判定，不发任何请求）
+  function isLoggedIn() {
+    const c = document.cookie || '';
+    return /(^|;\s*)(sessionid|sessionid_ss|sid_tt|sid_guard|sid_ucp_v1)=/.test(c);
+  }
+  // 直接从 cookie 读取当前登录用户的 uid（零请求、不跨域、最稳）
+  function getUidFromCookie() {
+    const c = document.cookie || '';
+    const m = c.match(/(?:^|;\s*)uid_tt(?:_ss)?=(\d+)/);
+    return m ? m[1] : '';
+  }
   async function getMyUid() {
+    const cookieUid = getUidFromCookie();
+    if (cookieUid) return cookieUid;
+    // 兜底：用当前域的同域接口（避免 m.douyin.com 下跨到 www 带不上登录 cookie）
     try {
-      const r = await fetch('https://www.douyin.com/aweme/v1/web/commit/user/', { credentials: 'include' });
+      const r = await fetch(location.origin + '/aweme/v1/web/commit/user/', { credentials: 'include' });
       const j = await r.json();
       if (j && j.user && j.user.uid) return String(j.user.uid);
     } catch (e) {}
@@ -307,7 +321,7 @@
     const out = [];
     let maxTime = 0;
     for (let page = 0; page < 40; page++) {
-      let url = 'https://www.douyin.com/aweme/v1/web/user/following/list/?aid=6383&count=50' +
+      let url = location.origin + '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
         '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
       if (maxTime) url += '&max_time=' + maxTime;
       let j = null;
@@ -327,7 +341,7 @@
     const out = [];
     let cursor = 0;
     for (let page = 0; page < 3; page++) {
-      let url = 'https://www.douyin.com/aweme/v1/web/aweme/post/?aid=6383&count=35' +
+      let url = location.origin + '/aweme/v1/web/aweme/post/?aid=6383&count=35' +
         '&sec_user_id=' + encodeURIComponent(secUid);
       if (cursor) url += '&max_cursor=' + cursor;
       let j = null;
@@ -347,7 +361,11 @@
   async function runFullScanMobile() {
     setScanText('⏳ 准备中…');
     const myUid = await getMyUid();
-    if (!myUid) { setScanText('⚠️ 失败：无法获取账号（请确认已登录抖音）'); return; }
+    if (!myUid) {
+      if (!isLoggedIn()) { setScanText('⚠️ 失败：检测到你尚未登录抖音，请先登录后再试'); }
+      else { setScanText('⚠️ 已登录，但接口未返回账号（可能被签名拦截）。建议改用「关注」页下滑记录，或手动打开抖音「观看历史」页自动捕获。'); }
+      return;
+    }
     const accounts = await getFollowingList(myUid);
     if (!accounts.length) { setScanText('⚠️ 失败：未读取到关注账号（接口可能被签名拦截，建议改用「关注」页下滑）'); return; }
     setScanText('⏳ 找到 ' + accounts.length + ' 个关注账号，开始逐个拉取…');
@@ -372,13 +390,17 @@
     const ids = [];
     let cursor = '0';
     for (let page = 0; page < 80; page++) {
-      const url = 'https://www.douyin.com/aweme/v1/web/history/read/?aid=6383&count=50&cursor=' +
+      const url = location.origin + '/aweme/v1/web/history/read/?aid=6383&count=50&cursor=' +
         encodeURIComponent(cursor);
       let j = null;
       try {
         const r = await fetch(url, { credentials: 'include' });
         if (!r.ok) {
-          setScanText('⚠️ 读取失败（HTTP ' + r.status + '）：接口可能被签名拦截，可手动打开抖音「观看历史」页，本插件会自动捕获。');
+          if (!isLoggedIn()) {
+            setScanText('⚠️ 读取失败（HTTP ' + r.status + '）：检测到你尚未登录抖音，请先登录后再试。');
+          } else {
+            setScanText('⚠️ 读取失败（HTTP ' + r.status + '）：接口可能被签名拦截，可手动打开抖音「观看历史」页，本插件会自动捕获。');
+          }
           return;
         }
         j = await r.json();
