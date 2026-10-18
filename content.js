@@ -217,6 +217,101 @@
     } catch (e) {}
   }
 
+  /* ---------------- 全量扫描：枚举关注账号并逐个拉取视频 ---------------- */
+
+  function sleep(ms) {
+    return new Promise(function (r) { setTimeout(r, ms); });
+  }
+
+  function reportScan(status) {
+    if (!isExtension) return;
+    try { chrome.runtime.sendMessage({ type: 'SCAN_PROGRESS', status: status }); } catch (e) {}
+  }
+
+  // 获取当前登录用户的 uid（用于拉取关注列表）
+  async function getMyUid() {
+    try {
+      const r = await fetch('https://www.douyin.com/aweme/v1/web/commit/user/', { credentials: 'include' });
+      const j = await r.json();
+      if (j && j.user && j.user.uid) return String(j.user.uid);
+    } catch (e) {}
+    return '';
+  }
+
+  // 分页拉取“我关注的账号”列表
+  async function getFollowingList(myUid) {
+    const out = [];
+    let maxTime = 0;
+    for (let page = 0; page < 40; page++) {
+      let url = 'https://www.douyin.com/aweme/v1/web/user/following/list/?aid=6383&count=50' +
+        '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
+      if (maxTime) url += '&max_time=' + maxTime;
+      let j = null;
+      try {
+        const r = await fetch(url, { credentials: 'include' });
+        if (!r.ok) break;
+        j = await r.json();
+      } catch (e) { break; }
+      const list = (j && j.following_list) || [];
+      for (const a of list) {
+        if (a && a.sec_uid) out.push({ sec_uid: a.sec_uid, nickname: a.nickname || a.unique_id || '未知' });
+      }
+      if (!j || !j.has_more || !list.length) break;
+      maxTime = j.max_time || (maxTime - 1);
+    }
+    return out;
+  }
+
+  // 拉取单个账号的作品列表（最多 3 页，约 100 条）
+  async function getAccountPosts(secUid) {
+    const out = [];
+    let cursor = 0;
+    for (let page = 0; page < 3; page++) {
+      let url = 'https://www.douyin.com/aweme/v1/web/aweme/post/?aid=6383&count=35' +
+        '&sec_user_id=' + encodeURIComponent(secUid);
+      if (cursor) url += '&max_cursor=' + cursor;
+      let j = null;
+      try {
+        const r = await fetch(url, { credentials: 'include' });
+        if (!r.ok) break;
+        j = await r.json();
+      } catch (e) { break; }
+      const arr = (j && j.aweme_list) || [];
+      for (const a of arr) { const v = toVideo(a); if (v) out.push(v); }
+      if (!j || !j.has_more || !arr.length) break;
+      cursor = j.max_cursor || 0;
+      if (!cursor) break;
+    }
+    return out;
+  }
+
+  // 全量扫描主流程：枚举关注账号 → 逐个拉取视频 → 上报进度
+  async function runFullScan() {
+    reportScan({ active: true, phase: '准备中…', current: 0, total: 0, added: 0, failed: 0, done: false });
+    const myUid = await getMyUid();
+    if (!myUid) {
+      reportScan({ active: false, phase: '失败：无法获取你的账号（请确认已登录抖音网页版）', current: 0, total: 0, added: 0, failed: 0, done: true, error: true });
+      return;
+    }
+    const accounts = await getFollowingList(myUid);
+    if (!accounts.length) {
+      reportScan({ active: false, phase: '失败：未读取到关注账号（接口可能被签名拦截，建议改用「关注」页下滑）', current: 0, total: 0, added: 0, failed: 0, done: true, error: true });
+      return;
+    }
+    reportScan({ active: true, phase: '找到 ' + accounts.length + ' 个关注账号，开始逐个拉取…', current: 0, total: accounts.length, added: 0, failed: 0, done: false });
+    let added = 0, failed = 0;
+    for (let i = 0; i < accounts.length; i++) {
+      const acc = accounts[i];
+      try {
+        const vids = await getAccountPosts(acc.sec_uid);
+        if (vids && vids.length) { sendVideos(vids); added += vids.length; }
+      } catch (e) { failed++; }
+      reportScan({ active: true, phase: '拉取：' + acc.nickname, current: i + 1, total: accounts.length, added: added, failed: failed, done: false });
+      await sleep(200);
+    }
+    reportScan({ active: false, phase: '扫描完成：新增 ' + added + ' 条，跳过 ' + failed + ' 个账号', current: accounts.length, total: accounts.length, added: added, failed: failed, done: true });
+  }
+
   /* ---------------- 启动与调度 ---------------- */
 
   function start() {
@@ -243,6 +338,13 @@
         installFetchHook();
         installXHRHook();
         scanDOM();
+        try { sendResponse({ ok: true }); } catch (e) {}
+        return true;
+      }
+      if (msg && msg.type === 'FULL_SCAN') {
+        installFetchHook();
+        installXHRHook();
+        runFullScan();
         try { sendResponse({ ok: true }); } catch (e) {}
         return true;
       }

@@ -38,6 +38,8 @@ const chromeBackend = {
   setAccountCat: function (key, cat) { return sendMessage({ type: 'SET_ACCOUNT_CAT', key: key, cat: cat }); },
   clearRead: function () { return sendMessage({ type: 'CLEAR_READ' }); },
   scanNow: function () { return sendMessage({ type: 'SCAN_NOW' }); },
+  fullScan: function () { return sendMessage({ type: 'FULL_SCAN' }); },
+  getScanStatus: function () { return sendMessage({ type: 'GET_SCAN_STATUS' }); },
 };
 
 // 预览模式后端（localStorage + 示例数据）
@@ -109,6 +111,10 @@ const mockBackend = (function () {
       return mutate(function (store) { for (const k in store) if (store[k].read) delete store[k]; });
     },
     scanNow: function () { return Promise.resolve({ ok: true, mock: true }); },
+    fullScan: function () { return Promise.resolve({ ok: true, mock: true }); },
+    getScanStatus: function () {
+      return Promise.resolve({ active: false, done: true, phase: '（预览模式不执行真实扫描）', current: 0, total: 0, added: 0, failed: 0 });
+    },
   };
 })();
 
@@ -305,6 +311,43 @@ function showHint(text) {
   hintTimer = setTimeout(function () { h.textContent = ''; }, 2500);
 }
 
+/* ---------------- 全量扫描（枚举关注账号） ---------------- */
+
+let scanTimer = null;
+
+function startFullScan() {
+  const el = $('scanStatus');
+  if (el) { el.style.display = 'block'; el.className = 'scan-status'; el.textContent = '⏳ 正在启动全量扫描…'; }
+  backend.fullScan().then(function (r) {
+    if (r && r.ok) pollScan();
+    else { if (el) { el.textContent = '请先打开抖音网页版并登录'; } showHint('请先打开抖音网页'); }
+  });
+}
+
+function pollScan() {
+  if (scanTimer) clearInterval(scanTimer);
+  scanTimer = setInterval(function () {
+    backend.getScanStatus().then(function (s) {
+      if (!s) return;
+      const el = $('scanStatus');
+      if (!el) return;
+      el.style.display = 'block';
+      if (s.active || !s.done) {
+        el.className = 'scan-status';
+        el.textContent = '⏳ ' + (s.phase || '') + '（' + (s.current || 0) + '/' + (s.total || 0) +
+          '，新增 ' + (s.added || 0) + '，跳过 ' + (s.failed || 0) + '）';
+      }
+      if (s.done) {
+        clearInterval(scanTimer); scanTimer = null;
+        el.className = s.error ? 'scan-status err' : 'scan-status ok';
+        el.textContent = (s.error ? '⚠️ ' : '✅ ') + (s.phase || '扫描完成');
+        refresh();
+        if (!s.error) setTimeout(function () { el.style.display = 'none'; }, 5000);
+      }
+    });
+  }, 800);
+}
+
 /* ---------------- 事件绑定 ---------------- */
 
 function bind() {
@@ -315,6 +358,8 @@ function bind() {
       setTimeout(refresh, 600);
     });
   });
+
+  $('btnScanAll').addEventListener('click', startFullScan);
 
   $('btnOpen').addEventListener('click', function () {
     if (isExtension) {
@@ -335,3 +380,10 @@ function bind() {
 
 bind();
 refresh();
+if (isExtension) {
+  // 弹窗打开时拉一次扫描状态，避免上次扫描的残留进度干扰
+  backend.getScanStatus().then(function (s) {
+    const el = $('scanStatus');
+    if (el && s && s.done && !s.error) el.style.display = 'none';
+  });
+}

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         抖音关注未读视频助手（手机版 / Via 等油猴浏览器）
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.1.0
-// @description  在手机浏览器（Via 等支持用户脚本的浏览器）上，抓取抖音「关注」页里关注的账号发布的未读视频，按「分类 → 账号」分组展示，每个账号显示未读数量，可标记已读 / 改分类。
+// @version      1.2.0
+// @description  在手机浏览器（Via 等支持用户脚本的浏览器）上，抓取抖音关注的账号发布的未读视频，支持「扫描全部关注」枚举所有关注账号并逐个拉取视频，按「分类 → 账号」分组展示，每个账号显示未读数量，可标记已读 / 改分类。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -108,8 +108,8 @@
   }
 
   /* ---------------- 记录 / 未读 ---------------- */
-  function capture(videos) {
-    if (!shouldRecord()) return;
+  function capture(videos, force) {
+    if (!force && !shouldRecord()) return;
     const data = loadData();
     const now = Date.now();
     let added = 0;
@@ -245,6 +245,81 @@
     } catch (e) {}
   }
 
+  /* ---------------- 全量扫描：枚举关注账号并逐个拉取视频 ---------------- */
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function setScanText(t) { const e = panel && panel.querySelector('#dyScanStatus'); if (e) { e.textContent = t; e.style.display = 'block'; } }
+
+  async function getMyUid() {
+    try {
+      const r = await fetch('https://www.douyin.com/aweme/v1/web/commit/user/', { credentials: 'include' });
+      const j = await r.json();
+      if (j && j.user && j.user.uid) return String(j.user.uid);
+    } catch (e) {}
+    return '';
+  }
+  async function getFollowingList(myUid) {
+    const out = [];
+    let maxTime = 0;
+    for (let page = 0; page < 40; page++) {
+      let url = 'https://www.douyin.com/aweme/v1/web/user/following/list/?aid=6383&count=50' +
+        '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
+      if (maxTime) url += '&max_time=' + maxTime;
+      let j = null;
+      try {
+        const r = await fetch(url, { credentials: 'include' });
+        if (!r.ok) break;
+        j = await r.json();
+      } catch (e) { break; }
+      const list = (j && j.following_list) || [];
+      for (const a of list) { if (a && a.sec_uid) out.push({ sec_uid: a.sec_uid, nickname: a.nickname || a.unique_id || '未知' }); }
+      if (!j || !j.has_more || !list.length) break;
+      maxTime = j.max_time || (maxTime - 1);
+    }
+    return out;
+  }
+  async function getAccountPosts(secUid) {
+    const out = [];
+    let cursor = 0;
+    for (let page = 0; page < 3; page++) {
+      let url = 'https://www.douyin.com/aweme/v1/web/aweme/post/?aid=6383&count=35' +
+        '&sec_user_id=' + encodeURIComponent(secUid);
+      if (cursor) url += '&max_cursor=' + cursor;
+      let j = null;
+      try {
+        const r = await fetch(url, { credentials: 'include' });
+        if (!r.ok) break;
+        j = await r.json();
+      } catch (e) { break; }
+      const arr = (j && j.aweme_list) || [];
+      for (const a of arr) { const v = toVideo(a); if (v) out.push(v); }
+      if (!j || !j.has_more || !arr.length) break;
+      cursor = j.max_cursor || 0;
+      if (!cursor) break;
+    }
+    return out;
+  }
+  async function runFullScanMobile() {
+    setScanText('⏳ 准备中…');
+    const myUid = await getMyUid();
+    if (!myUid) { setScanText('⚠️ 失败：无法获取账号（请确认已登录抖音）'); return; }
+    const accounts = await getFollowingList(myUid);
+    if (!accounts.length) { setScanText('⚠️ 失败：未读取到关注账号（接口可能被签名拦截，建议改用「关注」页下滑）'); return; }
+    setScanText('⏳ 找到 ' + accounts.length + ' 个关注账号，开始逐个拉取…');
+    let added = 0, failed = 0;
+    for (let i = 0; i < accounts.length; i++) {
+      const acc = accounts[i];
+      try {
+        const vids = await getAccountPosts(acc.sec_uid);
+        if (vids && vids.length) { capture(vids, true); added += vids.length; }
+      } catch (e) { failed++; }
+      setScanText('⏳ 拉取：' + acc.nickname + '（' + (i + 1) + '/' + accounts.length + '，新增 ' + added + '，跳过 ' + failed + '）');
+      await sleep(200);
+    }
+    setScanText('✅ 扫描完成：新增 ' + added + ' 条，跳过 ' + failed + ' 个账号');
+    render();
+    setTimeout(function () { setScanText(''); }, 5000);
+  }
+
   /* ---------------- 移动端 UI ---------------- */
   let panelOpen = false;
   let fab, panel, listEl, statusEl, badgeEl;
@@ -291,6 +366,7 @@
   .dyBtn.primary{background:#fe2c55;font-weight:600;}
   .dyBtn.ghost{background:transparent;border:1px solid #3a3d52;}
   .dySummary{padding:8px 14px;font-size:12px;color:#9aa0b5;background:#1f2233;border-bottom:1px solid #262a3b;}
+  .dyScanStatus{padding:8px 14px;font-size:12px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.5;}
   .dyCatHd{padding:8px 14px;font-size:12px;font-weight:700;color:#fe2c55;background:#161823;position:sticky;top:0;z-index:1;border-bottom:1px solid #262a3b;}
   .dyAcc{border-bottom:1px solid #262a3b;}
   .dyAccHd{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;}
@@ -327,9 +403,11 @@
       '<div class="dyStatus"><span><span class="dot" id="dyDot"></span><span id="dyStatusText">未记录</span></span>' +
       '<span id="dyCount"></span></div>' +
       '<div class="dySummary" id="dySummary"></div>' +
+      '<div class="dyScanStatus" id="dyScanStatus" style="display:none"></div>' +
       '<div class="dyList" id="dyList"></div>' +
       '<div class="dyFt">' +
       '<button class="dyBtn primary" id="dyRec">开始记录</button>' +
+      '<button class="dyBtn" id="dyScanAll">扫描全部关注</button>' +
       '<button class="dyBtn ghost" id="dyReadAll">全部已读</button>' +
       '<button class="dyBtn ghost" id="dyClear">清除已读</button>' +
       '</div>';
@@ -339,6 +417,10 @@
 
     panel.querySelector('#dyClose').addEventListener('click', togglePanel);
     panel.querySelector('#dyRec').addEventListener('click', toggleRec);
+    panel.querySelector('#dyScanAll').addEventListener('click', function () {
+      const s = panel.querySelector('#dyScanStatus'); if (s) s.style.display = 'block';
+      runFullScanMobile();
+    });
     panel.querySelector('#dyReadAll').addEventListener('click', function () { markAllRead(); });
     panel.querySelector('#dyClear').addEventListener('click', function () { clearRead(); });
 

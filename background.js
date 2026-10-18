@@ -17,6 +17,11 @@ const DEFAULT_SETTINGS = {
   keepReadDays: 7, // 已读视频保留天数后自动清理
 };
 
+// 全量扫描进度状态（由内容脚本实时上报）
+let scanStatus = {
+  active: false, phase: '', current: 0, total: 0, added: 0, failed: 0, done: false, error: false,
+};
+
 /* ---------------- 存储封装 ---------------- */
 
 function getVideos() {
@@ -192,6 +197,17 @@ async function forwardScanNow() {
   }
 }
 
+async function forwardFullScan() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs.length) return { ok: false, error: 'no tab' };
+    await chrome.tabs.sendMessage(tabs[0].id, { type: 'FULL_SCAN' });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 /* ---------------- 消息路由 ---------------- */
 
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
@@ -208,6 +224,9 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       case 'GET_SETTINGS': return await getSettings();
       case 'SET_SETTINGS': return await saveSettings(msg.settings);
       case 'SCAN_NOW': return await forwardScanNow();
+      case 'FULL_SCAN': return await forwardFullScan();
+      case 'SCAN_PROGRESS': scanStatus = msg.status || scanStatus; return { ok: true };
+      case 'GET_SCAN_STATUS': return scanStatus;
       default: return { error: 'unknown message type' };
     }
   })();
