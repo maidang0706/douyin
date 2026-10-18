@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "抖音关注未读视频助手",
+  "version": "1.0.0",
+  "description": "自动抓取你抖音账号关注的账号发布的未读视频，并在插件弹窗中集中展示、标记已读。",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://www.douyin.com/*",
+    "https://*.douyin.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "抖音关注未读视频助手"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.douyin.com/*",
+        "https://*.douyin.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

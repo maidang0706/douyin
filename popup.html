@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>抖音关注未读视频助手</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="hd">
+    <div class="hd-left">
+      <span class="logo">抖音</span>
+      <span class="title">关注未读</span>
+    </div>
+    <div class="hd-right">
+      <span id="badge" class="badge">0</span>
+      <span class="sub">未读</span>
+    </div>
+  </header>
+
+  <section class="stats">
+    <div class="stat"><b id="stUnread">0</b><span>未读</span></div>
+    <div class="stat"><b id="stRead">0</b><span>已读</span></div>
+    <div class="stat"><b id="stTotal">0</b><span>总计</span></div>
+  </section>
+
+  <div class="actions">
+    <button id="btnScan" class="btn primary">立即扫描</button>
+    <button id="btnOpen" class="btn">打开关注页</button>
+  </div>
+
+  <main id="list" class="list">
+    <div class="empty" id="empty">暂无未读视频。<br />打开抖音「关注」页并下滑，新视频会自动出现在这里。</div>
+  </main>
+
+  <footer class="ft">
+    <button id="btnReadAll" class="btn ghost">全部标记已读</button>
+    <button id="btnClear" class="btn ghost">清除已读</button>
+    <span id="hint" class="hint"></span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
