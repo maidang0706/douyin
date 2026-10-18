@@ -12,6 +12,7 @@
 
 const VIDEOS_KEY = 'videos';
 const SETTINGS_KEY = 'settings';
+const WATCHED_KEY = 'watched'; // 来自抖音「观看历史」的已看视频 ID 集合（数组）
 const DEFAULT_SETTINGS = {
   autoScan: true, // 是否随页面自动抓取（预留，当前始终在抖音页抓取）
   keepReadDays: 7, // 已读视频保留天数后自动清理
@@ -20,6 +21,11 @@ const DEFAULT_SETTINGS = {
 // 全量扫描进度状态（由内容脚本实时上报）
 let scanStatus = {
   active: false, phase: '', current: 0, total: 0, added: 0, failed: 0, done: false, error: false,
+};
+
+// 读取观看历史（同步"已读"）进度状态
+let readSyncStatus = {
+  active: false, done: false, error: false, added: 0, phase: '',
 };
 
 /* ---------------- 存储封装 ---------------- */
@@ -46,6 +52,18 @@ function getSettings() {
 function saveSettings(s) {
   return new Promise(function (res) {
     chrome.storage.local.set({ [SETTINGS_KEY]: s }, res);
+  });
+}
+function getWatched() {
+  return new Promise(function (res) {
+    chrome.storage.local.get(WATCHED_KEY, function (r) {
+      res(new Set(r[WATCHED_KEY] || []));
+    });
+  });
+}
+function saveWatched(set) {
+  return new Promise(function (res) {
+    chrome.storage.local.set({ [WATCHED_KEY]: Array.from(set) }, res);
   });
 }
 
@@ -81,14 +99,17 @@ async function capture(videos) {
 async function getState() {
   const store = await getVideos();
   const settings = await getSettings();
+  const watched = await getWatched();
+  const isRead = function (v) { return v.read || watched.has(String(v.id)); };
   const all = Object.values(store);
   const unread = all
-    .filter(function (v) { return !v.read; })
+    .filter(function (v) { return !isRead(v); })
     .sort(function (a, b) { return (b.createTime || 0) - (a.createTime || 0); });
-  const readCount = all.filter(function (v) { return v.read; }).length;
+  const readCount = all.filter(function (v) { return isRead(v); }).length;
   return {
     unread: unread,
     stats: { total: all.length, unread: unread.length, read: readCount },
+    watchedCount: watched.size,
     settings: settings,
   };
 }
@@ -120,13 +141,25 @@ async function markAllRead() {
 
 async function clearRead() {
   const store = await getVideos();
+  const watched = await getWatched();
   const out = {};
   for (const k in store) {
-    if (!store[k].read) out[k] = store[k];
+    const v = store[k];
+    if (!(v.read || watched.has(String(v.id)))) out[k] = v;
   }
   await saveVideos(out);
   await updateBadge(out);
   return true;
+}
+
+// 用"观看历史"的已看视频 ID 集合，更新本地已看记录（合并，不覆盖手动已读）
+async function setWatched(ids) {
+  const set = await getWatched();
+  for (const id of (ids || [])) set.add(String(id));
+  await saveWatched(set);
+  const store = await getVideos();
+  await updateBadge(store);
+  return { total: set.size };
 }
 
 // 账号标识：优先用 authorId，缺失时退化为 "n:" + 昵称
@@ -179,7 +212,10 @@ async function cleanup() {
 }
 
 async function updateBadge(store) {
-  const count = Object.values(store).filter(function (v) { return !v.read; }).length;
+  const watched = await getWatched();
+  const count = Object.values(store).filter(function (v) {
+    return !(v.read || watched.has(String(v.id)));
+  }).length;
   try {
     await chrome.action.setBadgeBackgroundColor({ color: '#fe2c55' });
     await chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
@@ -208,6 +244,17 @@ async function forwardFullScan() {
   }
 }
 
+async function forwardSyncRead() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs.length) return { ok: false, error: 'no tab' };
+    await chrome.tabs.sendMessage(tabs[0].id, { type: 'SYNC_READ' });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 /* ---------------- 消息路由 ---------------- */
 
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
@@ -225,8 +272,12 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       case 'SET_SETTINGS': return await saveSettings(msg.settings);
       case 'SCAN_NOW': return await forwardScanNow();
       case 'FULL_SCAN': return await forwardFullScan();
+      case 'SYNC_READ': return await forwardSyncRead();
+      case 'SET_WATCHED': return await setWatched(msg.ids);
       case 'SCAN_PROGRESS': scanStatus = msg.status || scanStatus; return { ok: true };
       case 'GET_SCAN_STATUS': return scanStatus;
+      case 'READ_SYNC_PROGRESS': readSyncStatus = msg.status || readSyncStatus; return { ok: true };
+      case 'GET_READ_SYNC_STATUS': return readSyncStatus;
       default: return { error: 'unknown message type' };
     }
   })();

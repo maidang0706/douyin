@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         抖音关注未读视频助手（手机版 / Via 等油猴浏览器）
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.2.0
-// @description  在手机浏览器（Via 等支持用户脚本的浏览器）上，抓取抖音关注的账号发布的未读视频，支持「扫描全部关注」枚举所有关注账号并逐个拉取视频，按「分类 → 账号」分组展示，每个账号显示未读数量，可标记已读 / 改分类。
+// @version      1.3.0
+// @description  抓取抖音关注账号的未读视频，并可「同步已读」——读取抖音真实观看历史，自动把你看过的视频标记为已读，按「分类 → 账号」分组展示、每账号显示未读数量。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -28,6 +28,7 @@
   /* ---------------- 存储 ---------------- */
   const K_DATA = 'DYUNREAD_DATA_v1';
   const K_REC = 'DYUNREAD_REC_v1';
+  const K_WATCHED = 'DYUNREAD_WATCHED_v1'; // 来自抖音「观看历史」的已看视频 ID 集合
 
   function loadData() {
     try { return JSON.parse(localStorage.getItem(K_DATA)) || {}; }
@@ -35,6 +36,20 @@
   }
   function saveData(d) {
     try { localStorage.setItem(K_DATA, JSON.stringify(d)); } catch (e) {}
+  }
+  function loadWatched() {
+    try { return new Set(JSON.parse(localStorage.getItem(K_WATCHED)) || []); }
+    catch (e) { return new Set(); }
+  }
+  function saveWatched(set) {
+    try { localStorage.setItem(K_WATCHED, JSON.stringify(Array.from(set))); } catch (e) {}
+  }
+  function mergeWatched(ids) {
+    if (!ids || !ids.length) return;
+    const set = loadWatched();
+    let changed = false;
+    for (const id of ids) { if (!set.has(String(id))) { set.add(String(id)); changed = true; } }
+    if (changed) { saveWatched(set); updateBadge(); if (panelOpen) render(); }
   }
   function isManualRecording() { return localStorage.getItem(K_REC) === '1'; }
   function setManualRecording(v) { localStorage.setItem(K_REC, v ? '1' : '0'); }
@@ -98,6 +113,16 @@
     for (const v of videos) { if (v && v.id && !seen.has(v.id)) { seen.add(v.id); res.push(v); } }
     return res;
   }
+  // 递归收集响应里出现的所有 aweme_id（无论接口把视频套在 aweme_info / aweme_list 等任意层级）
+  function collectIds(node, out) {
+    if (!node || out.length > 6000) return;
+    if (Array.isArray(node)) { for (let i = 0; i < node.length; i++) collectIds(node[i], out); return; }
+    if (typeof node === 'object') {
+      const id = node.aweme_id || node.awemeId || node.item_id || node.aweme_id_str;
+      if (id && String(id) !== '0') { const s = String(id); if (out.indexOf(s) === -1) out.push(s); }
+      for (const k in node) { if (Object.prototype.hasOwnProperty.call(node, k)) collectIds(node[k], out); }
+    }
+  }
   function parseAndCapture(data) {
     try {
       const raw = [];
@@ -128,10 +153,16 @@
     if (added) { saveData(data); updateBadge(); if (panelOpen) render(); }
   }
 
+  // 一个视频"已读" = 手动标记过 或 出现在抖音观看历史里
+  function isRead(v) {
+    if (v.read) return true;
+    const set = loadWatched();
+    return set.has(String(v.id));
+  }
   function getUnread() {
     const data = loadData();
     return Object.values(data)
-      .filter(function (v) { return !v.read; })
+      .filter(function (v) { return !isRead(v); })
       .sort(function (a, b) { return (b.createTime || 0) - (a.createTime || 0); });
   }
   function markRead(id) {
@@ -146,7 +177,7 @@
   }
   function clearRead() {
     const data = loadData(); const out = {};
-    for (const k in data) { if (!data[k].read) out[k] = data[k]; }
+    for (const k in data) { if (!isRead(data[k])) out[k] = data[k]; }
     saveData(out); updateBadge(); render();
   }
 
@@ -175,16 +206,26 @@
       const p = orig(input, init);
       try {
         const url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
-        if (url && url.indexOf('douyin.com') !== -1 &&
-            /feed|aweme|following|follow|recommend|refresh/.test(url)) {
-          p.then(function (resp) {
-            try {
-              const ct = resp.headers && resp.headers.get ? resp.headers.get('content-type') : '';
-              if (ct && ct.indexOf('json') !== -1) {
-                resp.clone().json().then(parseAndCapture).catch(function () {});
-              }
-            } catch (e) {}
-          }).catch(function () {});
+        if (url && url.indexOf('douyin.com') !== -1) {
+          if (url.indexOf('history/read') !== -1) {
+            p.then(function (resp) {
+              try {
+                const ct = resp.headers && resp.headers.get ? resp.headers.get('content-type') : '';
+                if (ct && ct.indexOf('json') !== -1) {
+                  resp.clone().json().then(function (j) { const ids = []; collectIds(j, ids); mergeWatched(ids); }).catch(function () {});
+                }
+              } catch (e) {}
+            }).catch(function () {});
+          } else if (/feed|aweme|following|follow|recommend|refresh/.test(url)) {
+            p.then(function (resp) {
+              try {
+                const ct = resp.headers && resp.headers.get ? resp.headers.get('content-type') : '';
+                if (ct && ct.indexOf('json') !== -1) {
+                  resp.clone().json().then(parseAndCapture).catch(function () {});
+                }
+              } catch (e) {}
+            }).catch(function () {});
+          }
         }
       } catch (e) {}
       return p;
@@ -199,10 +240,15 @@
       this.addEventListener('load', function () {
         try {
           const url = this.__u || '';
-          if (url && url.indexOf('douyin.com') !== -1 &&
-              /feed|aweme|following|follow|recommend|refresh/.test(url)) {
+          if (url && url.indexOf('douyin.com') !== -1) {
             const ct = this.getResponseHeader ? this.getResponseHeader('content-type') : '';
-            if (ct && ct.indexOf('json') !== -1) parseAndCapture(JSON.parse(this.responseText));
+            if (ct && ct.indexOf('json') !== -1) {
+              if (url.indexOf('history/read') !== -1) {
+                const ids = []; collectIds(JSON.parse(this.responseText), ids); mergeWatched(ids);
+              } else if (/feed|aweme|following|follow|recommend|refresh/.test(url)) {
+                parseAndCapture(JSON.parse(this.responseText));
+              }
+            }
           }
         } catch (e) {}
       });
@@ -320,6 +366,42 @@
     setTimeout(function () { setScanText(''); }, 5000);
   }
 
+  /* ---------------- 读取观看历史：用于推算"已读" ---------------- */
+  async function getWatchHistory() {
+    setScanText('⏳ 正在读取观看历史…');
+    const ids = [];
+    let cursor = '0';
+    for (let page = 0; page < 80; page++) {
+      const url = 'https://www.douyin.com/aweme/v1/web/history/read/?aid=6383&count=50&cursor=' +
+        encodeURIComponent(cursor);
+      let j = null;
+      try {
+        const r = await fetch(url, { credentials: 'include' });
+        if (!r.ok) {
+          setScanText('⚠️ 读取失败（HTTP ' + r.status + '）：接口可能被签名拦截，可手动打开抖音「观看历史」页，本插件会自动捕获。');
+          return;
+        }
+        j = await r.json();
+      } catch (e) {
+        setScanText('⚠️ 读取出错：' + e.message);
+        return;
+      }
+      const pageIds = [];
+      collectIds(j, pageIds);
+      for (const id of pageIds) if (ids.indexOf(id) === -1) ids.push(id);
+      setScanText('⏳ 已读取观看历史 ' + ids.length + ' 条（第 ' + (page + 1) + ' 页）…');
+      const hasMore = !!(j && (j.has_more === 1 || j.has_more === true));
+      const next = j && (j.cursor !== undefined ? j.cursor : (j.data && j.data.cursor));
+      if (!hasMore || next === undefined || String(next) === String(cursor)) break;
+      cursor = String(next);
+      await sleep(120);
+    }
+    mergeWatched(ids);
+    setScanText('✅ 已同步观看历史：' + ids.length + ' 条已看视频（它们会从「未读」中消失）');
+    render();
+    setTimeout(function () { setScanText(''); }, 6000);
+  }
+
   /* ---------------- 移动端 UI ---------------- */
   let panelOpen = false;
   let fab, panel, listEl, statusEl, badgeEl;
@@ -408,6 +490,7 @@
       '<div class="dyFt">' +
       '<button class="dyBtn primary" id="dyRec">开始记录</button>' +
       '<button class="dyBtn" id="dyScanAll">扫描全部关注</button>' +
+      '<button class="dyBtn" id="dySync">同步已读</button>' +
       '<button class="dyBtn ghost" id="dyReadAll">全部已读</button>' +
       '<button class="dyBtn ghost" id="dyClear">清除已读</button>' +
       '</div>';
@@ -423,6 +506,10 @@
     });
     panel.querySelector('#dyReadAll').addEventListener('click', function () { markAllRead(); });
     panel.querySelector('#dyClear').addEventListener('click', function () { clearRead(); });
+    panel.querySelector('#dySync').addEventListener('click', function () {
+      const s = panel.querySelector('#dyScanStatus'); if (s) s.style.display = 'block';
+      getWatchHistory();
+    });
 
     updateBadge();
     updateRecUI();
@@ -529,8 +616,11 @@
     const unread = getUnread();
     panel.querySelector('#dyCount').textContent = '未读 ' + unread.length;
     const accCount = new Set(unread.map(accKey)).size;
+    const watched = loadWatched().size;
     const sumEl = panel.querySelector('#dySummary');
-    if (sumEl) sumEl.textContent = unread.length ? (accCount + ' 个账号有未读 · 共 ' + unread.length + ' 条') : '没有未读视频';
+    if (sumEl) sumEl.textContent = unread.length
+      ? (accCount + ' 个账号有未读 · 共 ' + unread.length + ' 条（已看历史 ' + watched + ' 条）')
+      : '没有未读视频（已看历史 ' + watched + ' 条）';
     listEl.innerHTML = '';
     if (!unread.length) {
       const e = document.createElement('div');

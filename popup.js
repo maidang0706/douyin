@@ -40,11 +40,14 @@ const chromeBackend = {
   scanNow: function () { return sendMessage({ type: 'SCAN_NOW' }); },
   fullScan: function () { return sendMessage({ type: 'FULL_SCAN' }); },
   getScanStatus: function () { return sendMessage({ type: 'GET_SCAN_STATUS' }); },
+  syncRead: function () { return sendMessage({ type: 'SYNC_READ' }); },
+  getReadSyncStatus: function () { return sendMessage({ type: 'GET_READ_SYNC_STATUS' }); },
 };
 
 // 预览模式后端（localStorage + 示例数据）
 const mockBackend = (function () {
   const KEY = 'dy_mock_state_v1';
+  let watchedSet = new Set(['m4']); // 模拟"观看历史"里已看过的视频
   function load() {
     try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; }
   }
@@ -56,7 +59,7 @@ const mockBackend = (function () {
       { id: 'm1b', author: '摄影日记', authorId: 'u_photo', cat: '摄影', desc: '城市夜景延时摄影教程', cover: '', url: 'https://www.douyin.com/video/m1b', createTime: now - 3600, seenAt: Date.now(), read: false },
       { id: 'm2', author: '代码星球', authorId: 'u_code', cat: '编程', desc: '30 行实现一个迷你状态管理，建议收藏', cover: '', url: 'https://www.douyin.com/video/m2', createTime: now - 7200, seenAt: Date.now(), read: false },
       { id: 'm3', author: '猫咪日常', authorId: 'u_cat', cat: '萌宠', desc: '它又胖了三斤，但我还是好爱它🐱', cover: '', url: 'https://www.douyin.com/video/m3', createTime: now - 18000, seenAt: Date.now(), read: false },
-      { id: 'm4', author: '旅行手帐', authorId: 'u_trip', cat: '摄影', desc: '周末去了趟海边，附详细攻略', cover: '', url: 'https://www.douyin.com/video/m4', createTime: now - 86400, seenAt: Date.now(), read: true },
+      { id: 'm4', author: '旅行手帐', authorId: 'u_trip', cat: '摄影', desc: '周末去了趟海边，附详细攻略', cover: '', url: 'https://www.douyin.com/video/m4', createTime: now - 86400, seenAt: Date.now(), read: false },
     ];
     const store = {};
     items.forEach(function (v) { store[v.id] = v; });
@@ -65,14 +68,16 @@ const mockBackend = (function () {
     return state;
   }
   function computeState(store, settings) {
+    const isRead = function (v) { return v.read || watchedSet.has(v.id); };
     const all = Object.values(store);
     const unread = all
-      .filter(function (v) { return !v.read; })
+      .filter(function (v) { return !isRead(v); })
       .sort(function (a, b) { return (b.createTime || 0) - (a.createTime || 0); });
-    const readCount = all.filter(function (v) { return v.read; }).length;
+    const readCount = all.filter(function (v) { return isRead(v); }).length;
     return {
       unread: unread,
       stats: { total: all.length, unread: unread.length, read: readCount },
+      watchedCount: watchedSet.size,
       settings: settings || { autoScan: true, keepReadDays: 7 },
       __store: store,
     };
@@ -108,12 +113,22 @@ const mockBackend = (function () {
       });
     },
     clearRead: function () {
-      return mutate(function (store) { for (const k in store) if (store[k].read) delete store[k]; });
+      return mutate(function (store) {
+        for (const k in store) if (store[k].read || watchedSet.has(k)) delete store[k];
+      });
     },
     scanNow: function () { return Promise.resolve({ ok: true, mock: true }); },
     fullScan: function () { return Promise.resolve({ ok: true, mock: true }); },
+    syncRead: function () {
+      // 预览：模拟"读取观看历史"后，m1 也变成已读
+      watchedSet.add('m1');
+      return Promise.resolve({ ok: true, mock: true });
+    },
     getScanStatus: function () {
       return Promise.resolve({ active: false, done: true, phase: '（预览模式不执行真实扫描）', current: 0, total: 0, added: 0, failed: 0 });
+    },
+    getReadSyncStatus: function () {
+      return Promise.resolve({ active: false, done: true, phase: '（预览模式）' , added: 0 });
     },
   };
 })();
@@ -265,9 +280,10 @@ function render(state) {
   $('stTotal').textContent = stats.total;
 
   const accCount = new Set(unread.map(accKey)).size;
+  const watched = (state && state.watchedCount) || 0;
   $('summary').textContent = unread.length
-    ? (accCount + ' 个账号有未读 · 共 ' + unread.length + ' 条')
-    : '没有未读视频';
+    ? (accCount + ' 个账号有未读 · 共 ' + unread.length + ' 条（已看历史 ' + watched + ' 条）')
+    : '没有未读视频（已看历史 ' + watched + ' 条）';
 
   const groupsEl = $('groups');
   groupsEl.innerHTML = '';
@@ -348,6 +364,42 @@ function pollScan() {
   }, 800);
 }
 
+/* ---------------- 读取观看历史（同步"已读"） ---------------- */
+
+let readSyncTimer = null;
+
+function startReadSync() {
+  const el = $('syncStatus');
+  if (el) { el.style.display = 'block'; el.className = 'scan-status'; el.textContent = '⏳ 正在读取观看历史…'; }
+  backend.syncRead().then(function (r) {
+    if (r && r.ok) pollReadSync();
+    else { if (el) { el.textContent = '请先打开抖音网页版并登录'; } showHint('请先打开抖音网页'); }
+  });
+}
+
+function pollReadSync() {
+  if (readSyncTimer) clearInterval(readSyncTimer);
+  readSyncTimer = setInterval(function () {
+    backend.getReadSyncStatus().then(function (s) {
+      if (!s) return;
+      const el = $('syncStatus');
+      if (!el) return;
+      el.style.display = 'block';
+      if (s.active || !s.done) {
+        el.className = 'scan-status';
+        el.textContent = '⏳ ' + (s.phase || '正在读取观看历史…');
+      }
+      if (s.done) {
+        clearInterval(readSyncTimer); readSyncTimer = null;
+        el.className = s.error ? 'scan-status err' : 'scan-status ok';
+        el.textContent = (s.error ? '⚠️ ' : '✅ ') + (s.phase || '已同步观看历史');
+        refresh();
+        if (!s.error) setTimeout(function () { el.style.display = 'none'; }, 6000);
+      }
+    });
+  }, 800);
+}
+
 /* ---------------- 事件绑定 ---------------- */
 
 function bind() {
@@ -360,6 +412,8 @@ function bind() {
   });
 
   $('btnScanAll').addEventListener('click', startFullScan);
+
+  $('btnSync').addEventListener('click', startReadSync);
 
   $('btnOpen').addEventListener('click', function () {
     if (isExtension) {
