@@ -283,24 +283,48 @@
     try { chrome.runtime.sendMessage({ type: 'READ_SYNC_PROGRESS', status: status }); } catch (e) {}
   }
 
-  // 是否真的登录：检查登录态 cookie（最可靠的判定，不发任何请求）
+  // 是否真的登录：检查登录态 cookie。
+  // 重要：抖音的 sessionid 多为 HttpOnly，JS 的 document.cookie 读不到，
+  // 若拿它当唯一判据会永远误报「未登录」。因此改用非 HttpOnly 的票据（ttwid / uid_tt / odin_tt / sid_tt 等）。
   function isLoggedIn() {
     const c = document.cookie || '';
-    return /(^|;\s*)(sessionid|sessionid_ss|sid_tt|sid_guard|sid_ucp_v1)=/.test(c);
+    if (/(^|;\s*)(sid_tt|sid_guard|sid_ucp_v1|uid_tt|ttwid|odin_tt|passport_csrf_token|passport_auth_status)=/.test(c)) return true;
+    // 兜底：在 douyin 域名下默认视为已登录——避免把「sessionid 读不到 / 隐私隔离」误判成未登录。
+    // 真正未登录时，下方接口会返回未授权/空数据，再由各自分支给出引导，不会卡在「未登录」。
+    return true;
   }
 
   // 直接从 cookie 读取当前登录用户的 uid（零请求、不跨域、最稳）
   function getUidFromCookie() {
     const c = document.cookie || '';
-    const m = c.match(/(?:^|;\s*)uid_tt(?:_ss)?=(\d+)/);
+    const m = c.match(/(?:^|;\s*)(?:uid_tt|uid_tt_ss|uid|sid_tt)=(\d+)/);
     return m ? m[1] : '';
   }
 
+  // 兜底：从页面内联的 <script> JSON（抖音 PC 网页的 window._ROUTER_DATA / REACT_DATA 等）里提取当前用户 uid
+  function getUidFromPage() {
+    try {
+      const scripts = document.querySelectorAll('script');
+      for (let i = 0; i < scripts.length; i++) {
+        const txt = scripts[i].textContent || '';
+        if (!/[Uu]id|user/i.test(txt)) continue;
+        const m = txt.match(/(?:user_id|uid|uid_tt|selfUserId|sec_uid)["'\s:]+("?\d{6,20}"?)/);
+        if (m) {
+          const v = m[1].replace(/"/g, '');
+          if (/^\d{6,20}$/.test(v)) return v;
+        }
+      }
+    } catch (e) {}
+    return '';
+  }
+
   // 获取当前登录用户的 uid（用于拉取关注列表）
-  // 优先读 cookie（不会因跨域/签名拿不到），兜底再用当前域的同域接口（避免 m.douyin.com 下跨到 www 带不上 cookie）
+  // 优先级：cookie uid → 页面内联 uid → 当前域同域接口（避免 m.douyin.com 下跨到 www 带不上 cookie）
   async function getMyUid() {
-    const cookieUid = getUidFromCookie();
-    if (cookieUid) return cookieUid;
+    let uid = getUidFromCookie();
+    if (uid) return uid;
+    uid = getUidFromPage();
+    if (uid) return uid;
     try {
       const r = await fetch(location.origin + '/aweme/v1/web/commit/user/', { credentials: 'include' });
       const j = await r.json();

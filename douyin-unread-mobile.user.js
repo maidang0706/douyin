@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         抖音关注未读视频助手（手机版 / Via 等油猴浏览器）
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.3.0
-// @description  抓取抖音关注账号的未读视频，并可「同步已读」——读取抖音真实观看历史，自动把你看过的视频标记为已读，按「分类 → 账号」分组展示、每账号显示未读数量。
+// @version      1.3.1
+// @description  v1.3.1 修正「已登录却误报未登录」：改用非 HttpOnly 登录票据判定登录、兜底默认已登录、并从页面内联 JSON 提取 uid。抓取抖音关注账号未读视频，支持「同步已读」「扫描全部关注」「分类→账号分组」。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
