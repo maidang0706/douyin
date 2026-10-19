@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音关注未读视频助手（手机版 / Via）2026-10-19 22:24 签名拦截修复(X-Bogus)
+// @name         抖音关注未读视频助手（手机版 / Via）2026-10-19 22:38 加载崩溃修复(界面消失)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.3.3
-// @description  2026-10-19 22:24 签名拦截修复：内置 X-Bogus 签名，根治「接口可能被签名拦截」；打开已登录的抖音网页版(www.douyin.com)即可直接抓取关注账号未读视频，支持「同步已读」「扫描全部关注」「分类→账号分组」。
+// @version      1.3.4
+// @description  2026-10-19 22:38 加载崩溃修复：上一版因 X-Bogus 模块在严格模式下初始化崩溃导致「插件界面消失」，已移除 use-strict 恢复；并保留 X-Bogus 签名（根治「接口可能被签名拦截」）。打开已登录抖音网页版(www.douyin.com)即可直接抓取关注账号未读视频。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -23,7 +23,9 @@
  *  - 界面为移动端优化的悬浮按钮 + 底部面板上滑。
  */
 (function () {
-  'use strict';
+  /* 注意：此处故意不使用 'use strict'。内置的 X-Bogus 模块依赖非严格模式下的全局赋值
+     （如 jsvmp = function(){} 创建全局），与 Node 非严格环境一致；若加 'use strict'，
+     模块初始化会抛 "jsvmp is not defined"，导致整个脚本崩溃、界面不显示。 */
   /* ---------------- X-Bogus 签名（修复「接口被签名拦截」） ----------------
    * 抖音网页版 /aweme/v1/web/ 系列接口必须带 X-Bogus 签名，否则服务器直接拒绝
    * （脚本此前报「接口可能被签名拦截」就是这个原因：直连 fetch 没带签名）。
