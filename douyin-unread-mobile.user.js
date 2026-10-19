@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音关注未读视频助手（手机版 / Via）2026-10-19 22:38 加载崩溃修复(界面消失)
+// @name         抖音关注未读视频助手（手机版 / Via）2026-10-19 22:55 自动扫描关注(免下滑)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.3.4
-// @description  2026-10-19 22:38 加载崩溃修复：上一版因 X-Bogus 模块在严格模式下初始化崩溃导致「插件界面消失」，已移除 use-strict 恢复；并保留 X-Bogus 签名（根治「接口可能被签名拦截」）。打开已登录抖音网页版(www.douyin.com)即可直接抓取关注账号未读视频。
+// @version      1.3.5
+// @description  2026-10-19 22:55 自动扫描关注：进入已登录的抖音网页版(www.douyin.com)即自动抓取全部关注账号并统计每个账号的未读视频数，无需在关注页下滑；内置 X-Bogus 签名根治「接口可能被签名拦截」，并自动同步观看历史计算已读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -16,10 +16,10 @@
  *  - 本脚本运行在抖音网页的「主世界」，因此可以直接劫持页面自身的 window.fetch / XMLHttpRequest，
  *    从接口返回的 JSON 中提取视频（作者、文案、封面、链接、发布时间）。
  *  - 用 localStorage（带 DYUNREAD_ 前缀）记录已见过的视频 ID 与已读状态。
- *  - 「未读」= 被记录过、且未标记已读的视频。
- *  - 手机端难以稳定自动识别「关注」页，因此提供两种记录开关：
- *      1) 自动：当网址包含 follow / following 时自动记录；
- *      2) 手动：在面板里点「开始记录」，手动开启后即使不在关注页也会记录（方便在关注页点开后用）。
+ *  - 「未读」= 被扫描到（关注账号近期发布的视频）且未标记已读的视频。
+ *  - 浏览器运行时：进入已登录的抖音网页版(www.douyin.com)后，脚本自动扫描全部关注账号、
+ *    统计每个账号的未读视频数，并自动同步抖音「观看历史」推算已读，全程无需在关注页下滑。
+ *  - 仍保留「开始记录」（被动捕获当前页视频）与「扫描全部关注」「同步已读」按钮作为手动补充。
  *  - 界面为移动端优化的悬浮按钮 + 底部面板上滑。
  */
 (function () {
@@ -1001,12 +1001,42 @@ return sign;
     setTimeout(function () { setScanText(''); }, 5000);
   }
 
+  /* ---------------- 自动流程：登录后进入桌面版网页即自动抓取 ---------------- */
+  // 已登录 + 桌面版网页(www.douyin.com) 下自动：扫描全部关注 → 轻量同步观看历史算已读
+  async function autoScanThenSync() {
+    try {
+      setScanText('⏳ 已登录，自动扫描关注账号中…');
+      await runFullScanMobile();
+      setScanText('⏳ 自动同步观看历史（计算已读）…');
+      await getWatchHistory(8); // 轻量：最多 8 页（约 400 条），足以覆盖近期已看
+      render();
+    } catch (e) {
+      setScanText('⚠️ 自动扫描出错：' + (e && e.message ? e.message : e));
+    }
+  }
+  // 进入已登录的桌面版网页后自动触发一次扫描（带冷却，避免频繁请求被限流）
+  function maybeAutoRun() {
+    if (!isLoggedIn()) return;
+    const h = location.hostname;
+    if (h !== 'www.douyin.com' && h !== 'douyin.com') {
+      setScanText('⚠️ 自动扫描需在 www.douyin.com（桌面版）下进行。请在 Via 开启「桌面模式」访问 www.douyin.com 后刷新页面。');
+      return;
+    }
+    const now = Date.now();
+    const COOLDOWN = 30 * 60 * 1000; // 30 分钟
+    const last = Number(localStorage.getItem('DYUNREAD_AUTOSCAN_TS') || 0);
+    if (now - last < COOLDOWN) return;
+    localStorage.setItem('DYUNREAD_AUTOSCAN_TS', String(now));
+    autoScanThenSync();
+  }
+
   /* ---------------- 读取观看历史：用于推算"已读" ---------------- */
-  async function getWatchHistory() {
+  async function getWatchHistory(maxPages) {
+    if (!maxPages) maxPages = 80;
     setScanText('⏳ 正在读取观看历史…');
     const ids = [];
     let cursor = '0';
-    for (let page = 0; page < 80; page++) {
+    for (let page = 0; page < maxPages; page++) {
       const url = API + '/aweme/v1/web/history/read/?aid=6383&count=50&cursor=' +
         encodeURIComponent(cursor);
       let j = null;
@@ -1260,7 +1290,7 @@ return sign;
     if (!unread.length) {
       const e = document.createElement('div');
       e.className = 'dyEmpty';
-      e.innerHTML = '暂无未读视频。<br/>打开抖音「关注」页，确保状态为「记录中」，下滑加载视频即可。';
+      e.innerHTML = '暂无未读视频。<br/>已自动扫描你关注的账号并对比观看历史——若刚扫描完仍为空，说明近期都看过了。可手动点「同步已读」刷新已看状态。';
       listEl.appendChild(e);
       return;
     }
@@ -1283,10 +1313,12 @@ return sign;
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function () {
         buildUI();
+        maybeAutoRun();
         if (isFollowUrl()) scanDOM();
       });
     } else {
       buildUI();
+      maybeAutoRun();
       if (isFollowUrl()) scanDOM();
     }
     // 周期性 DOM 兜底扫描 + 同步记录状态
