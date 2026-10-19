@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音关注未读视频助手（手机版 / Via）2026-10-19 22:55 自动扫描关注(免下滑)
+// @name         抖音关注未读视频助手（手机版 / Via）2026-10-19 23:12 登录检测+扫描两步(跨域修复)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.3.5
-// @description  2026-10-19 22:55 自动扫描关注：进入已登录的抖音网页版(www.douyin.com)即自动抓取全部关注账号并统计每个账号的未读视频数，无需在关注页下滑；内置 X-Bogus 签名根治「接口可能被签名拦截」，并自动同步观看历史计算已读。
+// @version      1.3.6
+// @description  2026-10-19 23:12 流程重做：新增「登录检测」按钮（点击后明确提示登录成功/失败及原因），「扫描全部关注」改为「登录→扫描」两步式；自动从 m.douyin.com 跳转到 www.douyin.com 规避跨域(CORS)被拦，并按 status_code 精准报错。打开已登录的抖音网页版即可直接抓取关注账号未读视频，显示每个账号未读个数。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -626,6 +626,7 @@ return sign;
   const K_DATA = 'DYUNREAD_DATA_v1';
   const K_REC = 'DYUNREAD_REC_v1';
   const K_WATCHED = 'DYUNREAD_WATCHED_v1'; // 来自抖音「观看历史」的已看视频 ID 集合
+  let lastApiError = ''; // 最近一次接口失败原因，用于给出精准报错（而不是笼统的「接口未返回数据」）
 
   function loadData() {
     try { return JSON.parse(localStorage.getItem(K_DATA)) || {}; }
@@ -892,21 +893,32 @@ return sign;
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function setScanText(t) { const e = panel && panel.querySelector('#dyScanStatus'); if (e) { e.textContent = t; e.style.display = 'block'; } }
 
-  // 接口基础域名：PC 网页接口只存在于 www.douyin.com。
-  //  - 当页面就在 www.douyin.com 时，用同域（保证不跨域）；
-  //  - 当页面在 m.douyin.com 等子域时，显式请求 www 接口（.douyin.com 的 cookie 跨子域共享，best-effort）。
-  const API = (function () {
-    const h = location.hostname;
-    if (h === 'www.douyin.com' || h === 'douyin.com') return location.origin;
-    return 'https://www.douyin.com';
-  })();
+  // 接口基础域名：必须与当前页面【同域】，否则浏览器会因跨域(CORS)直接拦截请求，
+  // 表现为「接口未返回数据」。因此统一用 location.origin（当前页域名）。
+  // 脚本启动时会确保运行在 www.douyin.com（见 ensureWww），这样接口请求永远同域。
+  const API = location.origin;
 
-  // 接口失败时的友好提示（区分移动端跨域与签名拦截）
-  function apiFailHint() {
-    if (/douyin\.com/.test(location.hostname) && location.hostname !== 'www.douyin.com') {
-      return '当前在 m.douyin.com（移动版），接口为跨域请求易被拦截。请在 Via 开启「桌面模式」后访问 www.douyin.com 再点按钮；或直接在 www.douyin.com 的「关注」页下滑，本插件会自动捕获视频（走页面自身请求，无需跨域）。';
+  // 接口失败时的友好提示（按真实原因精准描述，而不是笼统的「接口未返回数据」）
+  function apiFailHint(extra) {
+    const cross = (function () { try { return new URL(API).host !== location.host; } catch (e) { return false; } })();
+    let base;
+    if (cross) {
+      base = '当前页面(' + location.host + ')与接口域名(' + (function () { try { return new URL(API).host; } catch (e) { return '?'; } })() + ')跨域，浏览器会拦截请求。请确保在 www.douyin.com（桌面版网页）下使用本插件。';
+    } else if (/douyin\.com/.test(location.hostname) && location.hostname !== 'www.douyin.com') {
+      base = '当前在 ' + location.hostname + '（移动版），网页接口只存在于 www.douyin.com。请开启「桌面模式」访问 www.douyin.com 后刷新。';
+    } else {
+      base = '接口未返回数据。';
     }
-    return '接口未返回数据。请确认：① 已登录抖音(www.douyin.com)；② 用的是桌面版网页(非 m.douyin.com)。签名已自动附加，仍失败多为登录态/网络问题。';
+    return base + (extra ? ('（' + extra + '）') : '');
+  }
+  // 确保运行在 www.douyin.com：网页接口只在 www 提供，且只有同域请求才不会被 CORS 拦截。
+  // 若在 m.douyin.com 等子域，自动跳转一次到 www（登录 cookie 跨子域共享，不会掉登录）。
+  function ensureWww() {
+    const h = location.hostname;
+    if (h === 'www.douyin.com' || h === 'douyin.com') return;
+    if (localStorage.getItem('DYUNREAD_REDIRECTED') === '1') return; // 已尝试过，避免循环
+    localStorage.setItem('DYUNREAD_REDIRECTED', '1');
+    try { location.replace('https://www.douyin.com/'); } catch (e) {}
   }
 
   // 是否登录：优先用非 HttpOnly 登录票据判定；读不到（sessionid / sid_tt 多为 HttpOnly）时，
@@ -927,12 +939,16 @@ return sign;
   async function getMyUid() {
     const cookieUid = getUidFromCookie();
     if (cookieUid) return cookieUid;
-    // 兜底：用当前域的同域接口（避免 m.douyin.com 下跨到 www 带不上登录 cookie）
+    // 兜底：用当前域同域接口取 uid。重点——按 status_code 判断，而不是只看 r.ok。
     try {
       const r = await fetch(signUrl(API + '/aweme/v1/web/commit/user/'), { credentials: 'include' });
-      const j = await r.json();
+      const j = await r.json().catch(function () { return {}; });
       if (j && j.user && j.user.uid) return String(j.user.uid);
-    } catch (e) {}
+      lastApiError = 'commit/user 返回 status_code=' + (j && j.status_code) + ' msg=' + ((j && j.status_msg) || '');
+    } catch (e) {
+      const cross = (function () { try { return new URL(API).host !== location.host; } catch (x) { return false; } })();
+      lastApiError = 'commit/user 请求异常：' + (e && e.message ? e.message : e) + (cross ? '（疑似跨域被浏览器拦截）' : '');
+    }
     return '';
   }
   async function getFollowingList(myUid) {
@@ -945,12 +961,17 @@ return sign;
       let j = null;
       try {
         const r = await fetch(signUrl(url), { credentials: 'include' });
-        if (!r.ok) break;
-        j = await r.json();
-      } catch (e) { break; }
-      const list = (j && j.following_list) || [];
+        j = await r.json().catch(function () { return null; });
+      } catch (e) {
+        lastApiError = 'following/list 请求异常：' + (e && e.message ? e.message : e);
+        break;
+      }
+      if (!j) { lastApiError = 'following/list 返回空/非 JSON'; break; }
+      if (j.status_code && j.status_code !== 0) { lastApiError = 'following/list status_code=' + j.status_code + ' ' + (j.status_msg || ''); break; }
+      const list = (j && (j.following_list || j.followings)) || [];
       for (const a of list) { if (a && a.sec_uid) out.push({ sec_uid: a.sec_uid, nickname: a.nickname || a.unique_id || '未知' }); }
-      if (!j || !j.has_more || !list.length) break;
+      if (!list.length) break;
+      if (!(j.has_more || j.has_more === 1)) break;
       maxTime = j.max_time || (maxTime - 1);
     }
     return out;
@@ -965,63 +986,93 @@ return sign;
       let j = null;
       try {
         const r = await fetch(signUrl(url), { credentials: 'include' });
-        if (!r.ok) break;
-        j = await r.json();
+        j = await r.json().catch(function () { return null; });
       } catch (e) { break; }
-      const arr = (j && j.aweme_list) || [];
+      if (!j) break;
+      if (j.status_code && j.status_code !== 0) { lastApiError = 'post(' + (secUid || '').slice(0, 8) + '…) status_code=' + j.status_code + ' ' + (j.status_msg || ''); break; }
+      const arr = (j && (j.aweme_list || (j.aweme_info && j.aweme_info.aweme_list))) || [];
       for (const a of arr) { const v = toVideo(a); if (v) out.push(v); }
-      if (!j || !j.has_more || !arr.length) break;
+      if (!arr.length) break;
       cursor = j.max_cursor || 0;
       if (!cursor) break;
     }
     return out;
   }
+  // —— 显式「登录检测」按钮：调用 commit/user，按 status_code 明确提示成功/失败及原因 ——
+  async function checkLogin() {
+    setScanText('⏳ 正在检测登录状态…');
+    lastApiError = '';
+    const myUid = await getMyUid();
+    if (myUid) {
+      localStorage.setItem('DYUNREAD_LOGINED', '1');
+      let name = '';
+      try {
+        const r = await fetch(signUrl(API + '/aweme/v1/web/commit/user/'), { credentials: 'include' });
+        const j = await r.json().catch(function () { return {}; });
+        name = (j && j.user && (j.user.nickname || j.user.unique_id)) || '';
+      } catch (e) {}
+      setScanText('✅ 登录成功' + (name ? ('，当前账号：' + name) : ('（uid ' + myUid + '）')) + '。现在可以点「扫描全部关注」了。');
+      updateLoginUI();
+    } else {
+      setScanText('❌ 登录检测失败。' + (lastApiError ? ('原因：' + lastApiError + '。') : '') +
+        '请确认：① 抖音网页版(www.douyin.com)右上角显示你的头像；② 用的是桌面版网页（非 m.douyin.com）。仍失败可刷新页面重试。');
+      updateLoginUI();
+    }
+  }
+
   async function runFullScanMobile() {
-    setScanText('⏳ 准备中…');
+    setScanText('⏳ 正在校验登录…');
     const myUid = await getMyUid();
     if (!myUid) {
-      setScanText('⚠️ ' + (isLoggedIn() ? apiFailHint() : '检测到你尚未登录抖音，请先登录后再试。'));
+      const msg = isLoggedIn()
+        ? ('⚠️ 接口未返回你的账号信息。' + (lastApiError ? ('原因：' + lastApiError + '。') : '') +
+           '请先点「登录检测」确认已登录；若你在 m.douyin.com，请开启「桌面模式」访问 www.douyin.com 后刷新再试。')
+        : ('⚠️ 检测到你尚未登录抖音，请先在 www.douyin.com 登录后再点扫描。');
+      setScanText(msg);
       return;
     }
+    localStorage.setItem('DYUNREAD_LOGINED', '1');
+    updateLoginUI();
     const accounts = await getFollowingList(myUid);
-    if (!accounts.length) { setScanText('⚠️ 失败：未读取到关注账号（接口可能被签名拦截，建议改用「关注」页下滑）'); return; }
+    if (!accounts.length) {
+      setScanText('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'));
+      return;
+    }
     setScanText('⏳ 找到 ' + accounts.length + ' 个关注账号，开始逐个拉取…');
-    let added = 0, failed = 0;
+    let added = 0, failed = 0, scanned = 0;
     for (let i = 0; i < accounts.length; i++) {
       const acc = accounts[i];
       try {
         const vids = await getAccountPosts(acc.sec_uid);
         if (vids && vids.length) { capture(vids, true); added += vids.length; }
+        scanned++;
       } catch (e) { failed++; }
-      setScanText('⏳ 拉取：' + acc.nickname + '（' + (i + 1) + '/' + accounts.length + '，新增 ' + added + '，跳过 ' + failed + '）');
+      setScanText('⏳ 拉取：' + acc.nickname + '（' + (i + 1) + '/' + accounts.length + '，已抓 ' + added + ' 条，跳过 ' + failed + '）');
       await sleep(200);
     }
-    setScanText('✅ 扫描完成：新增 ' + added + ' 条，跳过 ' + failed + ' 个账号');
+    // 自动同步观看历史，把已看的视频从「未读」中剔除
+    setScanText('⏳ 同步观看历史（计算已读）…');
+    try { await getWatchHistory(8); } catch (e) {}
+    const unread = getUnread();
+    setScanText('✅ 扫描完成：扫描 ' + scanned + ' 个账号，抓到 ' + added + ' 条视频，当前未读 ' + unread.length + ' 条。点开下方可看每个账号的未读数。');
     render();
-    setTimeout(function () { setScanText(''); }, 5000);
+    setTimeout(function () { setScanText(''); }, 8000);
   }
 
-  /* ---------------- 自动流程：登录后进入桌面版网页即自动抓取 ---------------- */
-  // 已登录 + 桌面版网页(www.douyin.com) 下自动：扫描全部关注 → 轻量同步观看历史算已读
+  /* ---------------- 自动流程：仅在点过「登录检测」且同域 www 下，才自动抓取 ---------------- */
+  // runFullScanMobile 内部已包含「扫描关注账号 + 同步观看历史算已读」，这里直接复用。
   async function autoScanThenSync() {
     try {
-      setScanText('⏳ 已登录，自动扫描关注账号中…');
       await runFullScanMobile();
-      setScanText('⏳ 自动同步观看历史（计算已读）…');
-      await getWatchHistory(8); // 轻量：最多 8 页（约 400 条），足以覆盖近期已看
-      render();
     } catch (e) {
-      setScanText('⚠️ 自动扫描出错：' + (e && e.message ? e.message : e));
+      // 后台自动扫描失败不打扰用户，可手动点「扫描全部关注」
     }
   }
-  // 进入已登录的桌面版网页后自动触发一次扫描（带冷却，避免频繁请求被限流）
+  // 仅在用户显式登录过(DYUNREAD_LOGINED) 且处于 www.douyin.com 时，才自动触发一次（带 30 分钟冷却）
   function maybeAutoRun() {
-    if (!isLoggedIn()) return;
+    if (localStorage.getItem('DYUNREAD_LOGINED') !== '1') return;
     const h = location.hostname;
-    if (h !== 'www.douyin.com' && h !== 'douyin.com') {
-      setScanText('⚠️ 自动扫描需在 www.douyin.com（桌面版）下进行。请在 Via 开启「桌面模式」访问 www.douyin.com 后刷新页面。');
-      return;
-    }
+    if (h !== 'www.douyin.com' && h !== 'douyin.com') return;
     const now = Date.now();
     const COOLDOWN = 30 * 60 * 1000; // 30 分钟
     const last = Number(localStorage.getItem('DYUNREAD_AUTOSCAN_TS') || 0);
@@ -1037,20 +1088,23 @@ return sign;
     const ids = [];
     let cursor = '0';
     for (let page = 0; page < maxPages; page++) {
-      const url = API + '/aweme/v1/web/history/read/?aid=6383&count=50&cursor=' +
-        encodeURIComponent(cursor);
+      const url = API + '/aweme/v1/web/history/read/?aid=6383&count=50&cursor=' + encodeURIComponent(cursor);
       let j = null;
       try {
         const r = await fetch(signUrl(url), { credentials: 'include' });
         if (!r.ok) {
-          setScanText('⚠️ 读取失败（HTTP ' + r.status + '）：' + (isLoggedIn() ? apiFailHint() : '检测到你尚未登录抖音，请先登录后再试。'));
+          const cross = (function () { try { return new URL(API).host !== location.host; } catch (e) { return false; } })();
+          setScanText('⚠️ 读取失败（HTTP ' + r.status + '）。' + (cross ? '疑似跨域被浏览器拦截，请确保在 www.douyin.com 下使用。' : (isLoggedIn() ? '请确认已登录抖音网页版。' : '请先登录抖音。')));
           return;
         }
-        j = await r.json();
+        j = await r.json().catch(function () { return null; });
       } catch (e) {
-        setScanText('⚠️ 读取出错：' + e.message);
+        const cross = (function () { try { return new URL(API).host !== location.host; } catch (x) { return false; } })();
+        setScanText('⚠️ 读取出错：' + (e && e.message ? e.message : e) + (cross ? '（疑似跨域）' : ''));
         return;
       }
+      if (!j) { setScanText('⚠️ 观看历史接口返回空/非 JSON。'); return; }
+      if (j.status_code && j.status_code !== 0) { setScanText('⚠️ 观看历史接口 status_code=' + j.status_code + ' ' + (j.status_msg || '') + '。'); return; }
       const pageIds = [];
       collectIds(j, pageIds);
       for (const id of pageIds) if (ids.indexOf(id) === -1) ids.push(id);
@@ -1153,7 +1207,7 @@ return sign;
       '<div class="dyScanStatus" id="dyScanStatus" style="display:none"></div>' +
       '<div class="dyList" id="dyList"></div>' +
       '<div class="dyFt">' +
-      '<button class="dyBtn primary" id="dyRec">开始记录</button>' +
+      '<button class="dyBtn primary" id="dyLogin">登录检测</button>' +
       '<button class="dyBtn" id="dyScanAll">扫描全部关注</button>' +
       '<button class="dyBtn" id="dySync">同步已读</button>' +
       '<button class="dyBtn ghost" id="dyReadAll">全部已读</button>' +
@@ -1164,7 +1218,10 @@ return sign;
     statusEl = panel.querySelector('#dyStatusText');
 
     panel.querySelector('#dyClose').addEventListener('click', togglePanel);
-    panel.querySelector('#dyRec').addEventListener('click', toggleRec);
+    panel.querySelector('#dyLogin').addEventListener('click', function () {
+      const s = panel.querySelector('#dyScanStatus'); if (s) s.style.display = 'block';
+      checkLogin();
+    });
     panel.querySelector('#dyScanAll').addEventListener('click', function () {
       const s = panel.querySelector('#dyScanStatus'); if (s) s.style.display = 'block';
       runFullScanMobile();
@@ -1178,6 +1235,23 @@ return sign;
 
     updateBadge();
     updateRecUI();
+    updateLoginUI();
+    // 若不在 www.douyin.com：网页接口只存在于 www，跨域请求会被浏览器拦截，给出一次性提示
+    if (location.hostname !== 'www.douyin.com' && location.hostname !== 'douyin.com') {
+      setScanText('⚠️ 当前在 ' + location.hostname + '：网页接口只在 www.douyin.com 提供，跨域请求会被浏览器拦截。请在 Via 开启「桌面模式」后访问 www.douyin.com（本插件已尝试自动跳转，但被弹回）。');
+    }
+  }
+
+  // 登录状态指示：反映「登录检测」是否成功过；同时兼顾被动记录状态
+  function updateLoginUI() {
+    const onWww = (location.hostname === 'www.douyin.com' || location.hostname === 'douyin.com');
+    const logined = localStorage.getItem('DYUNREAD_LOGINED') === '1';
+    const recording = isManualRecording() || isFollowUrl();
+    const txt = panel && panel.querySelector('#dyStatusText');
+    const btn = panel && panel.querySelector('#dyLogin');
+    if (txt) txt.textContent = recording ? '记录中（自动捕获当前页视频）'
+      : (onWww ? (logined ? '已登录（可扫描）' : '未登录检测') : '需在 www.douyin.com');
+    if (btn) btn.textContent = logined ? '重新检测' : '登录检测';
   }
 
   function togglePanel() {
@@ -1185,21 +1259,11 @@ return sign;
     panel.classList.toggle('open', panelOpen);
     if (panelOpen) render();
   }
-  function toggleRec() {
-    // 手动记录开关：若当前在关注页则无需手动；否则切换手动记录
-    setManualRecording(!isManualRecording());
-    updateRecUI();
-    render();
-  }
   function updateRecUI() {
+    // 仅更新「记录中」指示灯（原「开始记录」按钮已并入登录→扫描两步式，不再单独存在）
     const on = isManualRecording() || isFollowUrl();
-    const dot = panel.querySelector('#dyDot');
-    const txt = panel.querySelector('#dyStatusText');
-    const btn = panel.querySelector('#dyRec');
-    dot.classList.toggle('on', on);
-    if (isFollowUrl()) { txt.textContent = '记录中：关注页'; btn.textContent = '停止记录'; }
-    else if (isManualRecording()) { txt.textContent = '记录中：手动'; btn.textContent = '停止记录'; }
-    else { txt.textContent = '未记录（去关注页或点开始）'; btn.textContent = '开始记录'; }
+    const dot = panel && panel.querySelector('#dyDot');
+    if (dot) dot.classList.toggle('on', on);
   }
   function updateBadge() {
     const n = getUnread().length;
@@ -1278,6 +1342,7 @@ return sign;
   function render() {
     if (!listEl) return;
     updateRecUI();
+    updateLoginUI();
     const unread = getUnread();
     panel.querySelector('#dyCount').textContent = '未读 ' + unread.length;
     const accCount = new Set(unread.map(accKey)).size;
@@ -1308,6 +1373,7 @@ return sign;
 
   /* ---------------- 启动 ---------------- */
   function start() {
+    ensureWww(); // 若当前不是 www.douyin.com，自动跳转一次到 www（规避跨域被拦）
     installFetchHook();
     installXHRHook();
     if (document.readyState === 'loading') {
