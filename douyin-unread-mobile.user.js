@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-20 19:15 重排版(三级钻取:分类→账号→视频+按钮超大+失败备注可复制)
+// @name         抖音插件 2026-10-20 19:27 修复登录检测(被动捕获uid+sec_uid解析+轮询)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.5.0
-// @description  2026-10-20 19:15 界面重排版：改为三级钻取(不再直接铺开视频)——① 首页按抖音分类列出每类未读数；② 点分类进入该分类下的公众号列表(含各账号未读数)；③ 点账号才展开未读视频。登录检测等按钮整体大幅放大(每行2个、字号18px)。登录失败的备注框新增「一键复制」按钮。打开已登录的 www.douyin.com 即可抓取关注账号未读视频。
+// @version      1.5.1
+// @description  2026-10-20 19:27 修复「登录检测」一直失败(status_code=5/取不到账号)：新增被动捕获——hook 抖音自身的 commit/user、user/profile 等接口响应，抓取当前用户 uid(与可用桌面扩展同机制)；并增加页面 sec_uid→数字uid 解析、整页/全局状态扫描、登录检测轮询等待。login检测与扫描逻辑不变。打开已登录的 www.douyin.com 即可抓取关注账号未读视频。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -663,7 +663,31 @@ return sign;
   const K_DATA = 'DYUNREAD_DATA_v1';
   const K_REC = 'DYUNREAD_REC_v1';
   const K_WATCHED = 'DYUNREAD_WATCHED_v1'; // 来自抖音「观看历史」的已看视频 ID 集合
+  const K_UID = 'DYUNREAD_UID_v1';        // 被动捕获到的当前登录用户 uid（持久化，避免每次重新取）
+  const K_SEC = 'DYUNREAD_SEC_v1';        // 当前登录用户 sec_uid
   let lastApiError = ''; // 最近一次接口失败原因，用于给出精准报错（而不是笼统的「接口未返回数据」）
+
+  // 被动捕获到的当前用户 uid / sec_uid：抖音自己的页面代码在加载用户态时会调用 commit/user、
+  // user/profile 等接口，响应里带当前用户 uid；我们用 fetch/XHR hook 把这些响应里的 uid 抓出来，
+  // 比「主动调 commit/user」稳——后者在登录态下常被服务端校验拦成 status_code=5。
+  let CAPTURED_UID = '';
+  let CAPTURED_SEC = '';
+  try { CAPTURED_UID = localStorage.getItem(K_UID) || ''; } catch (e) {}
+  try { CAPTURED_SEC = localStorage.getItem(K_SEC) || ''; } catch (e) {}
+  function storeSelf(uid, sec) {
+    if (uid && /^\d{6,20}$/.test(String(uid))) { CAPTURED_UID = String(uid); try { localStorage.setItem(K_UID, CAPTURED_UID); } catch (e) {} }
+    if (sec && /MS4w/i.test(String(sec))) { CAPTURED_SEC = String(sec); try { localStorage.setItem(K_SEC, CAPTURED_SEC); } catch (e) {} }
+  }
+  // 从一个接口响应里提取「当前用户」的 uid / sec_uid。
+  // 只认顶层 user 对象（commit/user、user/profile/other 都返回 {user:{uid,sec_uid}}），
+  // 绝不抓 feed 里每个作者的 uid，避免把别人当成自己。
+  function extractSelfUid(data, url) {
+    if (!data || typeof data !== 'object') return null;
+    const u = data.user || data.user_info || data.userInfo;
+    if (u && u.uid && /^\d{6,20}$/.test(String(u.uid))) return { uid: String(u.uid), sec: u.sec_uid || '' };
+    if (u && u.uid_tt && /^\d{6,20}$/.test(String(u.uid_tt))) return { uid: String(u.uid_tt), sec: u.sec_uid || '' };
+    return null;
+  }
 
   function loadData() {
     try { return JSON.parse(localStorage.getItem(K_DATA)) || {}; }
@@ -842,25 +866,23 @@ return sign;
       try {
         const url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
         if (url && url.indexOf('douyin.com') !== -1) {
-          if (url.indexOf('history/read') !== -1) {
-            p.then(function (resp) {
-              try {
-                const ct = resp.headers && resp.headers.get ? resp.headers.get('content-type') : '';
-                if (ct && ct.indexOf('json') !== -1) {
-                  resp.clone().json().then(function (j) { const ids = []; collectIds(j, ids); mergeWatched(ids); }).catch(function () {});
-                }
-              } catch (e) {}
-            }).catch(function () {});
-          } else if (/feed|aweme|following|follow|recommend|refresh/.test(url)) {
-            p.then(function (resp) {
-              try {
-                const ct = resp.headers && resp.headers.get ? resp.headers.get('content-type') : '';
-                if (ct && ct.indexOf('json') !== -1) {
-                  resp.clone().json().then(parseAndCapture).catch(function () {});
-                }
-              } catch (e) {}
-            }).catch(function () {});
-          }
+          p.then(function (resp) {
+            try {
+              const ct = resp.headers && resp.headers.get ? resp.headers.get('content-type') : '';
+              if (ct && ct.indexOf('json') !== -1) {
+                resp.clone().json().then(function (j) {
+                  try {
+                    // 被动抓取当前用户 uid（commit/user、user/profile/other 等响应顶层带 user）
+                    const s = extractSelfUid(j, url);
+                    if (s) storeSelf(s.uid, s.sec);
+                    // 视频抓取（feed / aweme / following 等）
+                    if (/history\/read/.test(url)) { const ids = []; collectIds(j, ids); mergeWatched(ids); }
+                    else if (/feed|aweme|following|follow|recommend|refresh/.test(url)) { parseAndCapture(j); }
+                  } catch (e) {}
+                }).catch(function () {});
+              }
+            } catch (e) {}
+          }).catch(function () {});
         }
       } catch (e) {}
       return p;
@@ -878,11 +900,10 @@ return sign;
           if (url && url.indexOf('douyin.com') !== -1) {
             const ct = this.getResponseHeader ? this.getResponseHeader('content-type') : '';
             if (ct && ct.indexOf('json') !== -1) {
-              if (url.indexOf('history/read') !== -1) {
-                const ids = []; collectIds(JSON.parse(this.responseText), ids); mergeWatched(ids);
-              } else if (/feed|aweme|following|follow|recommend|refresh/.test(url)) {
-                parseAndCapture(JSON.parse(this.responseText));
-              }
+              const j = JSON.parse(this.responseText);
+              const s = extractSelfUid(j, url); if (s) storeSelf(s.uid, s.sec);
+              if (/history\/read/.test(url)) { const ids = []; collectIds(j, ids); mergeWatched(ids); }
+              else if (/feed|aweme|following|follow|recommend|refresh/.test(url)) { parseAndCapture(j); }
             }
           }
         } catch (e) {}
@@ -1019,6 +1040,7 @@ return sign;
   // 桌面版扩展正是靠这一招拿到 uid（之前手机版缺失这一步，所以一直拿不到 uid → 登录检测失败）。
   function getUidFromPage() {
     try {
+      // ① 内联 <script> 文本（桌面扩展靠这个拿到 uid）
       const scripts = document.querySelectorAll('script');
       for (let i = 0; i < scripts.length; i++) {
         const txt = scripts[i].textContent || '';
@@ -1029,10 +1051,15 @@ return sign;
           if (/^\d{6,20}$/.test(v)) return v;
         }
       }
+      // ② 页面全局状态（SPA 常把当前用户放进 window 全局对象，而不是内联 script 文本）
+      const globals = [window.RENDER_DATA, window._ROUTER_DATA, window.__INITIAL_STATE__, window._INITIAL_STATE_, window.__NEXT_DATA__];
+      for (let i = 0; i < globals.length; i++) {
+        const s = extractSelfUid(globals[i]);
+        if (s && s.uid) { storeSelf(s.uid, s.sec); return s.uid; }
+      }
     } catch (e) {}
     return '';
   }
-  // 从页面内联 <script> JSON 里提取当前用户昵称（用于登录成功后的展示）。
   function getNickFromPage() {
     try {
       const scripts = document.querySelectorAll('script');
@@ -1044,17 +1071,62 @@ return sign;
     } catch (e) {}
     return '';
   }
-  // 取当前登录用户 uid：① cookie → ② 页面内联 → ③ commit/user（不带 X-Bogus/webid，与桌面扩展一致，已知可用）。
+  // 从整页 / 全局状态里找当前登录用户的 sec_uid（非数字，登录态下几乎一定存在；拿它去解析数字 uid）。
+  function getSelfSecFromPage() {
+    try {
+      const globals = [window.RENDER_DATA, window._ROUTER_DATA, window.__INITIAL_STATE__, window._INITIAL_STATE_, window.__NEXT_DATA__];
+      for (let i = 0; i < globals.length; i++) {
+        const s = deepFindSec(globals[i]);
+        if (s) return s;
+      }
+      const html = document.documentElement ? document.documentElement.innerHTML : '';
+      const m = html.match(/sec_uid["'\s:]+"?(MS4w[^"]{10,60})/);
+      if (m) return m[1];
+    } catch (e) {}
+    return '';
+  }
+  // 在对象树里找第一个 MS4w 开头的 sec_uid（登录态首页里当前用户态通常早于 feed 作者出现）
+  function deepFindSec(obj) {
+    if (!obj || typeof obj !== 'object') return '';
+    const stack = [obj]; let n = 0;
+    while (stack.length && n < 30000) {
+      const o = stack.pop(); n++;
+      if (Array.isArray(o)) { for (let i = 0; i < o.length; i++) { const x = o[i]; if (x && typeof x === 'object') stack.push(x); } continue; }
+      if (typeof o.sec_uid === 'string' && /MS4w/.test(o.sec_uid)) return o.sec_uid;
+      for (const k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) { const v = o[k]; if (v && typeof v === 'object') stack.push(v); } }
+    }
+    return '';
+  }
+  // 用 sec_uid 解析出数字 uid（公开资料接口，登录态/非登录态一般都能返回目标用户的 uid）
+  async function resolveUidBySec(sec) {
+    try {
+      const res = await signedFetch('/aweme/v1/web/user/profile/other/?aid=6383&sec_user_id=' + encodeURIComponent(sec), {});
+      const j = res.j;
+      if (res.ok && j) {
+        const u = j.user || j.user_info || j.userInfo || (j.data && j.data.user);
+        if (u && u.uid && /^\d{6,20}$/.test(String(u.uid))) return String(u.uid);
+      }
+    } catch (e) {}
+    return '';
+  }
+  // 取当前登录用户 uid，优先级：
+  // ① hook 已被动捕获（最稳，抖音自己的接口响应里带当前用户 uid）
+  // ② cookie → ③ 页面内联/全局 → ④ 用页面 sec_uid 解析 → ⑤ 主动 commit/user（登录态可能返回 5，兜底）
   async function getMyUid() {
+    if (CAPTURED_UID) return CAPTURED_UID;
     let uid = getUidFromCookie();
-    if (uid) return uid;
+    if (uid) { storeSelf(uid, ''); return uid; }
     uid = getUidFromPage();
     if (uid) return uid;
-    // 兜底：commit/user 直接同域请求（不带签名/webid，避免 status_code=5）。
+    const sec = getSelfSecFromPage() || CAPTURED_SEC;
+    if (sec) {
+      const r = await resolveUidBySec(sec);
+      if (r) { storeSelf(r, sec); return r; }
+    }
     try {
       const r = await fetch(API + '/aweme/v1/web/commit/user/', { credentials: 'include' });
       const j = await r.json().catch(function () { return {}; });
-      if (j && j.user && j.user.uid) return String(j.user.uid);
+      if (j && j.user && j.user.uid) { storeSelf(String(j.user.uid), j.user.sec_uid || ''); return String(j.user.uid); }
       lastApiError = 'commit/user status_code=' + (j && j.status_code) + ' ' + ((j && j.status_msg) || '');
     } catch (e) {
       lastApiError = 'commit/user 请求异常：' + (e && e.message ? e.message : e);
@@ -1099,11 +1171,19 @@ return sign;
     }
     return out;
   }
-  // —— 显式「登录检测」按钮：调用 commit/user，按 status_code 明确提示成功/失败及原因 ——
+  // —— 显式「登录检测」按钮：按 status_code 明确提示成功/失败及原因 ——
   async function checkLogin() {
     setScanText('⏳ 正在检测登录状态…');
     lastApiError = '';
-    const myUid = await getMyUid();
+    let myUid = await getMyUid();
+    // 兜底：hook 可能正在从抖音自身的接口响应里被动捕获当前用户 uid，稍等几秒再试一次。
+    if (!myUid) {
+      for (let i = 0; i < 10 && !myUid; i++) {
+        await sleep(400);
+        if (CAPTURED_UID) myUid = CAPTURED_UID;
+        else myUid = await getMyUid();
+      }
+    }
     if (myUid) {
       localStorage.setItem('DYUNREAD_LOGINED', '1');
       // 取昵称用于展示：优先从页面内联脚本提取（commit/user 在登录态下会被 webid 校验拦成 status_code=5）。
