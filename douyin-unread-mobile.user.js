@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-20 18:49 界面调整(按钮置顶放大+窗口缩小+文字放大)
+// @name         抖音插件 2026-10-20 19:15 重排版(三级钻取:分类→账号→视频+按钮超大+失败备注可复制)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.4.0
-// @description  2026-10-20 18:49 界面调整：底部弹层窗口由 82vh 缩至 68vh(更不挡屏)；所有文字区块字号放大(标题/状态/摘要/分类/账号名等)；底部按钮排移到面板最上方并整体放大(每行2个、自动换行)；浮动按钮与「全部已读/分类」小按钮同步放大。登录检测与扫描逻辑不变。打开已登录的 www.douyin.com 即可抓取关注账号未读视频，显示每个账号未读个数。
+// @version      1.5.0
+// @description  2026-10-20 19:15 界面重排版：改为三级钻取(不再直接铺开视频)——① 首页按抖音分类列出每类未读数；② 点分类进入该分类下的公众号列表(含各账号未读数)；③ 点账号才展开未读视频。登录检测等按钮整体大幅放大(每行2个、字号18px)。登录失败的备注框新增「一键复制」按钮。打开已登录的 www.douyin.com 即可抓取关注账号未读视频。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -928,7 +928,38 @@ return sign;
 
   /* ---------------- 全量扫描：枚举关注账号并逐个拉取视频 ---------------- */
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-  function setScanText(t) { const e = panel && panel.querySelector('#dyScanStatus'); if (e) { e.textContent = t; e.style.display = 'block'; } }
+  function setScanText(t) {
+    const e = panel && panel.querySelector('#dyScanStatus');
+    if (!e) return;
+    const tx = e.querySelector('#dySStext');
+    if (tx) tx.textContent = t;
+    e.style.display = 'block';
+  }
+  // 一键复制文本（优先 clipboard API，失败回退 execCommand）
+  function copyText(t) {
+    if (t == null) t = '';
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(t).then(function () { flashCopied('已复制 ✓'); }, function () { fallbackCopy(t); });
+        return;
+      }
+    } catch (e) {}
+    fallbackCopy(t);
+  }
+  function fallbackCopy(t) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = t; ta.style.position = 'fixed'; ta.style.top = '-9999px'; ta.style.left = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      flashCopied(ok ? '已复制 ✓' : '复制失败');
+    } catch (e) { flashCopied('复制失败'); }
+  }
+  function flashCopied(msg) {
+    const b = panel && panel.querySelector('#dySScopy');
+    if (b) { b.textContent = msg || '已复制 ✓'; setTimeout(function () { b.textContent = '复制'; }, 1600); }
+  }
 
   // 接口基础域名：必须与当前页面【同域】，否则浏览器会因跨域(CORS)直接拦截请求，
   // 表现为「接口未返回数据」。因此统一用 location.origin（当前页域名）。
@@ -1229,11 +1260,11 @@ return sign;
   .dyOpen{color:#fe2c55;font-size:13px;text-decoration:none;margin-right:14px;}
   .dyMk{color:#9aa0b5;font-size:13px;background:none;border:none;padding:0;cursor:pointer;}
   .dyMk:hover{color:#fff;}
-  .dyFt{display:flex;flex-wrap:wrap;gap:10px;padding:12px 14px;border-bottom:1px solid #262a3b;background:#1f2233;}
-  .dyBtn{flex:1 1 calc(50% - 5px);min-width:120px;border:none;border-radius:10px;padding:14px 10px;font-size:15px;line-height:1.2;white-space:nowrap;cursor:pointer;
-    background:#2a2d40;color:#fff;}
-  .dyBtn.primary{background:#fe2c55;font-weight:600;}
-  .dyBtn.ghost{background:transparent;border:1px solid #3a3d52;}
+  .dyFt{display:flex;flex-wrap:wrap;gap:12px;padding:14px;border-bottom:1px solid #262a3b;background:#1f2233;}
+  .dyBtn{flex:1 1 calc(50% - 6px);min-width:0;border:none;border-radius:14px;padding:20px 10px;font-size:18px;font-weight:700;line-height:1.25;white-space:nowrap;cursor:pointer;
+    background:#2a2d40;color:#fff;letter-spacing:.5px;}
+  .dyBtn.primary{background:#fe2c55;}
+  .dyBtn.ghost{background:transparent;border:2px solid #3a3d52;}
   .dySummary{padding:10px 16px;font-size:14px;color:#9aa0b5;background:#1f2233;border-bottom:1px solid #262a3b;}
   .dyScanStatus{padding:10px 16px;font-size:14px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.6;}
   .dyCatHd{padding:10px 16px;font-size:15px;font-weight:700;color:#fe2c55;background:#161823;position:sticky;top:0;z-index:1;border-bottom:1px solid #262a3b;}
@@ -1243,7 +1274,7 @@ return sign;
   .dyAccName{flex:1;font-weight:600;font-size:15px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .dyAccCount{background:#fe2c55;color:#fff;border-radius:10px;padding:2px 10px;font-size:13px;font-weight:700;min-width:20px;text-align:center;}
   .dyAccActions{display:flex;gap:8px;}
-  .dyMini{background:#2a2d40;color:#fff;border:none;border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;}
+  .dyMini{background:#2a2d40;color:#fff;border:none;border-radius:8px;padding:11px 16px;font-size:15px;font-weight:600;cursor:pointer;}
   .dyMini.cat{background:transparent;border:1px solid #3a3d52;color:#9aa0b5;}
   .dyAccBody{padding:0 14px 12px;}
   .dyThumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
@@ -1251,6 +1282,29 @@ return sign;
   .dyThumbWrap img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block;}
   .dyPh2{width:100%;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#fe2c55,#f0385e);color:#fff;font-size:18px;}
   .dyThumbMk{position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:5px;font-size:11px;padding:3px 7px;cursor:pointer;}
+  /* ---- 三级钻取：分类 → 账号 → 视频 ---- */
+  .dyBack{display:flex;align-items:center;gap:6px;padding:13px 16px;font-size:16px;font-weight:600;color:#9aa0b5;cursor:pointer;background:#1f2233;border-bottom:1px solid #262a3b;}
+  .dyBack:active{color:#fff;}
+  .dyCatRow{display:flex;align-items:center;gap:12px;padding:18px 16px;cursor:pointer;border-bottom:1px solid #262a3b;}
+  .dyCatRow:active{background:#22263a;}
+  .dyCatName{font-size:18px;font-weight:700;}
+  .dyCatSub{font-size:13px;color:#9aa0b5;margin-top:4px;}
+  .dyCatCount{background:#fe2c55;color:#fff;border-radius:13px;padding:5px 15px;font-size:16px;font-weight:700;flex:0 0 auto;}
+  .dyArrow{color:#9aa0b5;font-size:26px;line-height:1;flex:0 0 auto;}
+  .dyAccRow{display:flex;align-items:center;gap:12px;padding:16px;cursor:pointer;border-bottom:1px solid #262a3b;}
+  .dyAccRow:active{background:#22263a;}
+  .dyAccInfo{flex:1;min-width:0;}
+  .dyAccName{font-size:17px;font-weight:600;}
+  .dyAccSub{font-size:13px;color:#9aa0b5;margin-top:4px;}
+  .dyAccHdWide{display:flex;align-items:center;gap:12px;padding:16px;background:#1f2233;border-bottom:1px solid #262a3b;}
+  .dyAccHdWide .dyAvatar{width:44px;height:44px;flex:0 0 44px;font-size:18px;}
+  .dyAccHdWide .dyAccInfo{flex:1;min-width:0;}
+  .dyAccHdWide .dyMini{font-size:15px;padding:11px 16px;}
+  /* ---- 登录失败备注框 + 一键复制 ---- */
+  .dyScanStatus{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;font-size:14px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.6;}
+  .dySStext{flex:1;min-width:0;word-break:break-word;white-space:pre-wrap;}
+  .dySScopy{flex:0 0 auto;border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:700;background:#fe2c55;color:#fff;cursor:pointer;}
+  .dySScopy:active{opacity:.8;}
   `;
 
   function buildUI() {
@@ -1279,7 +1333,10 @@ return sign;
       '<div class="dyStatus"><span><span class="dot" id="dyDot"></span><span id="dyStatusText">未记录</span></span>' +
       '<span id="dyCount"></span></div>' +
       '<div class="dySummary" id="dySummary"></div>' +
-      '<div class="dyScanStatus" id="dyScanStatus" style="display:none"></div>' +
+      '<div class="dyScanStatus" id="dyScanStatus" style="display:none">' +
+      '<div class="dySStext" id="dySStext"></div>' +
+      '<button class="dySScopy" id="dySScopy">复制</button>' +
+      '</div>' +
       '<div class="dyList" id="dyList"></div>';
     document.body.appendChild(panel);
     listEl = panel.querySelector('#dyList');
@@ -1299,6 +1356,10 @@ return sign;
     panel.querySelector('#dySync').addEventListener('click', function () {
       const s = panel.querySelector('#dyScanStatus'); if (s) s.style.display = 'block';
       getWatchHistory();
+    });
+    panel.querySelector('#dySScopy').addEventListener('click', function () {
+      const tx = panel.querySelector('#dySStext');
+      if (tx) copyText(tx.textContent);
     });
 
     updateBadge();
@@ -1368,43 +1429,96 @@ return sign;
     return { cats: result, names: names };
   }
 
-  function renderAccount(acc) {
-    const wrap = document.createElement('div'); wrap.className = 'dyAcc';
-    const hd = document.createElement('div'); hd.className = 'dyAccHd';
-    const av = document.createElement('div'); av.className = 'dyAvatar'; av.textContent = (acc.name || '?').slice(0, 1);
-    const name = document.createElement('div'); name.className = 'dyAccName'; name.textContent = acc.name;
-    const cnt = document.createElement('div'); cnt.className = 'dyAccCount'; cnt.textContent = acc.items.length;
-    const actions = document.createElement('div'); actions.className = 'dyAccActions';
+  // 钻取导航状态：cats(分类) → accounts(某分类下的账号) → videos(某账号的视频)
+  let nav = { level: 'cats', cat: null, key: null };
+  function goCats() { nav = { level: 'cats', cat: null, key: null }; render(); }
+  function goAccounts(cat) { nav = { level: 'accounts', cat: cat, key: null }; render(); }
+  function goVideos(cat, key) { nav = { level: 'videos', cat: cat, key: key }; render(); }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // 单个未读视频封面卡片（点 ✓ 标记已读；点图片跳转抖音）
+  function makeVideoCard(v) {
+    const a = document.createElement('a'); a.className = 'dyThumbWrap'; a.href = v.url; a.target = '_blank'; a.rel = 'noopener'; a.title = (v.desc || v.author || '');
+    if (v.cover) {
+      const img = document.createElement('img'); img.loading = 'lazy'; img.referrerPolicy = 'no-referrer'; img.src = v.cover; img.alt = v.author;
+      img.onerror = function () { const ph = document.createElement('div'); ph.className = 'dyPh2'; ph.textContent = '▶'; img.replaceWith(ph); };
+      a.appendChild(img);
+    } else {
+      const ph = document.createElement('div'); ph.className = 'dyPh2'; ph.textContent = '▶'; a.appendChild(ph);
+    }
+    const mk = document.createElement('button'); mk.className = 'dyThumbMk'; mk.textContent = '✓'; mk.title = '标记已读';
+    mk.addEventListener('click', function (e) { e.stopPropagation(); e.preventDefault(); markRead(v.id); });
+    a.appendChild(mk);
+    return a;
+  }
+
+  // 一级视图：分类列表（每个分类显示「N 个账号 / M 条未读」）
+  function renderCatsView(g) {
+    for (const cat of g.names) {
+      const accounts = g.cats[cat];
+      let cAcc = 0, cUnread = 0;
+      accounts.forEach(function (a) { cAcc++; cUnread += a.items.length; });
+      const row = document.createElement('div'); row.className = 'dyCatRow';
+      const left = document.createElement('div'); left.style.flex = '1'; left.style.minWidth = '0';
+      left.innerHTML = '<div class="dyCatName">' + esc(cat) + '</div><div class="dyCatSub">' + cAcc + ' 个账号</div>';
+      const cnt = document.createElement('div'); cnt.className = 'dyCatCount'; cnt.textContent = cUnread + ' 条';
+      const arrow = document.createElement('div'); arrow.className = 'dyArrow'; arrow.textContent = '›';
+      row.appendChild(left); row.appendChild(cnt); row.appendChild(arrow);
+      row.addEventListener('click', (function (c) { return function () { goAccounts(c); }; })(cat));
+      listEl.appendChild(row);
+    }
+  }
+
+  // 二级视图：某分类下的公众号列表（每个账号显示未读数）
+  function renderAccountsView(g) {
+    const back = document.createElement('div'); back.className = 'dyBack'; back.textContent = '‹ 返回分类';
+    back.addEventListener('click', goCats);
+    listEl.appendChild(back);
+    const accounts = g.cats[nav.cat] || [];
+    for (const acc of accounts) {
+      const row = document.createElement('div'); row.className = 'dyAccRow';
+      const av = document.createElement('div'); av.className = 'dyAvatar'; av.textContent = (acc.name || '?').slice(0, 1);
+      const info = document.createElement('div'); info.className = 'dyAccInfo';
+      info.innerHTML = '<div class="dyAccName">' + esc(acc.name) + '</div><div class="dyAccSub">' + acc.items.length + ' 条未读</div>';
+      const cnt = document.createElement('div'); cnt.className = 'dyAccCount'; cnt.textContent = acc.items.length;
+      const arrow = document.createElement('div'); arrow.className = 'dyArrow'; arrow.textContent = '›';
+      row.appendChild(av); row.appendChild(info); row.appendChild(cnt); row.appendChild(arrow);
+      row.addEventListener('click', (function (k) { return function () { goVideos(nav.cat, k); }; })(acc.key));
+      listEl.appendChild(row);
+    }
+    if (!accounts.length) {
+      const e = document.createElement('div'); e.className = 'dyEmpty'; e.textContent = '该分类下暂无未读账号。';
+      listEl.appendChild(e);
+    }
+  }
+
+  // 三级视图：某账号的未读视频
+  function renderVideosView(g) {
+    const back = document.createElement('div'); back.className = 'dyBack'; back.textContent = '‹ 返回账号';
+    back.addEventListener('click', function () { goAccounts(nav.cat); });
+    listEl.appendChild(back);
+    const accounts = g.cats[nav.cat] || [];
+    let acc = null;
+    for (const a of accounts) { if (a.key === nav.key) { acc = a; break; } }
+    if (!acc) {
+      const e = document.createElement('div'); e.className = 'dyEmpty'; e.textContent = '未找到该账号的未读视频。';
+      listEl.appendChild(e); return;
+    }
+    const hd = document.createElement('div'); hd.className = 'dyAccHdWide';
+    hd.innerHTML = '<div class="dyAvatar">' + esc((acc.name || '?').slice(0, 1)) + '</div>' +
+      '<div class="dyAccInfo"><div class="dyAccName">' + esc(acc.name) + '</div><div class="dyAccSub">' + acc.items.length + ' 条未读</div></div>';
     const bAll = document.createElement('button'); bAll.className = 'dyMini'; bAll.textContent = '全部已读';
-    bAll.addEventListener('click', function (e) { e.stopPropagation(); markAccountRead(acc.key); });
-    const bCat = document.createElement('button'); bCat.className = 'dyMini cat'; bCat.textContent = '分类';
-    bCat.addEventListener('click', function (e) {
-      e.stopPropagation();
-      const c = window.prompt('为该账号设置分类（如：美食 / 科技）：', '未分类');
-      if (c != null) setAccountCat(acc.key, (c.trim() || '未分类'));
-    });
-    actions.appendChild(bAll); actions.appendChild(bCat);
-    hd.appendChild(av); hd.appendChild(name); hd.appendChild(cnt); hd.appendChild(actions);
-    const body = document.createElement('div'); body.className = 'dyAccBody';
+    bAll.addEventListener('click', function () { markAccountRead(acc.key); goAccounts(nav.cat); });
+    hd.appendChild(bAll);
+    listEl.appendChild(hd);
     const grid = document.createElement('div'); grid.className = 'dyThumbs';
-    acc.items.forEach(function (v) {
-      const a = document.createElement('a'); a.className = 'dyThumbWrap'; a.href = v.url; a.target = '_blank'; a.rel = 'noopener'; a.title = (v.desc || v.author || '');
-      if (v.cover) {
-        const img = document.createElement('img'); img.loading = 'lazy'; img.referrerPolicy = 'no-referrer'; img.src = v.cover; img.alt = v.author;
-        img.onerror = function () { const ph = document.createElement('div'); ph.className = 'dyPh2'; ph.textContent = '▶'; img.replaceWith(ph); };
-        a.appendChild(img);
-      } else {
-        const ph = document.createElement('div'); ph.className = 'dyPh2'; ph.textContent = '▶'; a.appendChild(ph);
-      }
-      const mk = document.createElement('button'); mk.className = 'dyThumbMk'; mk.textContent = '✓'; mk.title = '标记已读';
-      mk.addEventListener('click', function (e) { e.stopPropagation(); e.preventDefault(); markRead(v.id); });
-      a.appendChild(mk);
-      grid.appendChild(a);
-    });
-    body.appendChild(grid);
-    hd.addEventListener('click', function () { body.style.display = (body.style.display === 'none') ? '' : 'none'; });
-    wrap.appendChild(hd); wrap.appendChild(body);
-    return wrap;
+    acc.items.forEach(function (v) { grid.appendChild(makeVideoCard(v)); });
+    listEl.appendChild(grid);
   }
 
   function render() {
@@ -1428,15 +1542,9 @@ return sign;
       return;
     }
     const g = buildGroups(unread);
-    for (const cat of g.names) {
-      const accounts = g.cats[cat];
-      let cAcc = 0, cUnread = 0;
-      accounts.forEach(function (a) { cAcc++; cUnread += a.items.length; });
-      const catHd = document.createElement('div'); catHd.className = 'dyCatHd';
-      catHd.textContent = cat + ' · ' + cAcc + ' 个账号 / ' + cUnread + ' 条未读';
-      listEl.appendChild(catHd);
-      accounts.forEach(function (acc) { listEl.appendChild(renderAccount(acc)); });
-    }
+    if (nav.level === 'accounts') renderAccountsView(g);
+    else if (nav.level === 'videos') renderVideosView(g);
+    else renderCatsView(g);
   }
 
   /* ---------------- 启动 ---------------- */
