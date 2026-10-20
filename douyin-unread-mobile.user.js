@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音关注未读视频助手（手机版 / Via）2026-10-19 23:12 登录检测+扫描两步(跨域修复)
+// @name         抖音关注未读视频助手(手机版/Via) 2026-10-20 10:59 修复登录检测status_code=5(最小请求优先)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.3.6
-// @description  2026-10-19 23:12 流程重做：新增「登录检测」按钮（点击后明确提示登录成功/失败及原因），「扫描全部关注」改为「登录→扫描」两步式；自动从 m.douyin.com 跳转到 www.douyin.com 规避跨域(CORS)被拦，并按 status_code 精准报错。打开已登录的抖音网页版即可直接抓取关注账号未读视频，显示每个账号未读个数。
+// @version      1.3.7
+// @description  2026-10-20 10:59 修复「登录检测」报 status_code=5(参数不合法)：改为最小请求优先(仅 aid+X-Bogus)，避免把 ttwid 当 webid 发给服务端被判参数非法；并优先从 cookie 读取 uid。打开已登录的抖音网页版(www.douyin.com)即可抓取关注账号未读视频，显示每个账号未读个数。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -603,15 +603,23 @@ return sign;
     const m = (document.cookie || '').match(/(?:^|;\s*)msToken=([^;]+)/);
     return m ? decodeURIComponent(m[1]) : '';
   }
-  // 给任意抖音接口 URL 追加 X-Bogus 签名（同时补上 webid / msToken，若 cookie 里有）
-  function signUrl(url) {
+  // 给任意抖音接口 URL 追加 X-Bogus 签名。
+  // 重要修复：默认【不】强行补 webid / msToken。先前把 ttwid cookie 当作 webid 发给服务端，
+  // 登录态下服务端会校验 webid 与 session 是否匹配，不匹配即返回 status_code=5(参数不合法)。
+  // 因此默认只发 aid + X-Bogus 的最小请求；仅在调用方显式要求(opts.addWebid/addMsToken)时才补。
+  function signUrl(url, opts) {
+    opts = opts || {};
     try {
       const u = new URL(url);
       if (!u.searchParams.has('aid')) u.searchParams.set('aid', '6383');
-      const wid = getWebId();
-      if (wid && !u.searchParams.has('webid')) u.searchParams.set('webid', wid);
-      const mt = getMsToken();
-      if (mt && !u.searchParams.has('msToken')) u.searchParams.set('msToken', mt);
+      if (opts.addWebid !== false) {
+        const wid = getWebId();
+        if (wid && !u.searchParams.has('webid')) u.searchParams.set('webid', wid);
+      }
+      if (opts.addMsToken !== false) {
+        const mt = getMsToken();
+        if (mt && !u.searchParams.has('msToken')) u.searchParams.set('msToken', mt);
+      }
       const query = u.search.slice(1); // 去掉前导 '?'
       const xb = XB_SIGN(query, navigator.userAgent || '');
       u.searchParams.set('X-Bogus', xb);
@@ -619,6 +627,35 @@ return sign;
     } catch (e) {
       return url;
     }
+  }
+
+  // 统一的带签名请求：最小请求优先，失败再逐步补 webid / msToken 重试。
+  // 返回 { ok, j, err, http }。ok=true 表示 status_code 为 0（或字段缺失视为成功）。
+  async function signedFetch(pathAndQuery, { extra, tries } = {}) {
+    if (!tries) tries = [
+      { addWebid: false, addMsToken: false }, // 最小：仅 aid + X-Bogus（修复登录态 status_code=5）
+      { addWebid: true,  addMsToken: false }, // 补 webid
+      {}                                         // 补 webid + msToken
+    ];
+    const last = { ok: false, j: null, err: '', http: 0 };
+    for (const t of tries) {
+      let url = API + pathAndQuery;
+      try {
+        const u = new URL(url);
+        if (extra) for (const k in extra) if (!u.searchParams.has(k)) u.searchParams.set(k, extra[k]);
+        url = u.toString();
+        const r = await fetch(signUrl(url, t), { credentials: 'include' });
+        last.http = r.status;
+        const j = await r.json().catch(function () { return null; });
+        last.j = j;
+        if (j && (!j.status_code || j.status_code === 0)) { last.ok = true; return last; }
+        last.err = 'status_code=' + (j && j.status_code != null ? j.status_code : '?') + ' ' + ((j && j.status_msg) || '');
+      } catch (e) {
+        last.err = '请求异常：' + (e && e.message ? e.message : e);
+        last.j = null;
+      }
+    }
+    return last;
   }
 
 
@@ -931,43 +968,42 @@ return sign;
     return false;
   }
   // 直接从 cookie 读取当前登录用户的 uid（零请求、不跨域、最稳）
+  // 优先从 cookie 直接读取当前登录用户 uid（零请求、最稳）。覆盖多种可能的 cookie 名。
   function getUidFromCookie() {
     const c = document.cookie || '';
-    const m = c.match(/(?:^|;\s*)uid_tt(?:_ss)?=(\d+)/);
-    return m ? m[1] : '';
+    let m = c.match(/(?:^|;\s*)uid_tt(?:_ss)?=(\d+)/);
+    if (m) return m[1];
+    // passport_auth_status 形如 uid%3D123456%26uid_tt%3D... 或 uid=123456&...
+    m = c.match(/(?:^|;\s*)passport_auth_status=([^;]+)/);
+    if (m) {
+      try {
+        const dec = decodeURIComponent(m[1]);
+        const u = dec.match(/(?:^|&|%26)uid(?:_tt)?(?:%3D|=)(\d+)/);
+        if (u) return u[1];
+      } catch (e) {}
+    }
+    return '';
   }
+  // 取当前登录用户 uid：① 优先 cookie；② 兜底 commit/user（最小请求优先，规避 status_code=5）。
   async function getMyUid() {
     const cookieUid = getUidFromCookie();
     if (cookieUid) return cookieUid;
-    // 兜底：用当前域同域接口取 uid。重点——按 status_code 判断，而不是只看 r.ok。
-    try {
-      const r = await fetch(signUrl(API + '/aweme/v1/web/commit/user/'), { credentials: 'include' });
-      const j = await r.json().catch(function () { return {}; });
-      if (j && j.user && j.user.uid) return String(j.user.uid);
-      lastApiError = 'commit/user 返回 status_code=' + (j && j.status_code) + ' msg=' + ((j && j.status_msg) || '');
-    } catch (e) {
-      const cross = (function () { try { return new URL(API).host !== location.host; } catch (x) { return false; } })();
-      lastApiError = 'commit/user 请求异常：' + (e && e.message ? e.message : e) + (cross ? '（疑似跨域被浏览器拦截）' : '');
-    }
+    const res = await signedFetch('/aweme/v1/web/commit/user/?aid=6383', {});
+    if (res.ok && res.j && res.j.user && res.j.user.uid) return String(res.j.user.uid);
+    lastApiError = res.err || 'commit/user 未返回用户信息';
     return '';
   }
   async function getFollowingList(myUid) {
     const out = [];
     let maxTime = 0;
     for (let page = 0; page < 40; page++) {
-      let url = API + '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
+      let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
         '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
-      if (maxTime) url += '&max_time=' + maxTime;
-      let j = null;
-      try {
-        const r = await fetch(signUrl(url), { credentials: 'include' });
-        j = await r.json().catch(function () { return null; });
-      } catch (e) {
-        lastApiError = 'following/list 请求异常：' + (e && e.message ? e.message : e);
-        break;
-      }
+      if (maxTime) pq += '&max_time=' + maxTime;
+      const res = await signedFetch(pq, {});
+      const j = res.j;
+      if (!res.ok) { lastApiError = 'following/list ' + (res.err || ('HTTP ' + res.http)); break; }
       if (!j) { lastApiError = 'following/list 返回空/非 JSON'; break; }
-      if (j.status_code && j.status_code !== 0) { lastApiError = 'following/list status_code=' + j.status_code + ' ' + (j.status_msg || ''); break; }
       const list = (j && (j.following_list || j.followings)) || [];
       for (const a of list) { if (a && a.sec_uid) out.push({ sec_uid: a.sec_uid, nickname: a.nickname || a.unique_id || '未知' }); }
       if (!list.length) break;
@@ -980,16 +1016,13 @@ return sign;
     const out = [];
     let cursor = 0;
     for (let page = 0; page < 3; page++) {
-      let url = API + '/aweme/v1/web/aweme/post/?aid=6383&count=35' +
+      let pq = '/aweme/v1/web/aweme/post/?aid=6383&count=35' +
         '&sec_user_id=' + encodeURIComponent(secUid);
-      if (cursor) url += '&max_cursor=' + cursor;
-      let j = null;
-      try {
-        const r = await fetch(signUrl(url), { credentials: 'include' });
-        j = await r.json().catch(function () { return null; });
-      } catch (e) { break; }
+      if (cursor) pq += '&max_cursor=' + cursor;
+      const res = await signedFetch(pq, {});
+      const j = res.j;
+      if (!res.ok) { lastApiError = 'post(' + (secUid || '').slice(0, 8) + '…) ' + (res.err || ('HTTP ' + res.http)); break; }
       if (!j) break;
-      if (j.status_code && j.status_code !== 0) { lastApiError = 'post(' + (secUid || '').slice(0, 8) + '…) status_code=' + j.status_code + ' ' + (j.status_msg || ''); break; }
       const arr = (j && (j.aweme_list || (j.aweme_info && j.aweme_info.aweme_list))) || [];
       for (const a of arr) { const v = toVideo(a); if (v) out.push(v); }
       if (!arr.length) break;
@@ -1005,17 +1038,18 @@ return sign;
     const myUid = await getMyUid();
     if (myUid) {
       localStorage.setItem('DYUNREAD_LOGINED', '1');
+      // 取昵称用于展示（同样走最小请求，规避 status_code=5）
       let name = '';
-      try {
-        const r = await fetch(signUrl(API + '/aweme/v1/web/commit/user/'), { credentials: 'include' });
-        const j = await r.json().catch(function () { return {}; });
-        name = (j && j.user && (j.user.nickname || j.user.unique_id)) || '';
-      } catch (e) {}
+      const res = await signedFetch('/aweme/v1/web/commit/user/?aid=6383', {});
+      if (res.ok && res.j && res.j.user) name = res.j.user.nickname || res.j.user.unique_id || '';
       setScanText('✅ 登录成功' + (name ? ('，当前账号：' + name) : ('（uid ' + myUid + '）')) + '。现在可以点「扫描全部关注」了。');
       updateLoginUI();
     } else {
-      setScanText('❌ 登录检测失败。' + (lastApiError ? ('原因：' + lastApiError + '。') : '') +
-        '请确认：① 抖音网页版(www.douyin.com)右上角显示你的头像；② 用的是桌面版网页（非 m.douyin.com）。仍失败可刷新页面重试。');
+      const hint = isLoggedIn()
+        ? '（检测到登录票据，但接口未返回账号信息；可刷新页面后重试）'
+        : '（未检测到登录票据，请先在 www.douyin.com 登录）';
+      setScanText('❌ 登录检测失败。' + (lastApiError ? ('原因：' + lastApiError + '。') : '') + hint +
+        ' 请确认：① 抖音网页版(www.douyin.com)右上角显示你的头像；② 用桌面版网页（非 m.douyin.com）。');
       updateLoginUI();
     }
   }
@@ -1088,23 +1122,15 @@ return sign;
     const ids = [];
     let cursor = '0';
     for (let page = 0; page < maxPages; page++) {
-      const url = API + '/aweme/v1/web/history/read/?aid=6383&count=50&cursor=' + encodeURIComponent(cursor);
-      let j = null;
-      try {
-        const r = await fetch(signUrl(url), { credentials: 'include' });
-        if (!r.ok) {
-          const cross = (function () { try { return new URL(API).host !== location.host; } catch (e) { return false; } })();
-          setScanText('⚠️ 读取失败（HTTP ' + r.status + '）。' + (cross ? '疑似跨域被浏览器拦截，请确保在 www.douyin.com 下使用。' : (isLoggedIn() ? '请确认已登录抖音网页版。' : '请先登录抖音。')));
-          return;
-        }
-        j = await r.json().catch(function () { return null; });
-      } catch (e) {
-        const cross = (function () { try { return new URL(API).host !== location.host; } catch (x) { return false; } })();
-        setScanText('⚠️ 读取出错：' + (e && e.message ? e.message : e) + (cross ? '（疑似跨域）' : ''));
+      const pq = '/aweme/v1/web/history/read/?aid=6383&count=50&cursor=' + encodeURIComponent(cursor);
+      const res = await signedFetch(pq, {});
+      const j = res.j;
+      if (!res.ok) {
+        const cross = (function () { try { return new URL(API).host !== location.host; } catch (e) { return false; } })();
+        setScanText('⚠️ 读取失败（' + (res.err || ('HTTP ' + res.http)) + '）。' + (cross ? '疑似跨域被浏览器拦截，请确保在 www.douyin.com 下使用。' : (isLoggedIn() ? '请确认已登录抖音网页版。' : '请先登录抖音。')));
         return;
       }
       if (!j) { setScanText('⚠️ 观看历史接口返回空/非 JSON。'); return; }
-      if (j.status_code && j.status_code !== 0) { setScanText('⚠️ 观看历史接口 status_code=' + j.status_code + ' ' + (j.status_msg || '') + '。'); return; }
       const pageIds = [];
       collectIds(j, pageIds);
       for (const id of pageIds) if (ids.indexOf(id) === -1) ids.push(id);
