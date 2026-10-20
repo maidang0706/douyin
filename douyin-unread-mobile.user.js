@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-20 22:18 字体再放大两档(基准22→26px)+复制按钮加大
+// @name         抖音插件 2026-10-20 22:30 三步串行流程(登录→关注名单→未读视频)+字体再放大两档
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.5.7
-// @description  2026-10-20 22:18 在 v1.5.6 基础上字体再放大两档：基准字号 22px→26px、功能按钮 26px→30px、标题/列表/备注等各元素再 +4px；并单独加大「一键复制」按钮（padding 16px 26px、字体同步放大），更易点击。只统计关注账号+身份去重逻辑、尺寸/大小切换保持不变。打开已登录的 www.douyin.com 点「扫描全部关注」即可。
+// @version      1.5.8
+// @description  2026-10-20 22:30 重构为明确串行三步：① 登录账号 → ② 登录成功后自动获取关注账号名单(直接读接口，精确) → ③ 拿到名单后自动获取未读视频；界面顶部新增三步进度指示条。并新增关注账号列表缓存(重新获取未读免重复拉名单)。字体在上版基础上再放大两档(基准26→30px、按钮34px)。只统计关注账号+身份去重、尺寸/大小切换、复制按钮加大均保持。打开已登录的 www.douyin.com 点「① 登录账号」即可。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -668,7 +668,13 @@ return sign;
   const K_UID = 'DYUNREAD_UID_v1';        // 被动捕获到的当前登录用户 uid（持久化，避免每次重新取）
   const K_SEC = 'DYUNREAD_SEC_v1';        // 当前登录用户 sec_uid
   const K_FOLLOW = 'DYUNREAD_FOLLOW_v2';  // 关注列表白名单（sec_uid 数组），只统计关注账号
+  const K_ACCOUNTS = 'DYUNREAD_ACCOUNTS_v2'; // 最近一次获取到的关注账号列表（含 nickname），供「重新获取未读」复用
   let lastApiError = ''; // 最近一次接口失败原因，用于给出精准报错（而不是笼统的「接口未返回数据」）
+
+  // 关注账号列表缓存：登录成功后获取，供「重新获取未读」复用，无需每次重新拉名单
+  let LAST_ACCOUNTS = [];
+  try { const a = JSON.parse(localStorage.getItem(K_ACCOUNTS) || '[]'); if (Array.isArray(a)) LAST_ACCOUNTS = a; } catch (e) {}
+  function saveAccounts() { try { localStorage.setItem(K_ACCOUNTS, JSON.stringify(LAST_ACCOUNTS)); } catch (e) {} }
 
   // 关注白名单（sec_uid 集合）：扫描「关注全部」后写入；为空时不限制（回退原行为）。
   // 作用：未读只统计你真实关注的账号，避免关注页/推荐流里混入的非关注账号被算进去。
@@ -1220,7 +1226,8 @@ return sign;
   }
   // —— 显式「登录检测」按钮：按 status_code 明确提示成功/失败及原因 ——
   async function checkLogin() {
-    setScanText('⏳ 正在检测登录状态…');
+    setScanText('① 正在检测登录状态…');
+    updateSteps(1);
     lastApiError = '';
     let myUid = await getMyUid();
     // 兜底：hook 可能正在从抖音自身的接口响应里被动捕获当前用户 uid，稍等几秒再试一次。
@@ -1242,69 +1249,71 @@ return sign;
           name = (j2 && j2.user && (j2.user.nickname || j2.user.unique_id)) || '';
         } catch (e) {}
       }
-      setScanText('✅ 登录成功' + (name ? ('，当前账号：' + name) : ('（uid ' + myUid + '）')) + '。现在可以点「扫描全部关注」了。');
-      updateLoginUI();
+      setScanText('① ✅ 登录成功' + (name ? ('（' + name + '）') : ('（uid ' + myUid + '）')) + '，正在获取关注账号名单…');
+      updateLoginUI(); updateSteps(2);
+      await stepGetFollow(myUid);   // 自动进入第二步
     } else {
       const hint = isLoggedIn()
         ? '（检测到登录票据，但接口/页面均未取到账号信息；请刷新 www.douyin.com 页面后重试）'
         : '（未检测到登录票据，请先在 www.douyin.com 登录）';
       setScanText('❌ 登录检测失败。' + (lastApiError ? ('原因：' + lastApiError + '。') : '') + hint +
         ' 请确认：① 抖音网页版(www.douyin.com)右上角显示你的头像；② 用桌面版网页（非 m.douyin.com）。');
-      updateLoginUI();
+      updateLoginUI(); updateSteps('err1');
     }
   }
 
-  async function runFullScanMobile() {
-    setScanText('⏳ 正在校验登录…');
-    const myUid = await getMyUid();
-    if (!myUid) {
-      const msg = isLoggedIn()
-        ? ('⚠️ 接口未返回你的账号信息。' + (lastApiError ? ('原因：' + lastApiError + '。') : '') +
-           '请先点「登录检测」确认已登录；若你在 m.douyin.com，请开启「桌面模式」访问 www.douyin.com 后刷新再试。')
-        : ('⚠️ 检测到你尚未登录抖音，请先在 www.douyin.com 登录后再点扫描。');
-      setScanText(msg);
-      return;
-    }
-    localStorage.setItem('DYUNREAD_LOGINED', '1');
-    updateLoginUI();
+  // 第二步：登录成功后，获取关注账号名单（直接读取接口，精确）
+  async function stepGetFollow(myUid) {
+    updateSteps(2);
+    setScanText('② 正在获取关注账号名单…');
     const accounts = await getFollowingList(myUid);
     // 写入关注白名单：之后未读只统计这些账号，避免混入非关注视频
     setFollowSet(accounts.map(function (a) { return a.sec_uid; }));
+    LAST_ACCOUNTS = accounts; saveAccounts();
     if (!accounts.length) {
       setScanText('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'));
+      updateSteps('err2');
       return;
     }
-    setScanText('⏳ 找到 ' + accounts.length + ' 个关注账号，开始逐个拉取…');
+    updateSteps(3);
+    setScanText('② ✅ 已获取 ' + accounts.length + ' 个关注账号，正在获取未读视频…');
+    await stepScanVideos(accounts);   // 自动进入第三步
+  }
+
+  // 第三步：拿到关注名单后，逐个拉取未读视频
+  async function stepScanVideos(accounts) {
+    updateSteps(3);
+    setScanText('③ 正在获取未读视频…');
     let added = 0, failed = 0, scanned = 0;
-    for (let i = 0; i < accounts.length; i++) {
-      const acc = accounts[i];
+    const list = (accounts && accounts.length) ? accounts : LAST_ACCOUNTS;
+    for (let i = 0; i < list.length; i++) {
+      const acc = list[i];
       try {
         const vids = await getAccountPosts(acc.sec_uid);
         if (vids && vids.length) { capture(vids, true); added += vids.length; }
         scanned++;
       } catch (e) { failed++; }
-      setScanText('⏳ 拉取：' + acc.nickname + '（' + (i + 1) + '/' + accounts.length + '，已抓 ' + added + ' 条，跳过 ' + failed + '）');
+      setScanText('③ 拉取：' + (acc.nickname || acc.sec_uid.slice(0, 8)) + '（' + (i + 1) + '/' + list.length + '，已抓 ' + added + ' 条，跳过 ' + failed + '）');
       await sleep(200);
     }
     // 自动同步观看历史，把已看的视频从「未读」中剔除
-    setScanText('⏳ 同步观看历史（计算已读）…');
+    setScanText('③ 同步观看历史（计算已读）…');
     try { await getWatchHistory(8); } catch (e) {}
     const unread = getUnread();
-    setScanText('✅ 扫描完成：扫描 ' + scanned + ' 个账号，抓到 ' + added + ' 条视频，当前未读 ' + unread.length + ' 条。点开下方可看每个账号的未读数。');
+    setScanText('✅ 完成：扫描 ' + scanned + ' 个账号，抓到 ' + added + ' 条视频，当前未读 ' + unread.length + ' 条。点开下方可看每个账号的未读数。');
+    updateSteps('done');
     render();
     setTimeout(function () { setScanText(''); }, 8000);
   }
 
-  /* ---------------- 自动流程：仅在点过「登录检测」且同域 www 下，才自动抓取 ---------------- */
-  // runFullScanMobile 内部已包含「扫描关注账号 + 同步观看历史算已读」，这里直接复用。
-  async function autoScanThenSync() {
-    try {
-      await runFullScanMobile();
-    } catch (e) {
-      // 后台自动扫描失败不打扰用户，可手动点「扫描全部关注」
-    }
+  // 主流程按钮：按步骤推进（① 登录 → ② 关注名单 → ③ 未读视频）
+  function runMainFlow() {
+    const s = panel && panel.querySelector('#dyScanStatus'); if (s) s.style.display = 'block';
+    if (!LAST_ACCOUNTS.length) { checkLogin(); }            // 首次/未拿名单：检测登录并自动走 ②③
+    else { stepScanVideos(LAST_ACCOUNTS); }                 // 已有名单：直接重新获取未读
   }
-  // 仅在用户显式登录过(DYUNREAD_LOGINED) 且处于 www.douyin.com 时，才自动触发一次（带 30 分钟冷却）
+
+  /* ---------------- 自动流程：登录过且处于 www 下，自动跑完整链路（带 30 分钟冷却） ---------------- */
   function maybeAutoRun() {
     if (localStorage.getItem('DYUNREAD_LOGINED') !== '1') return;
     const h = location.hostname;
@@ -1314,7 +1323,8 @@ return sign;
     const last = Number(localStorage.getItem('DYUNREAD_AUTOSCAN_TS') || 0);
     if (now - last < COOLDOWN) return;
     localStorage.setItem('DYUNREAD_AUTOSCAN_TS', String(now));
-    autoScanThenSync();
+    if (!LAST_ACCOUNTS.length) checkLogin();                // 自动走完整链路
+    else stepScanVideos(LAST_ACCOUNTS);
   }
 
   /* ---------------- 读取观看历史：用于推算"已读" ---------------- */
@@ -1355,89 +1365,94 @@ return sign;
 
   const CSS = `
   #dyFab{position:fixed;right:14px;bottom:84px;width:60px;height:60px;border-radius:50%;
-    background:#fe2c55;color:#fff;font-size:38px;line-height:60px;text-align:center;
+    background:#fe2c55;color:#fff;font-size:42px;line-height:60px;text-align:center;
     box-shadow:0 4px 14px rgba(0,0,0,.4);z-index:2147483646;cursor:pointer;user-select:none;
     border:2px solid rgba(255,255,255,.85);}
-  #dyBadge{position:absolute;top:-4px;right:-4px;background:#fff;color:#fe2c55;font-size:22px;
+  #dyBadge{position:absolute;top:-4px;right:-4px;background:#fff;color:#fe2c55;font-size:26px;
     font-weight:700;border-radius:10px;min-width:22px;height:22px;line-height:22px;text-align:center;
     padding:0 6px;box-shadow:0 1px 3px rgba(0,0,0,.3);}
   /* 大界面：近全屏浮动卡（四周各留 2%，只比手机屏小一点点） */
   #dyPanel{position:fixed;left:2%;right:2%;top:2%;bottom:2%;background:#161823;color:#fff;
     border-radius:16px;z-index:2147483647;transform:translateY(110%);
     transition:transform .25s ease,left .2s ease,right .2s ease,top .2s ease,bottom .2s ease;display:flex;flex-direction:column;
-    box-shadow:0 6px 26px rgba(0,0,0,.6);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:26px;}
+    box-shadow:0 6px 26px rgba(0,0,0,.6);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:30px;}
   #dyPanel.open{transform:translateY(0);}
   /* 小界面：手机屏的一半（四周各留 25%，居中浮动） */
   #dyPanel.small{left:25%;right:25%;top:25%;bottom:25%;}
   .dyHd{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;
     border-bottom:1px solid #262a3b;}
-  .dyHd b{font-size:29px;}
-  .dyClose{font-size:34px;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 8px;}
-  .dySize{font-size:28px;font-weight:700;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 12px;line-height:1;}
+  .dyHd b{font-size:33px;}
+  .dyClose{font-size:38px;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 8px;}
+  .dySize{font-size:32px;font-weight:700;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 12px;line-height:1;}
   .dySize:active{color:#fff;}
-  .dyStatus{padding:12px 18px;font-size:26px;color:#9aa0b5;background:#1f2233;display:flex;
+  .dySteps{display:flex;align-items:center;gap:8px;padding:10px 18px;background:#1f2233;border-bottom:1px solid #262a3b;font-size:26px;color:#6b7186;}
+  .dySteps .sep{color:#3a3d52;}
+  .dySteps span.on{color:#fe2c55;font-weight:700;}
+  .dySteps span.done{color:#22c55e;font-weight:700;}
+  .dySteps span.err{color:#ff5c5c;font-weight:700;}
+  .dyStatus{padding:12px 18px;font-size:30px;color:#9aa0b5;background:#1f2233;display:flex;
     align-items:center;justify-content:space-between;}
   .dyStatus .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#666;margin-right:6px;vertical-align:middle;}
   .dyStatus .dot.on{background:#22c55e;}
   .dyList{flex:1;overflow-y:auto;padding:6px 16px 10px;-webkit-overflow-scrolling:touch;}
-  .dyEmpty{text-align:center;opacity:.6;padding:44px 12px;line-height:1.9;font-size:26px;}
+  .dyEmpty{text-align:center;opacity:.6;padding:44px 12px;line-height:1.9;font-size:30px;}
   .dyCard{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #262a3b;}
   .dyThumb{width:72px;height:94px;flex:0 0 72px;border-radius:8px;object-fit:cover;
     background:linear-gradient(135deg,#2a2d40,#3a3d52);}
   .dyPh{width:72px;height:94px;flex:0 0 72px;border-radius:8px;background:linear-gradient(135deg,#fe2c55,#f0385e);
-    display:flex;align-items:center;justify-content:center;font-size:32px;color:#fff;}
+    display:flex;align-items:center;justify-content:center;font-size:36px;color:#fff;}
   .dyMeta{flex:1;min-width:0;}
-  .dyAuthor{font-weight:600;margin-bottom:4px;font-size:27px;}
-  .dyDesc{font-size:25px;opacity:.8;line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;
+  .dyAuthor{font-weight:600;margin-bottom:4px;font-size:31px;}
+  .dyDesc{font-size:29px;opacity:.8;line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;
     -webkit-box-orient:vertical;overflow:hidden;margin-bottom:8px;}
-  .dyTime{font-size:24px;opacity:.5;margin-bottom:8px;}
-  .dyOpen{color:#fe2c55;font-size:25px;text-decoration:none;margin-right:16px;}
-  .dyMk{color:#9aa0b5;font-size:25px;background:none;border:none;padding:0;cursor:pointer;}
+  .dyTime{font-size:28px;opacity:.5;margin-bottom:8px;}
+  .dyOpen{color:#fe2c55;font-size:29px;text-decoration:none;margin-right:16px;}
+  .dyMk{color:#9aa0b5;font-size:29px;background:none;border:none;padding:0;cursor:pointer;}
   .dyMk:hover{color:#fff;}
   .dyFt{display:flex;flex-wrap:wrap;gap:14px;padding:16px;border-bottom:1px solid #262a3b;background:#1f2233;}
-  .dyBtn{flex:1 1 calc(50% - 7px);min-width:0;border:none;border-radius:14px;padding:24px 14px;font-size:30px;font-weight:700;line-height:1.2;white-space:normal;cursor:pointer;
+  .dyBtn{flex:1 1 calc(50% - 7px);min-width:0;border:none;border-radius:14px;padding:24px 14px;font-size:34px;font-weight:700;line-height:1.2;white-space:normal;cursor:pointer;
     background:#2a2d40;color:#fff;letter-spacing:.5px;}
   .dyBtn.primary{background:#fe2c55;}
   .dyBtn.ghost{background:transparent;border:2px solid #3a3d52;}
-  .dySummary{padding:12px 18px;font-size:26px;color:#9aa0b5;background:#1f2233;border-bottom:1px solid #262a3b;}
-  .dyScanStatus{padding:12px 18px;font-size:26px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.7;}
-  .dyCatHd{padding:12px 18px;font-size:27px;font-weight:700;color:#fe2c55;background:#161823;position:sticky;top:0;z-index:1;border-bottom:1px solid #262a3b;}
+  .dySummary{padding:12px 18px;font-size:30px;color:#9aa0b5;background:#1f2233;border-bottom:1px solid #262a3b;}
+  .dyScanStatus{padding:12px 18px;font-size:30px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.7;}
+  .dyCatHd{padding:12px 18px;font-size:31px;font-weight:700;color:#fe2c55;background:#161823;position:sticky;top:0;z-index:1;border-bottom:1px solid #262a3b;}
   .dyAcc{border-bottom:1px solid #262a3b;}
   .dyAccHd{display:flex;align-items:center;gap:12px;padding:14px 18px;cursor:pointer;}
-  .dyAvatar{width:46px;height:46px;border-radius:50%;background:#fe2c55;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 46px;font-size:28px;}
-  .dyAccName{flex:1;font-weight:600;font-size:27px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .dyAccCount{background:#fe2c55;color:#fff;border-radius:10px;padding:3px 12px;font-size:25px;font-weight:700;min-width:22px;text-align:center;}
+  .dyAvatar{width:46px;height:46px;border-radius:50%;background:#fe2c55;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 46px;font-size:32px;}
+  .dyAccName{flex:1;font-weight:600;font-size:31px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .dyAccCount{background:#fe2c55;color:#fff;border-radius:10px;padding:3px 12px;font-size:29px;font-weight:700;min-width:22px;text-align:center;}
   .dyAccActions{display:flex;gap:8px;}
-  .dyMini{background:#2a2d40;color:#fff;border:none;border-radius:8px;padding:13px 18px;font-size:27px;font-weight:600;cursor:pointer;}
+  .dyMini{background:#2a2d40;color:#fff;border:none;border-radius:8px;padding:13px 18px;font-size:31px;font-weight:600;cursor:pointer;}
   .dyMini.cat{background:transparent;border:1px solid #3a3d52;color:#9aa0b5;}
   .dyAccBody{padding:0 16px 14px;}
   .dyThumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
   .dyThumbWrap{position:relative;display:block;border-radius:6px;overflow:hidden;background:#2a2d40;}
   .dyThumbWrap img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block;}
-  .dyPh2{width:100%;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#fe2c55,#f0385e);color:#fff;font-size:30px;}
-  .dyThumbMk{position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:5px;font-size:23px;padding:4px 9px;cursor:pointer;}
+  .dyPh2{width:100%;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#fe2c55,#f0385e);color:#fff;font-size:34px;}
+  .dyThumbMk{position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:5px;font-size:27px;padding:4px 9px;cursor:pointer;}
   /* ---- 三级钻取：分类 → 账号 → 视频 ---- */
-  .dyBack{display:flex;align-items:center;gap:6px;padding:15px 18px;font-size:28px;font-weight:600;color:#9aa0b5;cursor:pointer;background:#1f2233;border-bottom:1px solid #262a3b;}
+  .dyBack{display:flex;align-items:center;gap:6px;padding:15px 18px;font-size:32px;font-weight:600;color:#9aa0b5;cursor:pointer;background:#1f2233;border-bottom:1px solid #262a3b;}
   .dyBack:active{color:#fff;}
   .dyCatRow{display:flex;align-items:center;gap:14px;padding:20px 18px;cursor:pointer;border-bottom:1px solid #262a3b;}
   .dyCatRow:active{background:#22263a;}
-  .dyCatName{font-size:30px;font-weight:700;}
-  .dyCatSub{font-size:25px;color:#9aa0b5;margin-top:4px;}
-  .dyCatCount{background:#fe2c55;color:#fff;border-radius:13px;padding:6px 16px;font-size:28px;font-weight:700;flex:0 0 auto;}
-  .dyArrow{color:#9aa0b5;font-size:38px;line-height:1;flex:0 0 auto;}
+  .dyCatName{font-size:34px;font-weight:700;}
+  .dyCatSub{font-size:29px;color:#9aa0b5;margin-top:4px;}
+  .dyCatCount{background:#fe2c55;color:#fff;border-radius:13px;padding:6px 16px;font-size:32px;font-weight:700;flex:0 0 auto;}
+  .dyArrow{color:#9aa0b5;font-size:42px;line-height:1;flex:0 0 auto;}
   .dyAccRow{display:flex;align-items:center;gap:14px;padding:18px;cursor:pointer;border-bottom:1px solid #262a3b;}
   .dyAccRow:active{background:#22263a;}
   .dyAccInfo{flex:1;min-width:0;}
-  .dyAccName{font-size:29px;font-weight:600;}
-  .dyAccSub{font-size:25px;color:#9aa0b5;margin-top:4px;}
+  .dyAccName{font-size:33px;font-weight:600;}
+  .dyAccSub{font-size:29px;color:#9aa0b5;margin-top:4px;}
   .dyAccHdWide{display:flex;align-items:center;gap:14px;padding:18px;background:#1f2233;border-bottom:1px solid #262a3b;}
-  .dyAccHdWide .dyAvatar{width:52px;height:52px;flex:0 0 52px;font-size:30px;}
+  .dyAccHdWide .dyAvatar{width:52px;height:52px;flex:0 0 52px;font-size:34px;}
   .dyAccHdWide .dyAccInfo{flex:1;min-width:0;}
-  .dyAccHdWide .dyMini{font-size:27px;padding:13px 18px;}
+  .dyAccHdWide .dyMini{font-size:31px;padding:13px 18px;}
   /* ---- 登录失败备注框 + 一键复制 ---- */
-  .dyScanStatus{display:flex;align-items:flex-start;gap:12px;padding:14px 18px;font-size:26px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.7;}
+  .dyScanStatus{display:flex;align-items:flex-start;gap:12px;padding:14px 18px;font-size:30px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.7;}
   .dySStext{flex:1;min-width:0;word-break:break-word;white-space:pre-wrap;}
-  .dySScopy{flex:0 0 auto;border:none;border-radius:10px;padding:16px 26px;font-size:26px;font-weight:700;background:#fe2c55;color:#fff;cursor:pointer;}
+  .dySScopy{flex:0 0 auto;border:none;border-radius:10px;padding:16px 26px;font-size:30px;font-weight:700;background:#fe2c55;color:#fff;cursor:pointer;}
   .dySScopy:active{opacity:.8;}
   `;
 
@@ -1458,12 +1473,15 @@ return sign;
     panel.innerHTML =
       '<div class="dyHd"><b>抖音关注 · 未读</b><button class="dySize" id="dySize" title="缩小/放大界面">缩小</button><button class="dyClose" id="dyClose">×</button></div>' +
       '<div class="dyFt">' +
-      '<button class="dyBtn primary" id="dyLogin">登录检测</button>' +
-      '<button class="dyBtn" id="dyScanAll">扫描全部关注</button>' +
+      '<button class="dyBtn primary" id="dyLogin">① 登录账号</button>' +
       '<button class="dyBtn" id="dySync">同步已读</button>' +
       '<button class="dyBtn ghost" id="dyReadAll">全部已读</button>' +
       '<button class="dyBtn ghost" id="dyClear">清除已读</button>' +
       '</div>' +
+      '<div class="dySteps" id="dySteps">' +
+      '<span id="st1">① 登录</span><span class="sep">›</span>' +
+      '<span id="st2">② 关注名单</span><span class="sep">›</span>' +
+      '<span id="st3">③ 未读视频</span></div>' +
       '<div class="dyStatus"><span><span class="dot" id="dyDot"></span><span id="dyStatusText">未记录</span></span>' +
       '<span id="dyCount"></span></div>' +
       '<div class="dySummary" id="dySummary"></div>' +
@@ -1478,14 +1496,7 @@ return sign;
 
     panel.querySelector('#dyClose').addEventListener('click', togglePanel);
     panel.querySelector('#dySize').addEventListener('click', toggleSize);
-    panel.querySelector('#dyLogin').addEventListener('click', function () {
-      const s = panel.querySelector('#dyScanStatus'); if (s) s.style.display = 'block';
-      checkLogin();
-    });
-    panel.querySelector('#dyScanAll').addEventListener('click', function () {
-      const s = panel.querySelector('#dyScanStatus'); if (s) s.style.display = 'block';
-      runFullScanMobile();
-    });
+    panel.querySelector('#dyLogin').addEventListener('click', runMainFlow);
     panel.querySelector('#dyReadAll').addEventListener('click', function () { markAllRead(); });
     panel.querySelector('#dyClear').addEventListener('click', function () { clearRead(); });
     panel.querySelector('#dySync').addEventListener('click', function () {
@@ -1515,7 +1526,29 @@ return sign;
     const btn = panel && panel.querySelector('#dyLogin');
     if (txt) txt.textContent = recording ? '记录中（自动捕获当前页视频）'
       : (onWww ? (logined ? '已登录（可扫描）' : '未登录检测') : '需在 www.douyin.com');
-    if (btn) btn.textContent = logined ? '重新检测' : '登录检测';
+    if (btn) {
+      if (!logined) btn.textContent = '① 登录账号';
+      else if (!LAST_ACCOUNTS.length) btn.textContent = '② 获取关注名单';
+      else btn.textContent = '③ 获取未读视频';
+    }
+  }
+  // 三步流程指示：1/2/3=进行对应步(高亮)，done=全完成(绿色)，err1/err2=失败
+  function updateSteps(step) {
+    const s1 = panel && panel.querySelector('#st1');
+    const s2 = panel && panel.querySelector('#st2');
+    const s3 = panel && panel.querySelector('#st3');
+    if (!s1 || !s2 || !s3) return;
+    function cls(el, st) { el.classList.remove('on', 'done', 'err'); if (st) el.classList.add(st); }
+    if (step === 'err1' || step === 'err2') {
+      cls(s1, 'err'); cls(s2, ''); cls(s3, '');
+      if (step === 'err2') cls(s2, 'on');
+      return;
+    }
+    if (step === 'done') { cls(s1, 'done'); cls(s2, 'done'); cls(s3, 'done'); return; }
+    const n = Number(step);
+    cls(s1, n >= 1 ? (n > 1 ? 'done' : 'on') : '');
+    cls(s2, n >= 2 ? (n > 2 ? 'done' : 'on') : '');
+    cls(s3, n >= 3 ? 'on' : '');
   }
 
   function togglePanel() {
