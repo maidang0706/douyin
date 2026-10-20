@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音关注未读视频助手(手机版/Via) 2026-10-20 10:59 修复登录检测status_code=5(最小请求优先)
+// @name         抖音插件 2026-10-20 17:13 修复登录检测(页面取uid+去webid)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.3.7
-// @description  2026-10-20 10:59 修复「登录检测」报 status_code=5(参数不合法)：改为最小请求优先(仅 aid+X-Bogus)，避免把 ttwid 当 webid 发给服务端被判参数非法；并优先从 cookie 读取 uid。打开已登录的抖音网页版(www.douyin.com)即可抓取关注账号未读视频，显示每个账号未读个数。
+// @version      1.3.9
+// @description  2026-10-20 17:13 修复「登录检测」一直失败：uid_tt 是 HttpOnly 读不到、且 commit/user 在登录态下会因 webid 校验返回 status_code=5。改为优先从页面内联脚本提取 uid(与可用桌面扩展一致)，commit/user 仅作不带签名/webid 的兜底，并去除强制 webid。脚本名前缀改为「抖音插件」。打开已登录的 www.douyin.com 即可抓取关注账号未读视频，显示每个账号未读个数。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -967,13 +967,12 @@ return sign;
     if (/douyin\.com/.test(location.hostname)) return true; // douyin 域名下兜底默认已登录
     return false;
   }
-  // 直接从 cookie 读取当前登录用户的 uid（零请求、不跨域、最稳）
-  // 优先从 cookie 直接读取当前登录用户 uid（零请求、最稳）。覆盖多种可能的 cookie 名。
+  // 直接从 cookie 读取当前登录用户的 uid（零请求、最稳）。
   function getUidFromCookie() {
     const c = document.cookie || '';
-    let m = c.match(/(?:^|;\s*)uid_tt(?:_ss)?=(\d+)/);
+    let m = c.match(/(?:^|;\s*)(?:uid_tt|uid_tt_ss|uid|sid_tt)=(\d+)/);
     if (m) return m[1];
-    // passport_auth_status 形如 uid%3D123456%26uid_tt%3D... 或 uid=123456&...
+    // passport_auth_status 形如 uid%3D123456%26uid_tt%3D...（部分站点把 uid 放在这里）
     m = c.match(/(?:^|;\s*)passport_auth_status=([^;]+)/);
     if (m) {
       try {
@@ -984,13 +983,51 @@ return sign;
     }
     return '';
   }
-  // 取当前登录用户 uid：① 优先 cookie；② 兜底 commit/user（最小请求优先，规避 status_code=5）。
+  // 兜底：从页面内联 <script> JSON 里提取当前用户 uid。
+  // 抖音的 uid_tt 多为 HttpOnly，JS 读不到；但登录后的 PC 网页会把当前用户 uid 写进页面内联脚本，
+  // 桌面版扩展正是靠这一招拿到 uid（之前手机版缺失这一步，所以一直拿不到 uid → 登录检测失败）。
+  function getUidFromPage() {
+    try {
+      const scripts = document.querySelectorAll('script');
+      for (let i = 0; i < scripts.length; i++) {
+        const txt = scripts[i].textContent || '';
+        if (!/[Uu]id|user/i.test(txt)) continue;
+        const m = txt.match(/(?:user_id|uid|uid_tt|selfUserId|sec_uid)["'\s:]+("?\d{6,20}"?)/);
+        if (m) {
+          const v = m[1].replace(/"/g, '');
+          if (/^\d{6,20}$/.test(v)) return v;
+        }
+      }
+    } catch (e) {}
+    return '';
+  }
+  // 从页面内联 <script> JSON 里提取当前用户昵称（用于登录成功后的展示）。
+  function getNickFromPage() {
+    try {
+      const scripts = document.querySelectorAll('script');
+      for (let i = 0; i < scripts.length; i++) {
+        const txt = scripts[i].textContent || '';
+        const m = txt.match(/"nickname"\s*:\s*"([^"]{1,30})"/);
+        if (m) return m[1];
+      }
+    } catch (e) {}
+    return '';
+  }
+  // 取当前登录用户 uid：① cookie → ② 页面内联 → ③ commit/user（不带 X-Bogus/webid，与桌面扩展一致，已知可用）。
   async function getMyUid() {
-    const cookieUid = getUidFromCookie();
-    if (cookieUid) return cookieUid;
-    const res = await signedFetch('/aweme/v1/web/commit/user/?aid=6383', {});
-    if (res.ok && res.j && res.j.user && res.j.user.uid) return String(res.j.user.uid);
-    lastApiError = res.err || 'commit/user 未返回用户信息';
+    let uid = getUidFromCookie();
+    if (uid) return uid;
+    uid = getUidFromPage();
+    if (uid) return uid;
+    // 兜底：commit/user 直接同域请求（不带签名/webid，避免 status_code=5）。
+    try {
+      const r = await fetch(API + '/aweme/v1/web/commit/user/', { credentials: 'include' });
+      const j = await r.json().catch(function () { return {}; });
+      if (j && j.user && j.user.uid) return String(j.user.uid);
+      lastApiError = 'commit/user status_code=' + (j && j.status_code) + ' ' + ((j && j.status_msg) || '');
+    } catch (e) {
+      lastApiError = 'commit/user 请求异常：' + (e && e.message ? e.message : e);
+    }
     return '';
   }
   async function getFollowingList(myUid) {
@@ -1038,15 +1075,20 @@ return sign;
     const myUid = await getMyUid();
     if (myUid) {
       localStorage.setItem('DYUNREAD_LOGINED', '1');
-      // 取昵称用于展示（同样走最小请求，规避 status_code=5）
-      let name = '';
-      const res = await signedFetch('/aweme/v1/web/commit/user/?aid=6383', {});
-      if (res.ok && res.j && res.j.user) name = res.j.user.nickname || res.j.user.unique_id || '';
+      // 取昵称用于展示：优先从页面内联脚本提取（commit/user 在登录态下会被 webid 校验拦成 status_code=5）。
+      let name = getNickFromPage();
+      if (!name) {
+        try {
+          const r2 = await fetch(API + '/aweme/v1/web/commit/user/', { credentials: 'include' });
+          const j2 = await r2.json().catch(function () { return {}; });
+          name = (j2 && j2.user && (j2.user.nickname || j2.user.unique_id)) || '';
+        } catch (e) {}
+      }
       setScanText('✅ 登录成功' + (name ? ('，当前账号：' + name) : ('（uid ' + myUid + '）')) + '。现在可以点「扫描全部关注」了。');
       updateLoginUI();
     } else {
       const hint = isLoggedIn()
-        ? '（检测到登录票据，但接口未返回账号信息；可刷新页面后重试）'
+        ? '（检测到登录票据，但接口/页面均未取到账号信息；请刷新 www.douyin.com 页面后重试）'
         : '（未检测到登录票据，请先在 www.douyin.com 登录）';
       setScanText('❌ 登录检测失败。' + (lastApiError ? ('原因：' + lastApiError + '。') : '') + hint +
         ' 请确认：① 抖音网页版(www.douyin.com)右上角显示你的头像；② 用桌面版网页（非 m.douyin.com）。');
