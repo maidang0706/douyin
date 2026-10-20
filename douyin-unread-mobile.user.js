@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-20 17:13 修复登录检测(页面取uid+去webid)
+// @name         抖音插件 2026-10-20 18:49 界面调整(按钮置顶放大+窗口缩小+文字放大)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.3.9
-// @description  2026-10-20 17:13 修复「登录检测」一直失败：uid_tt 是 HttpOnly 读不到、且 commit/user 在登录态下会因 webid 校验返回 status_code=5。改为优先从页面内联脚本提取 uid(与可用桌面扩展一致)，commit/user 仅作不带签名/webid 的兜底，并去除强制 webid。脚本名前缀改为「抖音插件」。打开已登录的 www.douyin.com 即可抓取关注账号未读视频，显示每个账号未读个数。
+// @version      1.4.0
+// @description  2026-10-20 18:49 界面调整：底部弹层窗口由 82vh 缩至 68vh(更不挡屏)；所有文字区块字号放大(标题/状态/摘要/分类/账号名等)；底部按钮排移到面板最上方并整体放大(每行2个、自动换行)；浮动按钮与「全部已读/分类」小按钮同步放大。登录检测与扫描逻辑不变。打开已登录的 www.douyin.com 即可抓取关注账号未读视频，显示每个账号未读个数。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -1194,63 +1194,63 @@ return sign;
   let fab, panel, listEl, statusEl, badgeEl;
 
   const CSS = `
-  #dyFab{position:fixed;right:14px;bottom:84px;width:52px;height:52px;border-radius:50%;
-    background:#fe2c55;color:#fff;font-size:22px;line-height:52px;text-align:center;
+  #dyFab{position:fixed;right:14px;bottom:84px;width:56px;height:56px;border-radius:50%;
+    background:#fe2c55;color:#fff;font-size:26px;line-height:56px;text-align:center;
     box-shadow:0 4px 14px rgba(0,0,0,.4);z-index:2147483646;cursor:pointer;user-select:none;
     border:2px solid rgba(255,255,255,.85);}
   #dyBadge{position:absolute;top:-4px;right:-4px;background:#fff;color:#fe2c55;font-size:12px;
     font-weight:700;border-radius:10px;min-width:20px;height:20px;line-height:20px;text-align:center;
     padding:0 5px;box-shadow:0 1px 3px rgba(0,0,0,.3);}
-  #dyPanel{position:fixed;left:0;right:0;bottom:0;max-height:82vh;background:#161823;color:#fff;
+  #dyPanel{position:fixed;left:0;right:0;bottom:0;max-height:68vh;background:#161823;color:#fff;
     border-radius:14px 14px 0 0;z-index:2147483647;transform:translateY(100%);
     transition:transform .25s ease;display:flex;flex-direction:column;
-    box-shadow:0 -4px 20px rgba(0,0,0,.5);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;}
+    box-shadow:0 -4px 20px rgba(0,0,0,.5);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;}
   #dyPanel.open{transform:translateY(0);}
-  .dyHd{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;
+  .dyHd{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;
     border-bottom:1px solid #262a3b;}
-  .dyHd b{font-size:15px;}
-  .dyClose{font-size:20px;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 6px;}
-  .dyStatus{padding:8px 14px;font-size:12px;color:#9aa0b5;background:#1f2233;display:flex;
+  .dyHd b{font-size:17px;}
+  .dyClose{font-size:22px;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 6px;}
+  .dyStatus{padding:10px 16px;font-size:14px;color:#9aa0b5;background:#1f2233;display:flex;
     align-items:center;justify-content:space-between;}
   .dyStatus .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#666;margin-right:6px;vertical-align:middle;}
   .dyStatus .dot.on{background:#22c55e;}
   .dyList{flex:1;overflow-y:auto;padding:4px 14px 8px;-webkit-overflow-scrolling:touch;}
-  .dyEmpty{text-align:center;opacity:.6;padding:40px 10px;line-height:1.7;}
+  .dyEmpty{text-align:center;opacity:.6;padding:40px 10px;line-height:1.8;font-size:14px;}
   .dyCard{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #262a3b;}
   .dyThumb{width:64px;height:84px;flex:0 0 64px;border-radius:8px;object-fit:cover;
     background:linear-gradient(135deg,#2a2d40,#3a3d52);}
   .dyPh{width:64px;height:84px;flex:0 0 64px;border-radius:8px;background:linear-gradient(135deg,#fe2c55,#f0385e);
     display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;}
   .dyMeta{flex:1;min-width:0;}
-  .dyAuthor{font-weight:600;margin-bottom:3px;}
-  .dyDesc{font-size:12px;opacity:.8;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;
+  .dyAuthor{font-weight:600;margin-bottom:3px;font-size:15px;}
+  .dyDesc{font-size:13px;opacity:.8;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;
     -webkit-box-orient:vertical;overflow:hidden;margin-bottom:6px;}
-  .dyTime{font-size:11px;opacity:.5;margin-bottom:6px;}
-  .dyOpen{color:#fe2c55;font-size:12px;text-decoration:none;margin-right:14px;}
-  .dyMk{color:#9aa0b5;font-size:12px;background:none;border:none;padding:0;cursor:pointer;}
+  .dyTime{font-size:12px;opacity:.5;margin-bottom:6px;}
+  .dyOpen{color:#fe2c55;font-size:13px;text-decoration:none;margin-right:14px;}
+  .dyMk{color:#9aa0b5;font-size:13px;background:none;border:none;padding:0;cursor:pointer;}
   .dyMk:hover{color:#fff;}
-  .dyFt{display:flex;gap:8px;padding:10px 14px;border-top:1px solid #262a3b;background:#1f2233;}
-  .dyBtn{flex:1;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;
+  .dyFt{display:flex;flex-wrap:wrap;gap:10px;padding:12px 14px;border-bottom:1px solid #262a3b;background:#1f2233;}
+  .dyBtn{flex:1 1 calc(50% - 5px);min-width:120px;border:none;border-radius:10px;padding:14px 10px;font-size:15px;line-height:1.2;white-space:nowrap;cursor:pointer;
     background:#2a2d40;color:#fff;}
   .dyBtn.primary{background:#fe2c55;font-weight:600;}
   .dyBtn.ghost{background:transparent;border:1px solid #3a3d52;}
-  .dySummary{padding:8px 14px;font-size:12px;color:#9aa0b5;background:#1f2233;border-bottom:1px solid #262a3b;}
-  .dyScanStatus{padding:8px 14px;font-size:12px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.5;}
-  .dyCatHd{padding:8px 14px;font-size:12px;font-weight:700;color:#fe2c55;background:#161823;position:sticky;top:0;z-index:1;border-bottom:1px solid #262a3b;}
+  .dySummary{padding:10px 16px;font-size:14px;color:#9aa0b5;background:#1f2233;border-bottom:1px solid #262a3b;}
+  .dyScanStatus{padding:10px 16px;font-size:14px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.6;}
+  .dyCatHd{padding:10px 16px;font-size:15px;font-weight:700;color:#fe2c55;background:#161823;position:sticky;top:0;z-index:1;border-bottom:1px solid #262a3b;}
   .dyAcc{border-bottom:1px solid #262a3b;}
-  .dyAccHd{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;}
-  .dyAvatar{width:34px;height:34px;border-radius:50%;background:#fe2c55;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 34px;font-size:15px;}
-  .dyAccName{flex:1;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .dyAccCount{background:#fe2c55;color:#fff;border-radius:10px;padding:1px 9px;font-size:12px;font-weight:700;min-width:20px;text-align:center;}
-  .dyAccActions{display:flex;gap:6px;}
-  .dyMini{background:#2a2d40;color:#fff;border:none;border-radius:6px;padding:5px 9px;font-size:11px;cursor:pointer;}
+  .dyAccHd{display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;}
+  .dyAvatar{width:38px;height:38px;border-radius:50%;background:#fe2c55;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 38px;font-size:16px;}
+  .dyAccName{flex:1;font-weight:600;font-size:15px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .dyAccCount{background:#fe2c55;color:#fff;border-radius:10px;padding:2px 10px;font-size:13px;font-weight:700;min-width:20px;text-align:center;}
+  .dyAccActions{display:flex;gap:8px;}
+  .dyMini{background:#2a2d40;color:#fff;border:none;border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;}
   .dyMini.cat{background:transparent;border:1px solid #3a3d52;color:#9aa0b5;}
   .dyAccBody{padding:0 14px 12px;}
   .dyThumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
   .dyThumbWrap{position:relative;display:block;border-radius:6px;overflow:hidden;background:#2a2d40;}
   .dyThumbWrap img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block;}
   .dyPh2{width:100%;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#fe2c55,#f0385e);color:#fff;font-size:18px;}
-  .dyThumbMk{position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:4px;font-size:10px;padding:2px 5px;cursor:pointer;}
+  .dyThumbMk{position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:5px;font-size:11px;padding:3px 7px;cursor:pointer;}
   `;
 
   function buildUI() {
@@ -1269,18 +1269,18 @@ return sign;
     panel.id = 'dyPanel';
     panel.innerHTML =
       '<div class="dyHd"><b>抖音关注 · 未读</b><button class="dyClose" id="dyClose">×</button></div>' +
-      '<div class="dyStatus"><span><span class="dot" id="dyDot"></span><span id="dyStatusText">未记录</span></span>' +
-      '<span id="dyCount"></span></div>' +
-      '<div class="dySummary" id="dySummary"></div>' +
-      '<div class="dyScanStatus" id="dyScanStatus" style="display:none"></div>' +
-      '<div class="dyList" id="dyList"></div>' +
       '<div class="dyFt">' +
       '<button class="dyBtn primary" id="dyLogin">登录检测</button>' +
       '<button class="dyBtn" id="dyScanAll">扫描全部关注</button>' +
       '<button class="dyBtn" id="dySync">同步已读</button>' +
       '<button class="dyBtn ghost" id="dyReadAll">全部已读</button>' +
       '<button class="dyBtn ghost" id="dyClear">清除已读</button>' +
-      '</div>';
+      '</div>' +
+      '<div class="dyStatus"><span><span class="dot" id="dyDot"></span><span id="dyStatusText">未记录</span></span>' +
+      '<span id="dyCount"></span></div>' +
+      '<div class="dySummary" id="dySummary"></div>' +
+      '<div class="dyScanStatus" id="dyScanStatus" style="display:none"></div>' +
+      '<div class="dyList" id="dyList"></div>';
     document.body.appendChild(panel);
     listEl = panel.querySelector('#dyList');
     statusEl = panel.querySelector('#dyStatusText');
