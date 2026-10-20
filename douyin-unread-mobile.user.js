@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-20 22:05 只统计关注账号+身份去重(未读账号数对齐关注列表)
+// @name         抖音插件 2026-10-20 22:18 字体再放大两档(基准22→26px)+复制按钮加大
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.5.6
-// @description  2026-10-20 22:05 修复「未读账号数偏高(549 vs 391)」：① 扫描关注列表后用 sec_uid 白名单过滤，未读只统计你真实关注的账号，不再混入关注页/推荐流的非关注视频；② 账号标识改为 sec_uid 优先，合并 uid/unique_id 不一致导致的重复计数，账号数严格 ≤ 关注数。字体/尺寸/大小切换保持 v1.5.5。打开已登录的 www.douyin.com 点「扫描全部关注」即可。
+// @version      1.5.7
+// @description  2026-10-20 22:18 在 v1.5.6 基础上字体再放大两档：基准字号 22px→26px、功能按钮 26px→30px、标题/列表/备注等各元素再 +4px；并单独加大「一键复制」按钮（padding 16px 26px、字体同步放大），更易点击。只统计关注账号+身份去重逻辑、尺寸/大小切换保持不变。打开已登录的 www.douyin.com 点「扫描全部关注」即可。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -1355,89 +1355,89 @@ return sign;
 
   const CSS = `
   #dyFab{position:fixed;right:14px;bottom:84px;width:60px;height:60px;border-radius:50%;
-    background:#fe2c55;color:#fff;font-size:34px;line-height:60px;text-align:center;
+    background:#fe2c55;color:#fff;font-size:38px;line-height:60px;text-align:center;
     box-shadow:0 4px 14px rgba(0,0,0,.4);z-index:2147483646;cursor:pointer;user-select:none;
     border:2px solid rgba(255,255,255,.85);}
-  #dyBadge{position:absolute;top:-4px;right:-4px;background:#fff;color:#fe2c55;font-size:18px;
+  #dyBadge{position:absolute;top:-4px;right:-4px;background:#fff;color:#fe2c55;font-size:22px;
     font-weight:700;border-radius:10px;min-width:22px;height:22px;line-height:22px;text-align:center;
     padding:0 6px;box-shadow:0 1px 3px rgba(0,0,0,.3);}
   /* 大界面：近全屏浮动卡（四周各留 2%，只比手机屏小一点点） */
   #dyPanel{position:fixed;left:2%;right:2%;top:2%;bottom:2%;background:#161823;color:#fff;
     border-radius:16px;z-index:2147483647;transform:translateY(110%);
     transition:transform .25s ease,left .2s ease,right .2s ease,top .2s ease,bottom .2s ease;display:flex;flex-direction:column;
-    box-shadow:0 6px 26px rgba(0,0,0,.6);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:22px;}
+    box-shadow:0 6px 26px rgba(0,0,0,.6);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:26px;}
   #dyPanel.open{transform:translateY(0);}
   /* 小界面：手机屏的一半（四周各留 25%，居中浮动） */
   #dyPanel.small{left:25%;right:25%;top:25%;bottom:25%;}
   .dyHd{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;
     border-bottom:1px solid #262a3b;}
-  .dyHd b{font-size:25px;}
-  .dyClose{font-size:30px;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 8px;}
-  .dySize{font-size:24px;font-weight:700;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 12px;line-height:1;}
+  .dyHd b{font-size:29px;}
+  .dyClose{font-size:34px;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 8px;}
+  .dySize{font-size:28px;font-weight:700;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 12px;line-height:1;}
   .dySize:active{color:#fff;}
-  .dyStatus{padding:12px 18px;font-size:22px;color:#9aa0b5;background:#1f2233;display:flex;
+  .dyStatus{padding:12px 18px;font-size:26px;color:#9aa0b5;background:#1f2233;display:flex;
     align-items:center;justify-content:space-between;}
   .dyStatus .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#666;margin-right:6px;vertical-align:middle;}
   .dyStatus .dot.on{background:#22c55e;}
   .dyList{flex:1;overflow-y:auto;padding:6px 16px 10px;-webkit-overflow-scrolling:touch;}
-  .dyEmpty{text-align:center;opacity:.6;padding:44px 12px;line-height:1.9;font-size:22px;}
+  .dyEmpty{text-align:center;opacity:.6;padding:44px 12px;line-height:1.9;font-size:26px;}
   .dyCard{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #262a3b;}
   .dyThumb{width:72px;height:94px;flex:0 0 72px;border-radius:8px;object-fit:cover;
     background:linear-gradient(135deg,#2a2d40,#3a3d52);}
   .dyPh{width:72px;height:94px;flex:0 0 72px;border-radius:8px;background:linear-gradient(135deg,#fe2c55,#f0385e);
-    display:flex;align-items:center;justify-content:center;font-size:28px;color:#fff;}
+    display:flex;align-items:center;justify-content:center;font-size:32px;color:#fff;}
   .dyMeta{flex:1;min-width:0;}
-  .dyAuthor{font-weight:600;margin-bottom:4px;font-size:23px;}
-  .dyDesc{font-size:21px;opacity:.8;line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;
+  .dyAuthor{font-weight:600;margin-bottom:4px;font-size:27px;}
+  .dyDesc{font-size:25px;opacity:.8;line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;
     -webkit-box-orient:vertical;overflow:hidden;margin-bottom:8px;}
-  .dyTime{font-size:20px;opacity:.5;margin-bottom:8px;}
-  .dyOpen{color:#fe2c55;font-size:21px;text-decoration:none;margin-right:16px;}
-  .dyMk{color:#9aa0b5;font-size:21px;background:none;border:none;padding:0;cursor:pointer;}
+  .dyTime{font-size:24px;opacity:.5;margin-bottom:8px;}
+  .dyOpen{color:#fe2c55;font-size:25px;text-decoration:none;margin-right:16px;}
+  .dyMk{color:#9aa0b5;font-size:25px;background:none;border:none;padding:0;cursor:pointer;}
   .dyMk:hover{color:#fff;}
   .dyFt{display:flex;flex-wrap:wrap;gap:14px;padding:16px;border-bottom:1px solid #262a3b;background:#1f2233;}
-  .dyBtn{flex:1 1 calc(50% - 7px);min-width:0;border:none;border-radius:14px;padding:24px 14px;font-size:26px;font-weight:700;line-height:1.2;white-space:normal;cursor:pointer;
+  .dyBtn{flex:1 1 calc(50% - 7px);min-width:0;border:none;border-radius:14px;padding:24px 14px;font-size:30px;font-weight:700;line-height:1.2;white-space:normal;cursor:pointer;
     background:#2a2d40;color:#fff;letter-spacing:.5px;}
   .dyBtn.primary{background:#fe2c55;}
   .dyBtn.ghost{background:transparent;border:2px solid #3a3d52;}
-  .dySummary{padding:12px 18px;font-size:22px;color:#9aa0b5;background:#1f2233;border-bottom:1px solid #262a3b;}
-  .dyScanStatus{padding:12px 18px;font-size:22px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.7;}
-  .dyCatHd{padding:12px 18px;font-size:23px;font-weight:700;color:#fe2c55;background:#161823;position:sticky;top:0;z-index:1;border-bottom:1px solid #262a3b;}
+  .dySummary{padding:12px 18px;font-size:26px;color:#9aa0b5;background:#1f2233;border-bottom:1px solid #262a3b;}
+  .dyScanStatus{padding:12px 18px;font-size:26px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.7;}
+  .dyCatHd{padding:12px 18px;font-size:27px;font-weight:700;color:#fe2c55;background:#161823;position:sticky;top:0;z-index:1;border-bottom:1px solid #262a3b;}
   .dyAcc{border-bottom:1px solid #262a3b;}
   .dyAccHd{display:flex;align-items:center;gap:12px;padding:14px 18px;cursor:pointer;}
-  .dyAvatar{width:46px;height:46px;border-radius:50%;background:#fe2c55;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 46px;font-size:24px;}
-  .dyAccName{flex:1;font-weight:600;font-size:23px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .dyAccCount{background:#fe2c55;color:#fff;border-radius:10px;padding:3px 12px;font-size:21px;font-weight:700;min-width:22px;text-align:center;}
+  .dyAvatar{width:46px;height:46px;border-radius:50%;background:#fe2c55;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 46px;font-size:28px;}
+  .dyAccName{flex:1;font-weight:600;font-size:27px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .dyAccCount{background:#fe2c55;color:#fff;border-radius:10px;padding:3px 12px;font-size:25px;font-weight:700;min-width:22px;text-align:center;}
   .dyAccActions{display:flex;gap:8px;}
-  .dyMini{background:#2a2d40;color:#fff;border:none;border-radius:8px;padding:13px 18px;font-size:23px;font-weight:600;cursor:pointer;}
+  .dyMini{background:#2a2d40;color:#fff;border:none;border-radius:8px;padding:13px 18px;font-size:27px;font-weight:600;cursor:pointer;}
   .dyMini.cat{background:transparent;border:1px solid #3a3d52;color:#9aa0b5;}
   .dyAccBody{padding:0 16px 14px;}
   .dyThumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
   .dyThumbWrap{position:relative;display:block;border-radius:6px;overflow:hidden;background:#2a2d40;}
   .dyThumbWrap img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block;}
-  .dyPh2{width:100%;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#fe2c55,#f0385e);color:#fff;font-size:26px;}
-  .dyThumbMk{position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:5px;font-size:19px;padding:4px 9px;cursor:pointer;}
+  .dyPh2{width:100%;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#fe2c55,#f0385e);color:#fff;font-size:30px;}
+  .dyThumbMk{position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:5px;font-size:23px;padding:4px 9px;cursor:pointer;}
   /* ---- 三级钻取：分类 → 账号 → 视频 ---- */
-  .dyBack{display:flex;align-items:center;gap:6px;padding:15px 18px;font-size:24px;font-weight:600;color:#9aa0b5;cursor:pointer;background:#1f2233;border-bottom:1px solid #262a3b;}
+  .dyBack{display:flex;align-items:center;gap:6px;padding:15px 18px;font-size:28px;font-weight:600;color:#9aa0b5;cursor:pointer;background:#1f2233;border-bottom:1px solid #262a3b;}
   .dyBack:active{color:#fff;}
   .dyCatRow{display:flex;align-items:center;gap:14px;padding:20px 18px;cursor:pointer;border-bottom:1px solid #262a3b;}
   .dyCatRow:active{background:#22263a;}
-  .dyCatName{font-size:26px;font-weight:700;}
-  .dyCatSub{font-size:21px;color:#9aa0b5;margin-top:4px;}
-  .dyCatCount{background:#fe2c55;color:#fff;border-radius:13px;padding:6px 16px;font-size:24px;font-weight:700;flex:0 0 auto;}
-  .dyArrow{color:#9aa0b5;font-size:34px;line-height:1;flex:0 0 auto;}
+  .dyCatName{font-size:30px;font-weight:700;}
+  .dyCatSub{font-size:25px;color:#9aa0b5;margin-top:4px;}
+  .dyCatCount{background:#fe2c55;color:#fff;border-radius:13px;padding:6px 16px;font-size:28px;font-weight:700;flex:0 0 auto;}
+  .dyArrow{color:#9aa0b5;font-size:38px;line-height:1;flex:0 0 auto;}
   .dyAccRow{display:flex;align-items:center;gap:14px;padding:18px;cursor:pointer;border-bottom:1px solid #262a3b;}
   .dyAccRow:active{background:#22263a;}
   .dyAccInfo{flex:1;min-width:0;}
-  .dyAccName{font-size:25px;font-weight:600;}
-  .dyAccSub{font-size:21px;color:#9aa0b5;margin-top:4px;}
+  .dyAccName{font-size:29px;font-weight:600;}
+  .dyAccSub{font-size:25px;color:#9aa0b5;margin-top:4px;}
   .dyAccHdWide{display:flex;align-items:center;gap:14px;padding:18px;background:#1f2233;border-bottom:1px solid #262a3b;}
-  .dyAccHdWide .dyAvatar{width:52px;height:52px;flex:0 0 52px;font-size:26px;}
+  .dyAccHdWide .dyAvatar{width:52px;height:52px;flex:0 0 52px;font-size:30px;}
   .dyAccHdWide .dyAccInfo{flex:1;min-width:0;}
-  .dyAccHdWide .dyMini{font-size:23px;padding:13px 18px;}
+  .dyAccHdWide .dyMini{font-size:27px;padding:13px 18px;}
   /* ---- 登录失败备注框 + 一键复制 ---- */
-  .dyScanStatus{display:flex;align-items:flex-start;gap:12px;padding:14px 18px;font-size:22px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.7;}
+  .dyScanStatus{display:flex;align-items:flex-start;gap:12px;padding:14px 18px;font-size:26px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.7;}
   .dySStext{flex:1;min-width:0;word-break:break-word;white-space:pre-wrap;}
-  .dySScopy{flex:0 0 auto;border:none;border-radius:8px;padding:11px 18px;font-size:22px;font-weight:700;background:#fe2c55;color:#fff;cursor:pointer;}
+  .dySScopy{flex:0 0 auto;border:none;border-radius:10px;padding:16px 26px;font-size:26px;font-weight:700;background:#fe2c55;color:#fff;cursor:pointer;}
   .dySScopy:active{opacity:.8;}
   `;
 
