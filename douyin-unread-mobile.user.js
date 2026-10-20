@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-20 19:58 增加界面大小切换(缩小/放大按钮·全屏与浮动小卡片两档)
+// @name         抖音插件 2026-10-20 21:22 调整界面尺寸(大档近全屏·小档为屏幕一半)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.5.2
-// @description  2026-10-20 19:58 新增界面大小切换：面板右上角「缩小/放大」按钮，在「全屏大模式(默认，占满屏)」与「浮动小卡片模式(不占满屏、居中浮动)」之间一键切换。登录检测与扫描逻辑不变。打开已登录的 www.douyin.com 即可抓取关注账号未读视频。
+// @version      1.5.3
+// @description  2026-10-20 21:22 调整界面两档尺寸比例：大界面为近全屏浮动卡(四周各留2%，只比手机屏小一点点)；小界面为手机屏的一半(四周各留25%，居中浮动)。右上角「缩小/放大」按钮一键切换。登录检测与扫描逻辑不变。打开已登录的 www.douyin.com 即可抓取关注账号未读视频。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -1312,14 +1312,14 @@ return sign;
   #dyBadge{position:absolute;top:-4px;right:-4px;background:#fff;color:#fe2c55;font-size:12px;
     font-weight:700;border-radius:10px;min-width:20px;height:20px;line-height:20px;text-align:center;
     padding:0 5px;box-shadow:0 1px 3px rgba(0,0,0,.3);}
-  #dyPanel{position:fixed;left:0;right:0;bottom:0;max-height:90vh;background:#161823;color:#fff;
-    border-radius:14px 14px 0 0;z-index:2147483647;transform:translateY(100%);
-    transition:transform .25s ease,left .2s ease,right .2s ease,max-height .2s ease,bottom .2s ease;display:flex;flex-direction:column;
-    box-shadow:0 -4px 20px rgba(0,0,0,.5);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;}
+  /* 大界面：近全屏浮动卡（四周各留 2%，只比手机屏小一点点） */
+  #dyPanel{position:fixed;left:2%;right:2%;top:2%;bottom:2%;background:#161823;color:#fff;
+    border-radius:16px;z-index:2147483647;transform:translateY(110%);
+    transition:transform .25s ease,left .2s ease,right .2s ease,top .2s ease,bottom .2s ease;display:flex;flex-direction:column;
+    box-shadow:0 6px 26px rgba(0,0,0,.6);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;}
   #dyPanel.open{transform:translateY(0);}
-  /* 缩小模式：浮动小卡片（不占满屏，居中浮动） */
-  #dyPanel.small{left:4%;right:4%;bottom:16px;max-height:52vh;border-radius:16px;
-    box-shadow:0 6px 26px rgba(0,0,0,.6);}
+  /* 小界面：手机屏的一半（四周各留 25%，居中浮动） */
+  #dyPanel.small{left:25%;right:25%;top:25%;bottom:25%;}
   .dyHd{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;
     border-bottom:1px solid #262a3b;}
   .dyHd b{font-size:17px;}
