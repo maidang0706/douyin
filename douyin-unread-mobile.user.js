@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-20 21:49 界面字体再放大一档(基准18→22px·各项再+4px)
+// @name         抖音插件 2026-10-20 22:05 只统计关注账号+身份去重(未读账号数对齐关注列表)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.5.5
-// @description  2026-10-20 21:49 在 v1.5.4 基础上界面字体再放大一档：基准字号 18px→22px，标题/按钮/列表/备注等各元素再 +4px，按钮文字改为可换行避免小界面溢出。两档尺寸(近全屏/屏幕一半)与右上角缩小/放大按钮保持不变。登录检测与扫描逻辑不变。打开已登录的 www.douyin.com 即可抓取关注账号未读视频。
+// @version      1.5.6
+// @description  2026-10-20 22:05 修复「未读账号数偏高(549 vs 391)」：① 扫描关注列表后用 sec_uid 白名单过滤，未读只统计你真实关注的账号，不再混入关注页/推荐流的非关注视频；② 账号标识改为 sec_uid 优先，合并 uid/unique_id 不一致导致的重复计数，账号数严格 ≤ 关注数。字体/尺寸/大小切换保持 v1.5.5。打开已登录的 www.douyin.com 点「扫描全部关注」即可。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -660,12 +660,40 @@ return sign;
 
 
   /* ---------------- 存储 ---------------- */
-  const K_DATA = 'DYUNREAD_DATA_v1';
+  const SCHEMA = '2';                       // 数据 schema 版本；变化时清空旧的脏数据（v1 混入非关注账号/重复计数）
+  const K_SCHEMA = 'DYUNREAD_SCHEMA_v1';
+  const K_DATA = 'DYUNREAD_DATA_v2';        // 注意：key 升 v2，旧 v1 脏数据自动失效
   const K_REC = 'DYUNREAD_REC_v1';
   const K_WATCHED = 'DYUNREAD_WATCHED_v1'; // 来自抖音「观看历史」的已看视频 ID 集合
   const K_UID = 'DYUNREAD_UID_v1';        // 被动捕获到的当前登录用户 uid（持久化，避免每次重新取）
   const K_SEC = 'DYUNREAD_SEC_v1';        // 当前登录用户 sec_uid
+  const K_FOLLOW = 'DYUNREAD_FOLLOW_v2';  // 关注列表白名单（sec_uid 数组），只统计关注账号
   let lastApiError = ''; // 最近一次接口失败原因，用于给出精准报错（而不是笼统的「接口未返回数据」）
+
+  // 关注白名单（sec_uid 集合）：扫描「关注全部」后写入；为空时不限制（回退原行为）。
+  // 作用：未读只统计你真实关注的账号，避免关注页/推荐流里混入的非关注账号被算进去。
+  let FOLLOW_SET = [];
+  try {
+    const f = JSON.parse(localStorage.getItem(K_FOLLOW) || '[]');
+    if (Array.isArray(f)) FOLLOW_SET = f;
+  } catch (e) {}
+  function saveFollow() {
+    try { localStorage.setItem(K_FOLLOW, JSON.stringify(FOLLOW_SET)); } catch (e) {}
+  }
+  function setFollowSet(arr) {
+    FOLLOW_SET = Array.isArray(arr) ? arr.filter(Boolean) : [];
+    saveFollow();
+    if (panelOpen) render();
+  }
+  // schema 迁移：旧版本脏数据（混非关注、重复计数）清空，重新扫描即得干净结果
+  (function migrate() {
+    try {
+      if (localStorage.getItem(K_SCHEMA) !== SCHEMA) {
+        try { localStorage.removeItem('DYUNREAD_DATA_v1'); } catch (e) {}
+        try { localStorage.setItem(K_SCHEMA, SCHEMA); } catch (e) {}
+      }
+    } catch (e) {}
+  })();
 
   // 被动捕获到的当前用户 uid / sec_uid：抖音自己的页面代码在加载用户态时会调用 commit/user、
   // user/profile 等接口，响应里带当前用户 uid；我们用 fetch/XHR hook 把这些响应里的 uid 抓出来，
@@ -737,11 +765,15 @@ return sign;
     const desc = (a.desc || a.descr || a.caption || '').toString().trim();
     const authorName =
       author.nickname || author.nick_name || author.unique_id || author.short_id || '未知作者';
-    const authorId = author.uid || author.sec_uid || author.unique_id || '';
+    const aUid = author.uid || (a.author_id ? String(a.author_id) : '') || '';
+    const aSec = author.sec_uid || '';
+    const authorId = aUid || aSec || author.unique_id || '';
     return {
       id: id,
       author: authorName,
       authorId: authorId,
+      uid: aUid,
+      sec: aSec,
       desc: desc,
       cover: cover,
       url: 'https://www.douyin.com/video/' + id,
@@ -792,6 +824,13 @@ return sign;
   }
 
   /* ---------------- 记录 / 未读 ---------------- */
+  // 是否只算关注账号：白名单为空（尚未扫描关注列表）时不过滤，回退原行为
+  function inFollow(v) {
+    if (!FOLLOW_SET.length) return true;
+    const sec = (v && (v.sec || '')) || '';
+    if (sec && FOLLOW_SET.indexOf(sec) >= 0) return true;
+    return false;
+  }
   function capture(videos, force) {
     if (!force && !shouldRecord()) return;
     const data = loadData();
@@ -799,9 +838,11 @@ return sign;
     let added = 0;
     for (const v of videos) {
       if (!v || !v.id) continue;
+      if (!inFollow(v)) continue;   // 非关注账号不计入未读
       if (!data[v.id]) {
         data[v.id] = {
-          id: v.id, author: v.author, authorId: v.authorId, desc: v.desc,
+          id: v.id, author: v.author, authorId: v.authorId, uid: v.uid || '', sec: v.sec || '',
+          desc: v.desc,
           cover: v.cover, url: v.url, createTime: v.createTime,
           cat: v.cat || '未分类',
           seenAt: now, read: false,
@@ -840,8 +881,14 @@ return sign;
     saveData(out); updateBadge(); render();
   }
 
-  // 账号标识：优先用 authorId，缺失时退化为 "n:" + 昵称
-  function accKey(v) { return (v && v.authorId) ? v.authorId : ('n:' + (v.author || '未知作者')); }
+  // 账号标识：sec_uid 优先（最稳定，关注列表与视频作者都带它），缺失再退化为 uid/authorId/昵称。
+  // 保证同一账号不会因 uid / unique_id 在不同接口不一致而被重复计数。
+  function accKey(v) {
+    const sec = (v && v.sec) || ''; if (sec) return 's:' + sec;
+    const uid = (v && v.uid) || ''; if (uid) return 'u:' + uid;
+    if (v && v.authorId) return 'a:' + v.authorId;
+    return 'n:' + ((v && v.author) || '未知作者');
+  }
 
   // 把某个账号的全部未读标记为已读
   function markAccountRead(key) {
@@ -1221,6 +1268,8 @@ return sign;
     localStorage.setItem('DYUNREAD_LOGINED', '1');
     updateLoginUI();
     const accounts = await getFollowingList(myUid);
+    // 写入关注白名单：之后未读只统计这些账号，避免混入非关注视频
+    setFollowSet(accounts.map(function (a) { return a.sec_uid; }));
     if (!accounts.length) {
       setScanText('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'));
       return;
@@ -1629,6 +1678,13 @@ return sign;
       ? (accCount + ' 个账号有未读 · 共 ' + unread.length + ' 条（已看历史 ' + watched + ' 条）')
       : '没有未读视频（已看历史 ' + watched + ' 条）';
     listEl.innerHTML = '';
+    if (!FOLLOW_SET.length) {
+      const tip = document.createElement('div');
+      tip.className = 'dyScanStatus';
+      tip.style.color = '#ffd166';
+      tip.textContent = '⚠️ 尚未扫描关注列表，未读可能含非关注账号。点「扫描全部关注」即可只统计你关注的账号。';
+      listEl.appendChild(tip);
+    }
     if (!unread.length) {
       const e = document.createElement('div');
       e.className = 'dyEmpty';
