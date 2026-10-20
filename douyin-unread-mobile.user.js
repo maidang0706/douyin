@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-20 19:27 修复登录检测(被动捕获uid+sec_uid解析+轮询)
+// @name         抖音插件 2026-10-20 19:58 增加界面大小切换(缩小/放大按钮·全屏与浮动小卡片两档)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.5.1
-// @description  2026-10-20 19:27 修复「登录检测」一直失败(status_code=5/取不到账号)：新增被动捕获——hook 抖音自身的 commit/user、user/profile 等接口响应，抓取当前用户 uid(与可用桌面扩展同机制)；并增加页面 sec_uid→数字uid 解析、整页/全局状态扫描、登录检测轮询等待。login检测与扫描逻辑不变。打开已登录的 www.douyin.com 即可抓取关注账号未读视频。
+// @version      1.5.2
+// @description  2026-10-20 19:58 新增界面大小切换：面板右上角「缩小/放大」按钮，在「全屏大模式(默认，占满屏)」与「浮动小卡片模式(不占满屏、居中浮动)」之间一键切换。登录检测与扫描逻辑不变。打开已登录的 www.douyin.com 即可抓取关注账号未读视频。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -1312,15 +1312,20 @@ return sign;
   #dyBadge{position:absolute;top:-4px;right:-4px;background:#fff;color:#fe2c55;font-size:12px;
     font-weight:700;border-radius:10px;min-width:20px;height:20px;line-height:20px;text-align:center;
     padding:0 5px;box-shadow:0 1px 3px rgba(0,0,0,.3);}
-  #dyPanel{position:fixed;left:0;right:0;bottom:0;max-height:68vh;background:#161823;color:#fff;
+  #dyPanel{position:fixed;left:0;right:0;bottom:0;max-height:90vh;background:#161823;color:#fff;
     border-radius:14px 14px 0 0;z-index:2147483647;transform:translateY(100%);
-    transition:transform .25s ease;display:flex;flex-direction:column;
+    transition:transform .25s ease,left .2s ease,right .2s ease,max-height .2s ease,bottom .2s ease;display:flex;flex-direction:column;
     box-shadow:0 -4px 20px rgba(0,0,0,.5);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;}
   #dyPanel.open{transform:translateY(0);}
+  /* 缩小模式：浮动小卡片（不占满屏，居中浮动） */
+  #dyPanel.small{left:4%;right:4%;bottom:16px;max-height:52vh;border-radius:16px;
+    box-shadow:0 6px 26px rgba(0,0,0,.6);}
   .dyHd{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;
     border-bottom:1px solid #262a3b;}
   .dyHd b{font-size:17px;}
   .dyClose{font-size:22px;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 6px;}
+  .dySize{font-size:16px;font-weight:700;color:#9aa0b5;background:none;border:none;cursor:pointer;padding:0 10px;line-height:1;}
+  .dySize:active{color:#fff;}
   .dyStatus{padding:10px 16px;font-size:14px;color:#9aa0b5;background:#1f2233;display:flex;
     align-items:center;justify-content:space-between;}
   .dyStatus .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#666;margin-right:6px;vertical-align:middle;}
@@ -1402,7 +1407,7 @@ return sign;
     panel = document.createElement('div');
     panel.id = 'dyPanel';
     panel.innerHTML =
-      '<div class="dyHd"><b>抖音关注 · 未读</b><button class="dyClose" id="dyClose">×</button></div>' +
+      '<div class="dyHd"><b>抖音关注 · 未读</b><button class="dySize" id="dySize" title="缩小/放大界面">缩小</button><button class="dyClose" id="dyClose">×</button></div>' +
       '<div class="dyFt">' +
       '<button class="dyBtn primary" id="dyLogin">登录检测</button>' +
       '<button class="dyBtn" id="dyScanAll">扫描全部关注</button>' +
@@ -1423,6 +1428,7 @@ return sign;
     statusEl = panel.querySelector('#dyStatusText');
 
     panel.querySelector('#dyClose').addEventListener('click', togglePanel);
+    panel.querySelector('#dySize').addEventListener('click', toggleSize);
     panel.querySelector('#dyLogin').addEventListener('click', function () {
       const s = panel.querySelector('#dyScanStatus'); if (s) s.style.display = 'block';
       checkLogin();
@@ -1466,7 +1472,16 @@ return sign;
   function togglePanel() {
     panelOpen = !panelOpen;
     panel.classList.toggle('open', panelOpen);
+    if (fab) fab.style.display = panelOpen ? 'none' : 'block';
     if (panelOpen) render();
+  }
+  // 界面大小切换：全屏大模式 ↔ 浮动小卡片模式
+  let panelSmall = false;
+  function toggleSize() {
+    panelSmall = !panelSmall;
+    panel.classList.toggle('small', panelSmall);
+    const sb = panel.querySelector('#dySize');
+    if (sb) sb.textContent = panelSmall ? '放大' : '缩小';
   }
   function updateRecUI() {
     // 仅更新「记录中」指示灯（原「开始记录」按钮已并入登录→扫描两步式，不再单独存在）
