@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-21 22:00 三个独立按钮(登录/获取关注/抓取未读)+门禁+按钮加大
+// @name         抖音插件 2026-10-22 21:40 关注名单核对区(第②步展示数量+昵称清单供核对)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.5.9
-// @description  2026-10-21 22:00 底部按钮重构为三个同行大按钮并加门禁：①「登录」点击登录抖音(登录成功才能点下一步)；②「获取关注的公众号」(需登录，分页拉到 has_more=false 才算「完成」，必须取完所有关注才能继续)；③「抓取未读视频」(需关注名单完整获取)。三个按钮比之前更大。原先的「同步已读」已并入抓取步骤，「全部已读/清除已读」移至第二行小按钮保留。只统计关注账号+身份去重、尺寸/大小切换、复制按钮加大、字体均保持。打开已登录的 www.douyin.com 依次点 登录→获取关注→抓取未读。
+// @version      1.6.0
+// @description  2026-10-22 21:40 新增「关注名单核对区」：第②步获取关注公众号完成后，面板展示大号数量(绿色)与可滚动昵称清单(按昵称排序，最多200个+省略)，供用户先核对数量/名单是否正确，确认无误后再点③「抓取未读视频」。第②③步仍严格门禁(未登录不能取关注、关注未取完不能抓视频)。底部三按钮+尺寸/大小切换/复制按钮加大/字体均保持。打开已登录的 www.douyin.com 依次点 登录→获取关注(核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -1298,7 +1298,40 @@ return sign;
     FOLLOW_DONE = true;
     updateSteps(3);
     updateLoginUI();
-    setScanText('② ✅ 完成：已获取 ' + accounts.length + ' 个关注公众号（已全部取完）。现在点「抓取未读视频」。');
+    renderFollowList();
+    setScanText('② ✅ 完成：已获取 ' + accounts.length + ' 个关注公众号（已全部取完）。请先核对上方名单数量是否正确，确认无误后再点「抓取未读视频」。');
+  }
+
+  // 第②步完成后，把关注名单（数量 + 昵称清单）渲染到核对区，供用户先核对再抓视频
+  function renderFollowList() {
+    const box = panel && panel.querySelector('#dyFollowBox');
+    const numEl = panel && panel.querySelector('#dyFollowNum');
+    const namesEl = panel && panel.querySelector('#dyFollowNames');
+    if (!box || !numEl || !namesEl) return;
+    if (!FOLLOW_DONE || !LAST_ACCOUNTS.length) { box.classList.remove('show'); return; }
+    numEl.textContent = LAST_ACCOUNTS.length + ' 个';
+    numEl.classList.add('ok');
+    namesEl.innerHTML = '';
+    // 按昵称排序，方便核对；最多展示前 200 个（避免超长清单卡顿），其余显示省略
+    const sorted = LAST_ACCOUNTS.slice().sort(function (a, b) {
+      return (a.nickname || '').localeCompare(b.nickname || '', 'zh');
+    });
+    const MAX = 200;
+    for (let i = 0; i < Math.min(sorted.length, MAX); i++) {
+      const el = document.createElement('span');
+      el.className = 'dyFollowName';
+      el.textContent = sorted[i].nickname || sorted[i].sec_uid.slice(0, 10);
+      namesEl.appendChild(el);
+    }
+    if (sorted.length > MAX) {
+      const more = document.createElement('span');
+      more.className = 'dyFollowName';
+      more.style.background = 'transparent';
+      more.style.color = '#9aa0b5';
+      more.textContent = '…还有 ' + (sorted.length - MAX) + ' 个';
+      namesEl.appendChild(more);
+    }
+    box.classList.add('show');
   }
 
   // 第三步：拿到关注名单后，逐个拉取未读视频
@@ -1428,6 +1461,16 @@ return sign;
   .dyStatus .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#666;margin-right:6px;vertical-align:middle;}
   .dyStatus .dot.on{background:#22c55e;}
   .dyList{flex:1;overflow-y:auto;padding:6px 16px 10px;-webkit-overflow-scrolling:touch;}
+  /* ---- 关注名单核对区（第②步完成后展示，供用户核对数量/名单）---- */
+  .dyFollowBox{display:none;padding:14px 18px;background:#1f2233;border-bottom:1px solid #262a3b;}
+  .dyFollowBox.show{display:block;}
+  .dyFollowHd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
+  .dyFollowNum{font-size:34px;font-weight:800;color:#fe2c55;}
+  .dyFollowNum.ok{color:#22c55e;}
+  .dyFollowTip{font-size:26px;color:#9aa0b5;line-height:1.4;}
+  .dyFollowNames{display:flex;flex-wrap:wrap;gap:8px;max-height:300px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  .dyFollowName{background:#2a2d40;border-radius:10px;padding:8px 14px;font-size:26px;color:#fff;line-height:1.3;}
+  .dyFollowName:nth-child(even){background:#262a3b;}
   .dyEmpty{text-align:center;opacity:.6;padding:44px 12px;line-height:1.9;font-size:30px;}
   .dyCard{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #262a3b;}
   .dyThumb{width:72px;height:94px;flex:0 0 72px;border-radius:8px;object-fit:cover;
@@ -1527,6 +1570,11 @@ return sign;
       '<div class="dyScanStatus" id="dyScanStatus" style="display:none">' +
       '<div class="dySStext" id="dySStext"></div>' +
       '<button class="dySScopy" id="dySScopy">复制</button>' +
+      '</div>' +
+      '<div class="dyFollowBox" id="dyFollowBox">' +
+      '<div class="dyFollowHd"><span class="dyFollowNum" id="dyFollowNum">0</span>' +
+      '<span class="dyFollowTip">个关注公众号（请核对数量与名单）</span></div>' +
+      '<div class="dyFollowNames" id="dyFollowNames"></div>' +
       '</div>' +
       '<div class="dyList" id="dyList"></div>';
     document.body.appendChild(panel);
@@ -1745,6 +1793,7 @@ return sign;
     if (!listEl) return;
     updateRecUI();
     updateLoginUI();
+    renderFollowList();
     const unread = getUnread();
     panel.querySelector('#dyCount').textContent = '未读 ' + unread.length;
     const accCount = new Set(unread.map(accKey)).size;
@@ -1758,7 +1807,7 @@ return sign;
       const tip = document.createElement('div');
       tip.className = 'dyScanStatus';
       tip.style.color = '#ffd166';
-      tip.textContent = '⚠️ 尚未扫描关注列表，未读可能含非关注账号。点「扫描全部关注」即可只统计你关注的账号。';
+      tip.textContent = '⚠️ 尚未获取关注列表，未读可能含非关注账号。点「获取关注的公众号」即可先核对名单、再只统计你关注的账号。';
       listEl.appendChild(tip);
     }
     if (!unread.length) {
