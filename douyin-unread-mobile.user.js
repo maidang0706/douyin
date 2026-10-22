@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-22 21:40 关注名单核对区(第②步展示数量+昵称清单供核对)
+// @name         抖音插件 2026-10-22 21:43 关注名单进度条(个数+完成率+剩余时间估算)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.6.0
-// @description  2026-10-22 21:40 新增「关注名单核对区」：第②步获取关注公众号完成后，面板展示大号数量(绿色)与可滚动昵称清单(按昵称排序，最多200个+省略)，供用户先核对数量/名单是否正确，确认无误后再点③「抓取未读视频」。第②③步仍严格门禁(未登录不能取关注、关注未取完不能抓视频)。底部三按钮+尺寸/大小切换/复制按钮加大/字体均保持。打开已登录的 www.douyin.com 依次点 登录→获取关注(核对)→抓取未读。
+// @version      1.6.1
+// @description  2026-10-22 21:43 第②步「获取关注公众号」进行中实时显示进度条：已获取个数、完成率百分比、预计剩余时间(估算，接口不返回总数时按速度估算)。获取完成后进度条置满并收起，再展示「关注名单核对区」(大号数量+可滚动昵称清单供核对)。第②③步仍严格门禁。打开已登录的 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -1190,11 +1190,13 @@ return sign;
     return '';
   }
   // 返回 {list, complete}：complete=true 表示已分页拉到 has_more=false（即你关注的所有公众号都取完了）
-  async function getFollowingList(myUid) {
+  // onProgress(page 信息) 每拉完一页回调一次，用于实时显示「已获取个数 / 完成率 / 剩余时间」
+  async function getFollowingList(myUid, onProgress) {
     const out = [];
     let maxTime = 0;
     let err = '';
     let capHit = false;   // 翻到分页上限仍未结束 → 视为未取完（避免把"取不全"误判为完成）
+    const t0 = Date.now();
     for (let page = 0; page < 60; page++) {
       let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
         '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
@@ -1205,10 +1207,32 @@ return sign;
       if (!j) { err = 'following/list 返回空/非 JSON'; break; }
       const list = (j && (j.following_list || j.followings)) || [];
       for (const a of list) { if (a && a.sec_uid) out.push({ sec_uid: a.sec_uid, nickname: a.nickname || a.unique_id || '未知' }); }
+      const hasMore = !!(j.has_more || j.has_more === 1);
       if (!list.length) break;
-      if (!(j.has_more || j.has_more === 1)) break;   // 没有更多页 → 已取完全部
+      if (!hasMore) break;   // 没有更多页 → 已取完全部
       maxTime = j.max_time || (maxTime - 1);
       if (page === 59) capHit = true;
+      // —— 实时进度：每页回调一次（完成率/剩余时间多为估算，因为接口不返回总数）——
+      if (onProgress) {
+        const pages = page + 1;
+        const fetched = out.length;
+        const tElapsed = Date.now() - t0;
+        const tPerPage = pages > 0 ? tElapsed / pages : 0;
+        let pct, remMs;
+        // 优先用接口可能返回的真实关注总数；没有就用平滑估算（随页数上升、未取完前不超过 99%）
+        const realTotal = j && (j.following_count || j.total || j.followings_count || (j.user && j.user.following_count));
+        if (realTotal && realTotal > fetched) {
+          pct = Math.min(99, Math.round(fetched / realTotal * 100));
+          const perPageNow = fetched / pages;
+          const remPages = Math.ceil((realTotal - fetched) / Math.max(1, perPageNow));
+          remMs = tPerPage * remPages;
+        } else {
+          pct = hasMore ? Math.round(50 + 49 * (1 - 1 / (1 + pages * 0.15))) : 100;
+          const remPages = hasMore ? Math.max(1, pages) : 0;   // 不知总数时按"大约还有同样多页"保守估算
+          remMs = tPerPage * remPages;
+        }
+        onProgress({ pages: pages, fetched: fetched, hasMore: hasMore, pct: pct, remMs: remMs });
+      }
     }
     lastApiError = err;
     // 完整性：无请求错误 + 已取到账号 + 未触达分页上限（即 has_more 已变 false）
@@ -1282,13 +1306,38 @@ return sign;
     }
     updateSteps(2);
     setScanText('② 正在获取关注账号名单（分页拉取，直到取完全部）…');
-    const res = await getFollowingList(MY_UID);
+    // 显示进度条（已获取个数 + 完成率 + 剩余时间）
+    const progEl = panel && panel.querySelector('#dyFollowProg');
+    const fillEl = panel && panel.querySelector('#dyFPfill');
+    const pctEl = panel && panel.querySelector('#dyFPpct');
+    const cntEl = panel && panel.querySelector('#dyFPcount');
+    const etaEl = panel && panel.querySelector('#dyFPeta');
+    if (progEl) progEl.style.display = 'block';
+    if (fillEl) fillEl.style.width = '0%';
+    if (pctEl) pctEl.textContent = '0%';
+    if (cntEl) cntEl.textContent = '已获取 0 个';
+    if (etaEl) etaEl.textContent = '预计剩余：估算中…';
+    const fmtEta = function (ms) {
+      if (!ms || ms < 0) return '估算中…';
+      const s = Math.round(ms / 1000);
+      if (s < 60) return '约 ' + s + ' 秒';
+      const m = Math.floor(s / 60), r = s % 60;
+      return '约 ' + m + ' 分 ' + r + ' 秒';
+    };
+    const onProg = function (p) {
+      if (fillEl) fillEl.style.width = p.pct + '%';
+      if (pctEl) pctEl.textContent = p.pct + '%';
+      if (cntEl) cntEl.textContent = '已获取 ' + p.fetched + ' 个（第 ' + p.pages + ' 页）';
+      if (etaEl) etaEl.textContent = '预计剩余：' + fmtEta(p.remMs) + '（估算）';
+    };
+    const res = await getFollowingList(MY_UID, onProg);
     const accounts = res.list;
     // 写入关注白名单：之后未读只统计这些账号，避免混入非关注视频
     setFollowSet(accounts.map(function (a) { return a.sec_uid; }));
     LAST_ACCOUNTS = accounts; saveAccounts();
     if (!accounts.length || !res.complete) {
       FOLLOW_DONE = false;
+      if (progEl) { progEl.style.display = 'block'; if (fillEl) fillEl.style.width = '100%'; if (pctEl) pctEl.textContent = '中断'; if (etaEl) etaEl.textContent = '获取未完整，请重试'; }
       setScanText(!accounts.length
         ? ('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'))
         : ('⚠️ 关注名单未完整获取（已取 ' + accounts.length + ' 个，' + (lastApiError || '接口中断') + '）。请稍后重新点「获取关注的公众号」，直到全部取完才能抓未读。'));
@@ -1296,6 +1345,11 @@ return sign;
       return;
     }
     FOLLOW_DONE = true;
+    // 获取成功：进度条置满后收起，再展示核对区
+    if (fillEl) fillEl.style.width = '100%';
+    if (pctEl) pctEl.textContent = '100%';
+    if (etaEl) etaEl.textContent = '已完成';
+    setTimeout(function () { if (progEl) progEl.style.display = 'none'; }, 1200);
     updateSteps(3);
     updateLoginUI();
     renderFollowList();
@@ -1461,6 +1515,13 @@ return sign;
   .dyStatus .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#666;margin-right:6px;vertical-align:middle;}
   .dyStatus .dot.on{background:#22c55e;}
   .dyList{flex:1;overflow-y:auto;padding:6px 16px 10px;-webkit-overflow-scrolling:touch;}
+  /* ---- 获取关注名单进度条（第②步进行中展示：个数 + 完成率 + 剩余时间）---- */
+  .dyFollowProg{padding:12px 18px;background:#1f2233;border-bottom:1px solid #262a3b;}
+  .dyFPhead{display:flex;align-items:center;justify-content:space-between;font-size:28px;color:#fff;margin-bottom:10px;}
+  .dyFPpct{color:#22c55e;font-weight:800;font-size:30px;}
+  .dyFPbar{height:20px;background:#2a2d40;border-radius:11px;overflow:hidden;}
+  .dyFPfill{height:100%;width:0%;background:linear-gradient(90deg,#fe2c55,#ff6a3d);transition:width .25s ease;}
+  .dyFPeta{margin-top:10px;font-size:24px;color:#9aa0b5;}
   /* ---- 关注名单核对区（第②步完成后展示，供用户核对数量/名单）---- */
   .dyFollowBox{display:none;padding:14px 18px;background:#1f2233;border-bottom:1px solid #262a3b;}
   .dyFollowBox.show{display:block;}
@@ -1570,6 +1631,11 @@ return sign;
       '<div class="dyScanStatus" id="dyScanStatus" style="display:none">' +
       '<div class="dySStext" id="dySStext"></div>' +
       '<button class="dySScopy" id="dySScopy">复制</button>' +
+      '</div>' +
+      '<div class="dyFollowProg" id="dyFollowProg" style="display:none">' +
+      '<div class="dyFPhead"><span id="dyFPcount">已获取 0 个</span><span class="dyFPpct" id="dyFPpct">0%</span></div>' +
+      '<div class="dyFPbar"><div class="dyFPfill" id="dyFPfill"></div></div>' +
+      '<div class="dyFPeta" id="dyFPeta">预计剩余：估算中…</div>' +
       '</div>' +
       '<div class="dyFollowBox" id="dyFollowBox">' +
       '<div class="dyFollowHd"><span class="dyFollowNum" id="dyFollowNum">0</span>' +
