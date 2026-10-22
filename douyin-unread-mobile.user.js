@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-22 21:46 关注名单稳定拉取(节流+重试+去重+断点续传)
+// @name         抖音插件 2026-10-22 22:27 关注名单防中断(持续重试+自适应节流)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.6.2
-// @description  2026-10-22 21:46 修复「关注名单未完整获取(接口中断/计数虚高1200)」：①翻页间节流350ms降低限流；②单页失败自动重试3次(退避)；③按sec_uid去重只统计唯一账号；④断点续传——中断后保存游标，再次点「继续获取」从断点接着拉不从头重来。进度条保留(个数+完成率+剩余时间)。打开已登录的 www.douyin.com 依次点 登录→获取/继续获取(看进度/核对)→抓取未读。
+// @version      1.6.3
+// @description  2026-10-22 22:27 修复「获取关注老是中断」：单页被限流/失败时不再中断任务，改为原地长退避持续重试同一页(最多约40次/退避上限8s)，自动跨过限流窗口一次取完；翻页节流改为自适应(被限流→间隔加大到4s，顺利→回落到0.4s)。进度条在限流时显示「⏳触发限流，约X秒后自动重试」。断点续传/去重保留。打开已登录的 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -1202,24 +1202,31 @@ return sign;
     let maxTime = startMax;
     let err = '';
     let capHit = false;   // 翻到分页上限仍未结束 → 视为未取完（避免把"取不全"误判为完成）
+    let gap = 400;        // 自适应节流间隔(ms)：被限流→加大，顺利→回落到基础值
     const t0 = Date.now();
     for (let page = 0; page < 60; page++) {
       let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
         '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
       if (maxTime) pq += '&max_time=' + maxTime;
-      // 单页失败自动重试（应对抖音限流/网络抖动）：退避递增，仍失败才判定中断
-      let res = null, j = null, ok = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      // 单页「持续重试」：被限流/失败时不中断任务，而是原地长退避重试同一页，直到恢复或重试耗尽
+      // （抖音限流常持续数秒~十几秒，短重试必失败；持续重试可自动跨过限流窗口，一次取完）
+      let res = null, j = null, ok = false, rateLimited = false;
+      for (let attempt = 0; attempt < 40; attempt++) {
         res = await signedFetch(pq, {});
         j = res && res.j;
         const softErr = j && typeof j.status_code === 'number' && j.status_code !== 0; // 200 但业务错误（如限流）
         if (res && res.ok && j && !softErr) { ok = true; break; }
-        await sleep(700 * (attempt + 1));
+        rateLimited = true;
+        const backoff = Math.min(8000, 800 * Math.pow(1.7, attempt)); // 退避上限 8s，指数上升
+        if (onProgress) onProgress({ pages: page + 1, fetched: seen.size, hasMore: true, pct: 0, remMs: backoff, waiting: true, waitSec: Math.ceil(backoff / 1000) });
+        await sleep(backoff);
       }
       if (!ok) {
-        err = 'following/list 请求失败(已重试3次) ' + ((res && (res.err || ('HTTP ' + res.http))) || (j && j.status_msg) || '接口返回异常');
+        err = 'following/list 持续请求失败(已重试约40次) ' + ((res && (res.err || ('HTTP ' + res.http))) || (j && j.status_msg) || '接口返回异常');
         break;
       }
+      // 自适应节流：刚被限流→后续间隔加大；顺利→间隔缓慢回落到基础值
+      gap = rateLimited ? Math.min(4000, gap * 1.8) : Math.max(400, gap * 0.85);
       const list = (j && (j.following_list || j.followings)) || [];
       // 按 sec_uid 去重：避免重复翻页/接口回带导致计数虚高（如「1200 个」实为重复）
       for (const a of list) {
@@ -1254,7 +1261,7 @@ return sign;
         }
         onProgress({ pages: pages, fetched: fetched, hasMore: hasMore, pct: pct, remMs: remMs });
       }
-      await sleep(350);   // 翻页节流，降低被限流概率
+      await sleep(gap);   // 自适应节流：刚被限流则加大间隔，顺利则回落
     }
     lastApiError = err;
     // 完整性：无错误 + 已取到唯一账号 + 未触达分页上限（即 has_more 已变 false）
@@ -1361,7 +1368,16 @@ return sign;
       const m = Math.floor(s / 60), r = s % 60;
       return '约 ' + m + ' 分 ' + r + ' 秒';
     };
+    let lastPct = 0;
     const onProg = function (p) {
+      if (p.waiting) {
+        // 触发限流：保持进度条，提示自动等待恢复（不再中断任务）
+        if (etaEl) etaEl.textContent = '⏳ 触发限流，约 ' + (p.waitSec || '?') + ' 秒后自动重试（无需操作）';
+        if (cntEl) cntEl.textContent = '已获取 ' + p.fetched + ' 个（等待恢复）';
+        if (pctEl) pctEl.textContent = lastPct + '%';
+        return;
+      }
+      lastPct = p.pct;
       if (fillEl) fillEl.style.width = p.pct + '%';
       if (pctEl) pctEl.textContent = p.pct + '%';
       if (cntEl) cntEl.textContent = '已获取 ' + p.fetched + ' 个（第 ' + p.pages + ' 页）';
