@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-20 22:30 三步串行流程(登录→关注名单→未读视频)+字体再放大两档
+// @name         抖音插件 2026-10-21 22:00 三个独立按钮(登录/获取关注/抓取未读)+门禁+按钮加大
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.5.8
-// @description  2026-10-20 22:30 重构为明确串行三步：① 登录账号 → ② 登录成功后自动获取关注账号名单(直接读接口，精确) → ③ 拿到名单后自动获取未读视频；界面顶部新增三步进度指示条。并新增关注账号列表缓存(重新获取未读免重复拉名单)。字体在上版基础上再放大两档(基准26→30px、按钮34px)。只统计关注账号+身份去重、尺寸/大小切换、复制按钮加大均保持。打开已登录的 www.douyin.com 点「① 登录账号」即可。
+// @version      1.5.9
+// @description  2026-10-21 22:00 底部按钮重构为三个同行大按钮并加门禁：①「登录」点击登录抖音(登录成功才能点下一步)；②「获取关注的公众号」(需登录，分页拉到 has_more=false 才算「完成」，必须取完所有关注才能继续)；③「抓取未读视频」(需关注名单完整获取)。三个按钮比之前更大。原先的「同步已读」已并入抓取步骤，「全部已读/清除已读」移至第二行小按钮保留。只统计关注账号+身份去重、尺寸/大小切换、复制按钮加大、字体均保持。打开已登录的 www.douyin.com 依次点 登录→获取关注→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -676,6 +676,9 @@ return sign;
   try { const a = JSON.parse(localStorage.getItem(K_ACCOUNTS) || '[]'); if (Array.isArray(a)) LAST_ACCOUNTS = a; } catch (e) {}
   function saveAccounts() { try { localStorage.setItem(K_ACCOUNTS, JSON.stringify(LAST_ACCOUNTS)); } catch (e) {} }
 
+  let MY_UID = (function () { try { return localStorage.getItem(K_UID) || ''; } catch (e) { return ''; } })(); // 当前登录用户 uid（持久化，返回用户免重新登录）
+  let FOLLOW_DONE = false;  // 关注名单是否已「完整」获取（门禁：只有完整取完才能抓未读）
+
   // 关注白名单（sec_uid 集合）：扫描「关注全部」后写入；为空时不限制（回退原行为）。
   // 作用：未读只统计你真实关注的账号，避免关注页/推荐流里混入的非关注账号被算进去。
   let FOLLOW_SET = [];
@@ -1186,24 +1189,30 @@ return sign;
     }
     return '';
   }
+  // 返回 {list, complete}：complete=true 表示已分页拉到 has_more=false（即你关注的所有公众号都取完了）
   async function getFollowingList(myUid) {
     const out = [];
     let maxTime = 0;
-    for (let page = 0; page < 40; page++) {
+    let err = '';
+    let capHit = false;   // 翻到分页上限仍未结束 → 视为未取完（避免把"取不全"误判为完成）
+    for (let page = 0; page < 60; page++) {
       let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
         '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
       if (maxTime) pq += '&max_time=' + maxTime;
       const res = await signedFetch(pq, {});
       const j = res.j;
-      if (!res.ok) { lastApiError = 'following/list ' + (res.err || ('HTTP ' + res.http)); break; }
-      if (!j) { lastApiError = 'following/list 返回空/非 JSON'; break; }
+      if (!res.ok) { err = 'following/list ' + (res.err || ('HTTP ' + res.http)); break; }
+      if (!j) { err = 'following/list 返回空/非 JSON'; break; }
       const list = (j && (j.following_list || j.followings)) || [];
       for (const a of list) { if (a && a.sec_uid) out.push({ sec_uid: a.sec_uid, nickname: a.nickname || a.unique_id || '未知' }); }
       if (!list.length) break;
-      if (!(j.has_more || j.has_more === 1)) break;
+      if (!(j.has_more || j.has_more === 1)) break;   // 没有更多页 → 已取完全部
       maxTime = j.max_time || (maxTime - 1);
+      if (page === 59) capHit = true;
     }
-    return out;
+    lastApiError = err;
+    // 完整性：无请求错误 + 已取到账号 + 未触达分页上限（即 has_more 已变 false）
+    return { list: out, complete: !err && out.length > 0 && !capHit };
   }
   async function getAccountPosts(secUid) {
     const out = [];
@@ -1224,8 +1233,8 @@ return sign;
     }
     return out;
   }
-  // —— 显式「登录检测」按钮：按 status_code 明确提示成功/失败及原因 ——
-  async function checkLogin() {
+  // —— 第一步：登录检测（只登录，成功后点亮第二步，不自动往下跑）——
+  async function doLogin() {
     setScanText('① 正在检测登录状态…');
     updateSteps(1);
     lastApiError = '';
@@ -1239,7 +1248,9 @@ return sign;
       }
     }
     if (myUid) {
+      MY_UID = myUid;
       localStorage.setItem('DYUNREAD_LOGINED', '1');
+      localStorage.setItem(K_UID, MY_UID);   // 持久化，返回用户免重新登录
       // 取昵称用于展示：优先从页面内联脚本提取（commit/user 在登录态下会被 webid 校验拦成 status_code=5）。
       let name = getNickFromPage();
       if (!name) {
@@ -1249,9 +1260,8 @@ return sign;
           name = (j2 && j2.user && (j2.user.nickname || j2.user.unique_id)) || '';
         } catch (e) {}
       }
-      setScanText('① ✅ 登录成功' + (name ? ('（' + name + '）') : ('（uid ' + myUid + '）')) + '，正在获取关注账号名单…');
+      setScanText('① ✅ 登录成功' + (name ? ('（' + name + '）') : ('（uid ' + myUid + '）')) + '。现在点「获取关注的公众号」。');
       updateLoginUI(); updateSteps(2);
-      await stepGetFollow(myUid);   // 自动进入第二步
     } else {
       const hint = isLoggedIn()
         ? '（检测到登录票据，但接口/页面均未取到账号信息；请刷新 www.douyin.com 页面后重试）'
@@ -1262,22 +1272,33 @@ return sign;
     }
   }
 
-  // 第二步：登录成功后，获取关注账号名单（直接读取接口，精确）
-  async function stepGetFollow(myUid) {
+  // 第二步：登录成功后，获取关注账号名单（必须完整取完才算完成）
+  async function doGetFollow() {
+    const logined = localStorage.getItem('DYUNREAD_LOGINED') === '1';
+    if (!logined || !MY_UID) {
+      setScanText('⚠️ 请先点「登录」完成登录，再获取关注名单。');
+      updateSteps(1);
+      return;
+    }
     updateSteps(2);
-    setScanText('② 正在获取关注账号名单…');
-    const accounts = await getFollowingList(myUid);
+    setScanText('② 正在获取关注账号名单（分页拉取，直到取完全部）…');
+    const res = await getFollowingList(MY_UID);
+    const accounts = res.list;
     // 写入关注白名单：之后未读只统计这些账号，避免混入非关注视频
     setFollowSet(accounts.map(function (a) { return a.sec_uid; }));
     LAST_ACCOUNTS = accounts; saveAccounts();
-    if (!accounts.length) {
-      setScanText('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'));
-      updateSteps('err2');
+    if (!accounts.length || !res.complete) {
+      FOLLOW_DONE = false;
+      setScanText(!accounts.length
+        ? ('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'))
+        : ('⚠️ 关注名单未完整获取（已取 ' + accounts.length + ' 个，' + (lastApiError || '接口中断') + '）。请稍后重新点「获取关注的公众号」，直到全部取完才能抓未读。'));
+      updateSteps('err2'); updateLoginUI();
       return;
     }
+    FOLLOW_DONE = true;
     updateSteps(3);
-    setScanText('② ✅ 已获取 ' + accounts.length + ' 个关注账号，正在获取未读视频…');
-    await stepScanVideos(accounts);   // 自动进入第三步
+    updateLoginUI();
+    setScanText('② ✅ 完成：已获取 ' + accounts.length + ' 个关注公众号（已全部取完）。现在点「抓取未读视频」。');
   }
 
   // 第三步：拿到关注名单后，逐个拉取未读视频
@@ -1306,11 +1327,24 @@ return sign;
     setTimeout(function () { setScanText(''); }, 8000);
   }
 
-  // 主流程按钮：按步骤推进（① 登录 → ② 关注名单 → ③ 未读视频）
-  function runMainFlow() {
+  // 第三步：关注名单完整获取后，逐个拉取未读视频
+  async function doScan() {
     const s = panel && panel.querySelector('#dyScanStatus'); if (s) s.style.display = 'block';
-    if (!LAST_ACCOUNTS.length) { checkLogin(); }            // 首次/未拿名单：检测登录并自动走 ②③
-    else { stepScanVideos(LAST_ACCOUNTS); }                 // 已有名单：直接重新获取未读
+    if (!FOLLOW_DONE) {
+      setScanText('⚠️ 请先点「获取关注的公众号」并等到显示「完成」后，再抓取未读视频。');
+      updateSteps(2);
+      return;
+    }
+    await stepScanVideos(LAST_ACCOUNTS);
+  }
+
+  // 后台自动流程：登录过且处于 www 下，自动走完 ①②③（带 30 分钟冷却）
+  async function runFullAuto() {
+    try {
+      if (!MY_UID) { await doLogin(); }
+      if (!FOLLOW_DONE) { await doGetFollow(); }
+      if (FOLLOW_DONE) { await doScan(); }
+    } catch (e) {}
   }
 
   /* ---------------- 自动流程：登录过且处于 www 下，自动跑完整链路（带 30 分钟冷却） ---------------- */
@@ -1323,8 +1357,7 @@ return sign;
     const last = Number(localStorage.getItem('DYUNREAD_AUTOSCAN_TS') || 0);
     if (now - last < COOLDOWN) return;
     localStorage.setItem('DYUNREAD_AUTOSCAN_TS', String(now));
-    if (!LAST_ACCOUNTS.length) checkLogin();                // 自动走完整链路
-    else stepScanVideos(LAST_ACCOUNTS);
+    runFullAuto();
   }
 
   /* ---------------- 读取观看历史：用于推算"已读" ---------------- */
@@ -1409,11 +1442,14 @@ return sign;
   .dyOpen{color:#fe2c55;font-size:29px;text-decoration:none;margin-right:16px;}
   .dyMk{color:#9aa0b5;font-size:29px;background:none;border:none;padding:0;cursor:pointer;}
   .dyMk:hover{color:#fff;}
-  .dyFt{display:flex;flex-wrap:wrap;gap:14px;padding:16px;border-bottom:1px solid #262a3b;background:#1f2233;}
-  .dyBtn{flex:1 1 calc(50% - 7px);min-width:0;border:none;border-radius:14px;padding:24px 14px;font-size:34px;font-weight:700;line-height:1.2;white-space:normal;cursor:pointer;
+  .dyFt{display:flex;flex-wrap:nowrap;gap:12px;padding:18px;border-bottom:1px solid #262a3b;background:#1f2233;}
+  .dyBtn{flex:1 1 0;min-width:0;border:none;border-radius:16px;padding:30px 12px;font-size:38px;font-weight:700;line-height:1.15;white-space:normal;cursor:pointer;
     background:#2a2d40;color:#fff;letter-spacing:.5px;}
   .dyBtn.primary{background:#fe2c55;}
-  .dyBtn.ghost{background:transparent;border:2px solid #3a3d52;}
+  .dyBtn:disabled{opacity:.35;filter:grayscale(.75);cursor:not-allowed;}
+  .dyFt2{display:flex;flex-wrap:nowrap;gap:12px;padding:0 18px 18px;background:#1f2233;}
+  .dyBtn2{flex:1 1 0;min-width:0;border:none;border-radius:14px;padding:16px 12px;font-size:28px;font-weight:700;line-height:1.2;white-space:normal;cursor:pointer;background:#2a2d40;color:#fff;}
+  .dyBtn2.ghost{background:transparent;border:2px solid #3a3d52;color:#9aa0b5;}
   .dySummary{padding:12px 18px;font-size:30px;color:#9aa0b5;background:#1f2233;border-bottom:1px solid #262a3b;}
   .dyScanStatus{padding:12px 18px;font-size:30px;color:#ffd166;background:#2a2d40;border-bottom:1px solid #262a3b;line-height:1.7;}
   .dyCatHd{padding:12px 18px;font-size:31px;font-weight:700;color:#fe2c55;background:#161823;position:sticky;top:0;z-index:1;border-bottom:1px solid #262a3b;}
@@ -1473,10 +1509,13 @@ return sign;
     panel.innerHTML =
       '<div class="dyHd"><b>抖音关注 · 未读</b><button class="dySize" id="dySize" title="缩小/放大界面">缩小</button><button class="dyClose" id="dyClose">×</button></div>' +
       '<div class="dyFt">' +
-      '<button class="dyBtn primary" id="dyLogin">① 登录账号</button>' +
-      '<button class="dyBtn" id="dySync">同步已读</button>' +
-      '<button class="dyBtn ghost" id="dyReadAll">全部已读</button>' +
-      '<button class="dyBtn ghost" id="dyClear">清除已读</button>' +
+      '<button class="dyBtn primary" id="dyLogin">登录</button>' +
+      '<button class="dyBtn" id="dyGetFollow" disabled>获取关注的公众号</button>' +
+      '<button class="dyBtn" id="dyScanUnread" disabled>抓取未读视频</button>' +
+      '</div>' +
+      '<div class="dyFt2">' +
+      '<button class="dyBtn2" id="dyReadAll">全部已读</button>' +
+      '<button class="dyBtn2 ghost" id="dyClear">清除已读</button>' +
       '</div>' +
       '<div class="dySteps" id="dySteps">' +
       '<span id="st1">① 登录</span><span class="sep">›</span>' +
@@ -1496,13 +1535,11 @@ return sign;
 
     panel.querySelector('#dyClose').addEventListener('click', togglePanel);
     panel.querySelector('#dySize').addEventListener('click', toggleSize);
-    panel.querySelector('#dyLogin').addEventListener('click', runMainFlow);
+    panel.querySelector('#dyLogin').addEventListener('click', doLogin);
+    panel.querySelector('#dyGetFollow').addEventListener('click', doGetFollow);
+    panel.querySelector('#dyScanUnread').addEventListener('click', doScan);
     panel.querySelector('#dyReadAll').addEventListener('click', function () { markAllRead(); });
     panel.querySelector('#dyClear').addEventListener('click', function () { clearRead(); });
-    panel.querySelector('#dySync').addEventListener('click', function () {
-      const s = panel.querySelector('#dyScanStatus'); if (s) s.style.display = 'block';
-      getWatchHistory();
-    });
     panel.querySelector('#dySScopy').addEventListener('click', function () {
       const tx = panel.querySelector('#dySStext');
       if (tx) copyText(tx.textContent);
@@ -1517,19 +1554,25 @@ return sign;
     }
   }
 
-  // 登录状态指示：反映「登录检测」是否成功过；同时兼顾被动记录状态
+  // 登录状态指示 + 三步按钮门禁：① 登录 → ② 获取关注（需登录） → ③ 抓未读（需关注完整获取）
   function updateLoginUI() {
     const onWww = (location.hostname === 'www.douyin.com' || location.hostname === 'douyin.com');
     const logined = localStorage.getItem('DYUNREAD_LOGINED') === '1';
     const recording = isManualRecording() || isFollowUrl();
     const txt = panel && panel.querySelector('#dyStatusText');
-    const btn = panel && panel.querySelector('#dyLogin');
+    const bLogin = panel && panel.querySelector('#dyLogin');
+    const bFollow = panel && panel.querySelector('#dyGetFollow');
+    const bScan = panel && panel.querySelector('#dyScanUnread');
     if (txt) txt.textContent = recording ? '记录中（自动捕获当前页视频）'
-      : (onWww ? (logined ? '已登录（可扫描）' : '未登录检测') : '需在 www.douyin.com');
-    if (btn) {
-      if (!logined) btn.textContent = '① 登录账号';
-      else if (!LAST_ACCOUNTS.length) btn.textContent = '② 获取关注名单';
-      else btn.textContent = '③ 获取未读视频';
+      : (onWww ? (logined ? '已登录' : '未登录') : '需在 www.douyin.com');
+    if (bLogin) bLogin.textContent = logined ? '重新登录' : '登录';
+    if (bFollow) {
+      bFollow.textContent = (LAST_ACCOUNTS.length && FOLLOW_DONE) ? '重新获取' : '获取关注的公众号';
+      bFollow.disabled = !(logined && MY_UID);      // 未登录 / 未取到 uid 不能点第二步
+    }
+    if (bScan) {
+      bScan.textContent = '抓取未读视频';
+      bScan.disabled = !FOLLOW_DONE;               // 关注名单未完整获取不能点第三步
     }
   }
   // 三步流程指示：1/2/3=进行对应步(高亮)，done=全完成(绿色)，err1/err2=失败
