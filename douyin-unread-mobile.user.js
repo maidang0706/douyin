@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-22 21:43 关注名单进度条(个数+完成率+剩余时间估算)
+// @name         抖音插件 2026-10-22 21:46 关注名单稳定拉取(节流+重试+去重+断点续传)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.6.1
-// @description  2026-10-22 21:43 第②步「获取关注公众号」进行中实时显示进度条：已获取个数、完成率百分比、预计剩余时间(估算，接口不返回总数时按速度估算)。获取完成后进度条置满并收起，再展示「关注名单核对区」(大号数量+可滚动昵称清单供核对)。第②③步仍严格门禁。打开已登录的 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @version      1.6.2
+// @description  2026-10-22 21:46 修复「关注名单未完整获取(接口中断/计数虚高1200)」：①翻页间节流350ms降低限流；②单页失败自动重试3次(退避)；③按sec_uid去重只统计唯一账号；④断点续传——中断后保存游标，再次点「继续获取」从断点接着拉不从头重来。进度条保留(个数+完成率+剩余时间)。打开已登录的 www.douyin.com 依次点 登录→获取/继续获取(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -669,6 +669,8 @@ return sign;
   const K_SEC = 'DYUNREAD_SEC_v1';        // 当前登录用户 sec_uid
   const K_FOLLOW = 'DYUNREAD_FOLLOW_v2';  // 关注列表白名单（sec_uid 数组），只统计关注账号
   const K_ACCOUNTS = 'DYUNREAD_ACCOUNTS_v2'; // 最近一次获取到的关注账号列表（含 nickname），供「重新获取未读」复用
+  const K_FCURSOR = 'DYUNREAD_FOLLOW_CURSOR';  // 断点续传游标（最后成功的 max_time），中断后可从断点接着拉
+  const K_FSEEN = 'DYUNREAD_FOLLOW_SEEN';      // 已见 sec_uid（跨次去重 + 续传合并）
   let lastApiError = ''; // 最近一次接口失败原因，用于给出精准报错（而不是笼统的「接口未返回数据」）
 
   // 关注账号列表缓存：登录成功后获取，供「重新获取未读」复用，无需每次重新拉名单
@@ -1191,9 +1193,13 @@ return sign;
   }
   // 返回 {list, complete}：complete=true 表示已分页拉到 has_more=false（即你关注的所有公众号都取完了）
   // onProgress(page 信息) 每拉完一页回调一次，用于实时显示「已获取个数 / 完成率 / 剩余时间」
-  async function getFollowingList(myUid, onProgress) {
-    const out = [];
-    let maxTime = 0;
+  // opts: { resumeFrom: 续传起始 max_time, seen: 已见 sec_uid 集合 } —— 支持中断后续传，避免从头重拉撞限流
+  async function getFollowingList(myUid, onProgress, opts) {
+    opts = opts || {};
+    const seen = (opts.seen instanceof Set) ? opts.seen : new Set(); // 累计唯一 sec_uid（含续传已有）
+    const startMax = opts.resumeFrom || 0;
+    const out = [];           // 本次调用新增的唯一账号（不含 seen 中已存在的）
+    let maxTime = startMax;
     let err = '';
     let capHit = false;   // 翻到分页上限仍未结束 → 视为未取完（避免把"取不全"误判为完成）
     const t0 = Date.now();
@@ -1201,12 +1207,27 @@ return sign;
       let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
         '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
       if (maxTime) pq += '&max_time=' + maxTime;
-      const res = await signedFetch(pq, {});
-      const j = res.j;
-      if (!res.ok) { err = 'following/list ' + (res.err || ('HTTP ' + res.http)); break; }
-      if (!j) { err = 'following/list 返回空/非 JSON'; break; }
+      // 单页失败自动重试（应对抖音限流/网络抖动）：退避递增，仍失败才判定中断
+      let res = null, j = null, ok = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        res = await signedFetch(pq, {});
+        j = res && res.j;
+        const softErr = j && typeof j.status_code === 'number' && j.status_code !== 0; // 200 但业务错误（如限流）
+        if (res && res.ok && j && !softErr) { ok = true; break; }
+        await sleep(700 * (attempt + 1));
+      }
+      if (!ok) {
+        err = 'following/list 请求失败(已重试3次) ' + ((res && (res.err || ('HTTP ' + res.http))) || (j && j.status_msg) || '接口返回异常');
+        break;
+      }
       const list = (j && (j.following_list || j.followings)) || [];
-      for (const a of list) { if (a && a.sec_uid) out.push({ sec_uid: a.sec_uid, nickname: a.nickname || a.unique_id || '未知' }); }
+      // 按 sec_uid 去重：避免重复翻页/接口回带导致计数虚高（如「1200 个」实为重复）
+      for (const a of list) {
+        if (a && a.sec_uid && !seen.has(a.sec_uid)) {
+          seen.add(a.sec_uid);
+          out.push({ sec_uid: a.sec_uid, nickname: a.nickname || a.unique_id || '未知' });
+        }
+      }
       const hasMore = !!(j.has_more || j.has_more === 1);
       if (!list.length) break;
       if (!hasMore) break;   // 没有更多页 → 已取完全部
@@ -1215,7 +1236,7 @@ return sign;
       // —— 实时进度：每页回调一次（完成率/剩余时间多为估算，因为接口不返回总数）——
       if (onProgress) {
         const pages = page + 1;
-        const fetched = out.length;
+        const fetched = seen.size;   // 累计唯一账号数（含续传已有）
         const tElapsed = Date.now() - t0;
         const tPerPage = pages > 0 ? tElapsed / pages : 0;
         let pct, remMs;
@@ -1233,10 +1254,11 @@ return sign;
         }
         onProgress({ pages: pages, fetched: fetched, hasMore: hasMore, pct: pct, remMs: remMs });
       }
+      await sleep(350);   // 翻页节流，降低被限流概率
     }
     lastApiError = err;
-    // 完整性：无请求错误 + 已取到账号 + 未触达分页上限（即 has_more 已变 false）
-    return { list: out, complete: !err && out.length > 0 && !capHit };
+    // 完整性：无错误 + 已取到唯一账号 + 未触达分页上限（即 has_more 已变 false）
+    return { list: out, seen: seen, nextMaxTime: maxTime, complete: !err && seen.size > 0 && !capHit };
   }
   async function getAccountPosts(secUid) {
     const out = [];
@@ -1305,7 +1327,22 @@ return sign;
       return;
     }
     updateSteps(2);
-    setScanText('② 正在获取关注账号名单（分页拉取，直到取完全部）…');
+    // 断点续传：上次未取完且已保存游标 → 从断点继续拉，避免从头重拉反复撞限流
+    const cursor = Number(localStorage.getItem(K_FCURSOR) || 0);
+    const canResume = (!FOLLOW_DONE) && cursor > 0 && LAST_ACCOUNTS.length > 0;
+    let baseAccounts = [];
+    let seen = new Set();
+    let resumeFrom = 0;
+    if (canResume) {
+      resumeFrom = cursor;
+      baseAccounts = LAST_ACCOUNTS.slice();
+      try { const arr = JSON.parse(localStorage.getItem(K_FSEEN) || '[]'); if (Array.isArray(arr)) arr.forEach(function (s) { seen.add(s); }); } catch (e) {}
+      setScanText('② 正在继续获取关注账号名单（断点续传：已取 ' + baseAccounts.length + ' 个，从断点接着拉）…');
+    } else {
+      try { localStorage.removeItem(K_FCURSOR); } catch (e) {}
+      try { localStorage.removeItem(K_FSEEN); } catch (e) {}
+      setScanText('② 正在获取关注账号名单（分页拉取，已加节流与失败重试，直到取完全部）…');
+    }
     // 显示进度条（已获取个数 + 完成率 + 剩余时间）
     const progEl = panel && panel.querySelector('#dyFollowProg');
     const fillEl = panel && panel.querySelector('#dyFPfill');
@@ -1315,7 +1352,7 @@ return sign;
     if (progEl) progEl.style.display = 'block';
     if (fillEl) fillEl.style.width = '0%';
     if (pctEl) pctEl.textContent = '0%';
-    if (cntEl) cntEl.textContent = '已获取 0 个';
+    if (cntEl) cntEl.textContent = '已获取 ' + (canResume ? baseAccounts.length + ' 个（续传）' : '0 个');
     if (etaEl) etaEl.textContent = '预计剩余：估算中…';
     const fmtEta = function (ms) {
       if (!ms || ms < 0) return '估算中…';
@@ -1330,21 +1367,25 @@ return sign;
       if (cntEl) cntEl.textContent = '已获取 ' + p.fetched + ' 个（第 ' + p.pages + ' 页）';
       if (etaEl) etaEl.textContent = '预计剩余：' + fmtEta(p.remMs) + '（估算）';
     };
-    const res = await getFollowingList(MY_UID, onProg);
-    const accounts = res.list;
+    const res = await getFollowingList(MY_UID, onProg, { resumeFrom: resumeFrom, seen: seen });
+    const accounts = baseAccounts.concat(res.list);   // 续传时合并「已取 + 本次新增（已去重）」
     // 写入关注白名单：之后未读只统计这些账号，避免混入非关注视频
     setFollowSet(accounts.map(function (a) { return a.sec_uid; }));
     LAST_ACCOUNTS = accounts; saveAccounts();
     if (!accounts.length || !res.complete) {
       FOLLOW_DONE = false;
-      if (progEl) { progEl.style.display = 'block'; if (fillEl) fillEl.style.width = '100%'; if (pctEl) pctEl.textContent = '中断'; if (etaEl) etaEl.textContent = '获取未完整，请重试'; }
+      // 保存断点游标 + 已见 sec_uid，供下次点「获取」时从断点继续
+      try { localStorage.setItem(K_FCURSOR, String(res.nextMaxTime)); localStorage.setItem(K_FSEEN, JSON.stringify([].slice.call(seen))); } catch (e) {}
+      if (progEl) { progEl.style.display = 'block'; if (fillEl) fillEl.style.width = '100%'; if (pctEl) pctEl.textContent = '中断'; if (etaEl) etaEl.textContent = '未取完·已存进度·可继续'; }
       setScanText(!accounts.length
         ? ('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'))
-        : ('⚠️ 关注名单未完整获取（已取 ' + accounts.length + ' 个，' + (lastApiError || '接口中断') + '）。请稍后重新点「获取关注的公众号」，直到全部取完才能抓未读。'));
+        : ('⚠️ 关注名单未完整获取（已取唯一 ' + accounts.length + ' 个，' + (lastApiError || '接口中断') + '）。已自动保存进度，请稍后点「继续获取关注的公众号」从断点接着拉，直到全部取完才能抓未读。'));
       updateSteps('err2'); updateLoginUI();
       return;
     }
     FOLLOW_DONE = true;
+    // 取完：清除续传游标
+    try { localStorage.removeItem(K_FCURSOR); localStorage.removeItem(K_FSEEN); } catch (e) {}
     // 获取成功：进度条置满后收起，再展示核对区
     if (fillEl) fillEl.style.width = '100%';
     if (pctEl) pctEl.textContent = '100%';
@@ -1353,7 +1394,7 @@ return sign;
     updateSteps(3);
     updateLoginUI();
     renderFollowList();
-    setScanText('② ✅ 完成：已获取 ' + accounts.length + ' 个关注公众号（已全部取完）。请先核对上方名单数量是否正确，确认无误后再点「抓取未读视频」。');
+    setScanText('② ✅ 完成：已获取 ' + accounts.length + ' 个关注公众号（已全部取完，已按账号去重）。请先核对上方名单数量是否正确，确认无误后再点「抓取未读视频」。');
   }
 
   // 第②步完成后，把关注名单（数量 + 昵称清单）渲染到核对区，供用户先核对再抓视频
@@ -1681,7 +1722,9 @@ return sign;
       : (onWww ? (logined ? '已登录' : '未登录') : '需在 www.douyin.com');
     if (bLogin) bLogin.textContent = logined ? '重新登录' : '登录';
     if (bFollow) {
-      bFollow.textContent = (LAST_ACCOUNTS.length && FOLLOW_DONE) ? '重新获取' : '获取关注的公众号';
+      const hasCursor = Number(localStorage.getItem(K_FCURSOR) || 0) > 0 && LAST_ACCOUNTS.length > 0;
+      bFollow.textContent = FOLLOW_DONE ? '重新获取'
+        : (hasCursor ? '继续获取（断点续传）' : '获取关注的公众号');
       bFollow.disabled = !(logined && MY_UID);      // 未登录 / 未取到 uid 不能点第二步
     }
     if (bScan) {
