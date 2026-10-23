@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-23 10:04 关注名单防中断(完整签名重试+长冷却+节奏控制)
+// @name         抖音插件 2026-10-23 10:14 关注名单过滤非关注项(剔除推荐/粉丝,对齐真实关注数)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.6.5
-// @description  2026-10-23 10:04 针对「获取关注反复中断(取493个后断)」再次修复：①关键发现——抖音往往只对缺少msToken的裸请求限流，故重试改回「完整签名(含msToken)」且成功即停(不再quiet单请求)，带token重试更易跨过限流；②退避上限60s→120s、指数1.9(3s→120s)，长冷却自动跨过分钟级风控；③每成功3页主动休息8s模拟人工节奏，从源头降低累计风控；④中断时显示真实诊断(HTTP码/status_code/响应片段)并保存到本地便于反馈。去重/断点续传保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @version      1.6.6
+// @description  2026-10-23 10:14 修复「获取427个但只关注391个」：抖音 following/list 会混入推荐关注/粉丝卡片(有sec_uid但不属于你关注的人)，按 relation=0/rec_reason/is_follow=false 过滤，仅保留真实关注项，关注数不再虚高；并透明显示「接口返回N→剔除M→保留真实关注K」。完整签名重试/120s长冷却/节奏控制/诊断/断点续传保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -1197,6 +1197,16 @@ return sign;
   // 返回 {list, complete}：complete=true 表示已分页拉到 has_more=false（即你关注的所有公众号都取完了）
   // onProgress(page 信息) 每拉完一页回调一次，用于实时显示「已获取个数 / 完成率 / 剩余时间」
   // opts: { resumeFrom: 续传起始 max_time, seen: 已见 sec_uid 集合 } —— 支持中断后续传，避免从头重拉撞限流
+  // 判断一个 following 列表项是否「真实关注」——抖音 following/list 会混入推荐关注/粉丝卡片(有 sec_uid 但不属于你关注的人)，
+  // 这类项的 relation/follow_status 通常为 0 或含 rec_reason(推荐理由)，据此过滤，避免关注数虚高(如 427 vs 真实 391)
+  function isRealFollow(a) {
+    if (!a || !a.sec_uid) return false;
+    if (a.rec_reason || a.recommend_reason || a.reason) return false;   // 推荐关注卡片(带推荐理由)
+    if (a.is_follow === false) return false;                            // 明确未关注
+    if (a.follow_status === 0 || a.relation === 0) return false;        // 关系字段明确为「未关注/粉丝」
+    return true; // relation=1 关注 / 2 互关 → 保留；字段缺失 → 默认信任(接口通常只返回关注列表)
+  }
+
   async function getFollowingList(myUid, onProgress, opts) {
     opts = opts || {};
     const seen = (opts.seen instanceof Set) ? opts.seen : new Set(); // 累计唯一 sec_uid（含续传已有）
@@ -1205,6 +1215,7 @@ return sign;
     let maxTime = startMax;
     let err = '';
     let capHit = false;   // 翻到分页上限仍未结束 → 视为未取完（避免把"取不全"误判为完成）
+    let skipped = 0;     // 被过滤的非关注项(推荐/粉丝)数量，用于透明展示「接口返回 N → 剔除 M → 保留真实关注 K」
     let gap = 1200;       // 自适应节流间隔(ms)：基础 1.2s，被限流→加大(≤8s)，顺利→缓慢回落到基础值（从源头降低触发限流的频率）
     const t0 = Date.now();
     for (let page = 0; page < 60; page++) {
@@ -1225,7 +1236,7 @@ return sign;
         rateLimited = true;
         lastFailSample = ((res && res.err) || (j && j.status_msg) || (res && ('HTTP ' + res.http)) || '无详情');
         const backoff = Math.min(120000, 3000 * Math.pow(1.9, attempt)); // 退避上限 120s、指数上升（3s→5.7k→10.8k→20.6k→39k→75k→120k…）足以跨过分钟级风控冷却
-        if (onProgress) onProgress({ pages: page + 1, fetched: seen.size, hasMore: true, pct: 0, remMs: backoff, waiting: true, waitSec: Math.ceil(backoff / 1000) });
+        if (onProgress) onProgress({ pages: page + 1, fetched: out.length, hasMore: true, pct: 0, remMs: backoff, waiting: true, waitSec: Math.ceil(backoff / 1000) });
         await sleep(backoff);
       }
       if (!ok) {
@@ -1235,12 +1246,14 @@ return sign;
       // 自适应节流：刚被限流→后续间隔加大；顺利→间隔缓慢回落到基础值
       gap = rateLimited ? Math.min(8000, gap * 1.8) : Math.max(1200, gap * 0.9);
       const list = (j && (j.following_list || j.followings)) || [];
-      // 按 sec_uid 去重：避免重复翻页/接口回带导致计数虚高（如「1200 个」实为重复）
+      // 解析：① 按 sec_uid 跨页去重；② 过滤非关注项(推荐关注/粉丝，relation=0 或含 rec_reason/is_follow=false)，
+      // 这些项会被抖音 following 接口混进列表，导致「关注数」虚高(如 427 vs 真实 391)
       for (const a of list) {
-        if (a && a.sec_uid && !seen.has(a.sec_uid)) {
-          seen.add(a.sec_uid);
-          out.push({ sec_uid: a.sec_uid, nickname: a.nickname || a.unique_id || '未知' });
-        }
+        if (!a || !a.sec_uid) continue;
+        if (seen.has(a.sec_uid)) continue; // 跨页重复，跳过
+        seen.add(a.sec_uid);
+        if (!isRealFollow(a)) { skipped++; continue; } // 非关注项(推荐/粉丝)剔除，不计入关注名单
+        out.push({ sec_uid: a.sec_uid, nickname: a.nickname || a.unique_id || '未知' });
       }
       const hasMore = !!(j.has_more || j.has_more === 1);
       if (!list.length) break;
@@ -1250,7 +1263,7 @@ return sign;
       // —— 实时进度：每页回调一次（完成率/剩余时间多为估算，因为接口不返回总数）——
       if (onProgress) {
         const pages = page + 1;
-        const fetched = seen.size;   // 累计唯一账号数（含续传已有）
+        const fetched = out.length;   // 累计真实关注账号数（已过滤非关注项，含续传已有）
         const tElapsed = Date.now() - t0;
         const tPerPage = pages > 0 ? tElapsed / pages : 0;
         let pct, remMs;
@@ -1273,7 +1286,7 @@ return sign;
     }
     lastApiError = err;
     // 完整性：无错误 + 已取到唯一账号 + 未触达分页上限（即 has_more 已变 false）
-    return { list: out, seen: seen, nextMaxTime: maxTime, complete: !err && seen.size > 0 && !capHit };
+    return { list: out, seen: seen, nextMaxTime: maxTime, complete: !err && seen.size > 0 && !capHit, skipped: skipped };
   }
   async function getAccountPosts(secUid) {
     const out = [];
@@ -1421,7 +1434,12 @@ return sign;
     updateSteps(3);
     updateLoginUI();
     renderFollowList();
-    setScanText('② ✅ 完成：已获取 ' + accounts.length + ' 个关注公众号（已全部取完，已按账号去重）。请先核对上方名单数量是否正确，确认无误后再点「抓取未读视频」。');
+    const skippedNow = res.skipped || 0;
+    let doneMsg = '② ✅ 完成：已获取 ' + accounts.length + ' 个关注公众号（已全部取完';
+    if (skippedNow > 0) doneMsg += '；已从接口返回中自动剔除 ' + skippedNow + ' 个非关注或推荐账号，仅保留真实关注';
+    else doneMsg += '，已按账号去重';
+    doneMsg += '）。请先核对上方名单数量是否正确，确认无误后再点「抓取未读视频」。';
+    setScanText(doneMsg);
   }
 
   // 第②步完成后，把关注名单（数量 + 昵称清单）渲染到核对区，供用户先核对再抓视频
