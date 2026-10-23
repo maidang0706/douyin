@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-23 11:34 关注名单自动续传(一次点击跑到完+签名升级突破限流+诊断)
+// @name         抖音插件 2026-10-23 11:45 关注名单自动续传+面板常驻版本号(一眼确认是否最新版)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=169
-// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=169
-// @version      1.6.9
-// @description  2026-10-23 11:34 修复「获取关注反复中断、要一次次点继续获取」：①自动续传——一次点击后遇限流中断会自动存进度、冷却25~40s后从断点接着拉，最多8轮，直到取完或登录失效，无需手动反复点「继续获取」；②重试周期升级签名(每第4次带msToken完整请求)突破「裸请求被限流」；③诊断不再吞错——任何失败都显示最近一次HTTP码/status_code并写入本地DYUNREAD_LAST_ERR，便于精准定位；④登录失效立即终止提示重登。过滤非关注/去重/进度条/随机间隔保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=170
+// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=170
+// @version      1.6.10
+// @description  2026-10-23 11:45 在面板标题处常驻显示版本号 v1.6.10，一眼确认是否跑在最新版（根治「Via 更新常跳旧版、不知自己跑的是哪版」的困惑）。关注获取逻辑保持 v1.6.9 的自动续传(一次点击跑到完、遇限流自动存进度冷却25~40s后从断点接着拉最多8轮、无需手动点继续获取)+重试周期升级签名突破限流+诊断不吞错+登录失效立即终止。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -678,6 +678,7 @@ return sign;
   const K_FSEEN = 'DYUNREAD_FOLLOW_SEEN';      // 已见 sec_uid（跨次去重 + 续传合并）
   let lastApiError = ''; // 最近一次接口失败原因，用于给出精准报错（而不是笼统的「接口未返回数据」）
   let lastFailSample = ''; // 最近一次失败的具体响应(HTTP码/status_code/msg)，供中断时给出诊断、便于精准定位
+  const SCRIPT_VERSION = '1.6.10'; // 面板常驻显示的版本号，便于一眼确认是否跑在最新版（与下方 @version 保持一致）
 
   // 关注账号列表缓存：登录成功后获取，供「重新获取未读」复用，无需每次重新拉名单
   let LAST_ACCOUNTS = [];
@@ -1744,7 +1745,7 @@ return sign;
     panel = document.createElement('div');
     panel.id = 'dyPanel';
     panel.innerHTML =
-      '<div class="dyHd"><b>抖音关注 · 未读</b><button class="dySize" id="dySize" title="缩小/放大界面">缩小</button><button class="dyClose" id="dyClose">×</button></div>' +
+      '<div class="dyHd"><b>抖音关注 · 未读</b><span class="dyVer" id="dyVer" style="font-size:12px;font-weight:400;color:#8b93b5;margin-left:6px">v' + SCRIPT_VERSION + '</span><button class="dySize" id="dySize" title="缩小/放大界面">缩小</button><button class="dyClose" id="dyClose">×</button></div>' +
       '<div class="dyFt">' +
       '<button class="dyBtn primary" id="dyLogin">登录</button>' +
       '<button class="dyBtn" id="dyGetFollow" disabled>获取关注的公众号</button>' +
