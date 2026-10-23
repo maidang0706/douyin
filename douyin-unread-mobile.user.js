@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-22 22:27 关注名单防中断(持续重试+自适应节流)
+// @name         抖音插件 2026-10-23 09:23 关注名单彻底防中断(quiet重试+60s长退避+节流)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.6.3
-// @description  2026-10-22 22:27 修复「获取关注老是中断」：单页被限流/失败时不再中断任务，改为原地长退避持续重试同一页(最多约40次/退避上限8s)，自动跨过限流窗口一次取完；翻页节流改为自适应(被限流→间隔加大到4s，顺利→回落到0.4s)。进度条在限流时显示「⏳触发限流，约X秒后自动重试」。断点续传/去重保留。打开已登录的 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @version      1.6.4
+// @description  2026-10-23 09:23 彻底修复「获取关注老是中断」：①retry 改用 quiet 单请求模式(仅最小签名1个请求)，避免3x请求放大限流、让接口真正冷却；②退避上限8s→60s、重试40→60次、指数更快封顶，足以跨过抖音数十秒~分钟的限流窗口一次跑完；③基础节流400ms→1.2s、限流后间隔上限4s→8s，从源头降低触发频率。进度条限流时显示「⏳约X秒后自动重试」。去重/断点续传保留。打开已登录的 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -631,12 +631,14 @@ return sign;
 
   // 统一的带签名请求：最小请求优先，失败再逐步补 webid / msToken 重试。
   // 返回 { ok, j, err, http }。ok=true 表示 status_code 为 0（或字段缺失视为成功）。
-  async function signedFetch(pathAndQuery, { extra, tries } = {}) {
-    if (!tries) tries = [
-      { addWebid: false, addMsToken: false }, // 最小：仅 aid + X-Bogus（修复登录态 status_code=5）
-      { addWebid: true,  addMsToken: false }, // 补 webid
-      {}                                         // 补 webid + msToken
-    ];
+  async function signedFetch(pathAndQuery, { extra, tries, quiet } = {}) {
+    if (!tries) tries = quiet
+      ? [{ addWebid: false, addMsToken: false }] // 限流重试(quiet)模式：仅发最小签名 1 个请求，避免重试时被 3x 请求放大、持续刷新限流窗口
+      : [
+          { addWebid: false, addMsToken: false }, // 最小：仅 aid + X-Bogus（修复登录态 status_code=5）
+          { addWebid: true,  addMsToken: false }, // 补 webid
+          {}                                         // 补 webid + msToken
+        ];
     const last = { ok: false, j: null, err: '', http: 0 };
     for (const t of tries) {
       let url = API + pathAndQuery;
@@ -1202,7 +1204,7 @@ return sign;
     let maxTime = startMax;
     let err = '';
     let capHit = false;   // 翻到分页上限仍未结束 → 视为未取完（避免把"取不全"误判为完成）
-    let gap = 400;        // 自适应节流间隔(ms)：被限流→加大，顺利→回落到基础值
+    let gap = 1200;       // 自适应节流间隔(ms)：基础 1.2s，被限流→加大(≤8s)，顺利→缓慢回落到基础值（从源头降低触发限流的频率）
     const t0 = Date.now();
     for (let page = 0; page < 60; page++) {
       let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
@@ -1211,22 +1213,25 @@ return sign;
       // 单页「持续重试」：被限流/失败时不中断任务，而是原地长退避重试同一页，直到恢复或重试耗尽
       // （抖音限流常持续数秒~十几秒，短重试必失败；持续重试可自动跨过限流窗口，一次取完）
       let res = null, j = null, ok = false, rateLimited = false;
-      for (let attempt = 0; attempt < 40; attempt++) {
-        res = await signedFetch(pq, {});
+      // 单页「持续重试」：被限流/失败时不中断任务，原地长退避重试同一页直到恢复
+      // （抖音限流常持续数十秒~1分钟，退避上限提到 60s、重试提到 60 次，确保一次跑完不中断）
+      for (let attempt = 0; attempt < 60; attempt++) {
+        // 首次(attempt 0)用全签名尝试；重试阶段用 quiet 模式(仅 1 个最小签名请求)——既给接口冷却时间，又避免 3x 请求放大限流
+        res = await signedFetch(pq, attempt > 0 ? { quiet: true } : {});
         j = res && res.j;
         const softErr = j && typeof j.status_code === 'number' && j.status_code !== 0; // 200 但业务错误（如限流）
         if (res && res.ok && j && !softErr) { ok = true; break; }
         rateLimited = true;
-        const backoff = Math.min(8000, 800 * Math.pow(1.7, attempt)); // 退避上限 8s，指数上升
+        const backoff = Math.min(60000, 2000 * Math.pow(2.2, attempt)); // 退避上限 60s、指数上升更快封顶（2s→4.4k→9.7k→21k→47k→60k…）
         if (onProgress) onProgress({ pages: page + 1, fetched: seen.size, hasMore: true, pct: 0, remMs: backoff, waiting: true, waitSec: Math.ceil(backoff / 1000) });
         await sleep(backoff);
       }
       if (!ok) {
-        err = 'following/list 持续请求失败(已重试约40次) ' + ((res && (res.err || ('HTTP ' + res.http))) || (j && j.status_msg) || '接口返回异常');
+        err = 'following/list 持续请求失败(已重试约60次仍失败) ' + ((res && (res.err || ('HTTP ' + res.http))) || (j && j.status_msg) || '接口返回异常');
         break;
       }
       // 自适应节流：刚被限流→后续间隔加大；顺利→间隔缓慢回落到基础值
-      gap = rateLimited ? Math.min(4000, gap * 1.8) : Math.max(400, gap * 0.85);
+      gap = rateLimited ? Math.min(8000, gap * 1.8) : Math.max(1200, gap * 0.9);
       const list = (j && (j.following_list || j.followings)) || [];
       // 按 sec_uid 去重：避免重复翻页/接口回带导致计数虚高（如「1200 个」实为重复）
       for (const a of list) {
