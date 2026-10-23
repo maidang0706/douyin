@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-23 09:23 关注名单彻底防中断(quiet重试+60s长退避+节流)
+// @name         抖音插件 2026-10-23 10:04 关注名单防中断(完整签名重试+长冷却+节奏控制)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.6.4
-// @description  2026-10-23 09:23 彻底修复「获取关注老是中断」：①retry 改用 quiet 单请求模式(仅最小签名1个请求)，避免3x请求放大限流、让接口真正冷却；②退避上限8s→60s、重试40→60次、指数更快封顶，足以跨过抖音数十秒~分钟的限流窗口一次跑完；③基础节流400ms→1.2s、限流后间隔上限4s→8s，从源头降低触发频率。进度条限流时显示「⏳约X秒后自动重试」。去重/断点续传保留。打开已登录的 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @version      1.6.5
+// @description  2026-10-23 10:04 针对「获取关注反复中断(取493个后断)」再次修复：①关键发现——抖音往往只对缺少msToken的裸请求限流，故重试改回「完整签名(含msToken)」且成功即停(不再quiet单请求)，带token重试更易跨过限流；②退避上限60s→120s、指数1.9(3s→120s)，长冷却自动跨过分钟级风控；③每成功3页主动休息8s模拟人工节奏，从源头降低累计风控；④中断时显示真实诊断(HTTP码/status_code/响应片段)并保存到本地便于反馈。去重/断点续传保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -674,6 +674,7 @@ return sign;
   const K_FCURSOR = 'DYUNREAD_FOLLOW_CURSOR';  // 断点续传游标（最后成功的 max_time），中断后可从断点接着拉
   const K_FSEEN = 'DYUNREAD_FOLLOW_SEEN';      // 已见 sec_uid（跨次去重 + 续传合并）
   let lastApiError = ''; // 最近一次接口失败原因，用于给出精准报错（而不是笼统的「接口未返回数据」）
+  let lastFailSample = ''; // 最近一次失败的具体响应(HTTP码/status_code/msg)，供中断时给出诊断、便于精准定位
 
   // 关注账号列表缓存：登录成功后获取，供「重新获取未读」复用，无需每次重新拉名单
   let LAST_ACCOUNTS = [];
@@ -1213,16 +1214,17 @@ return sign;
       // 单页「持续重试」：被限流/失败时不中断任务，而是原地长退避重试同一页，直到恢复或重试耗尽
       // （抖音限流常持续数秒~十几秒，短重试必失败；持续重试可自动跨过限流窗口，一次取完）
       let res = null, j = null, ok = false, rateLimited = false;
-      // 单页「持续重试」：被限流/失败时不中断任务，原地长退避重试同一页直到恢复
-      // （抖音限流常持续数十秒~1分钟，退避上限提到 60s、重试提到 60 次，确保一次跑完不中断）
+      // 单页「持续重试」：被限流/失败时不中断任务，原地长冷却重试同一页直到恢复
+      // 关键点：重试也用「完整签名(含 msToken)」而非裸请求——抖音往往只对缺少 msToken 的裸请求限流，
+      // 带 token 的完整签名更易成功；signedFetch 成功即停(不 3x 放大)，靠下方长退避保证请求稀疏、给接口充分冷却
       for (let attempt = 0; attempt < 60; attempt++) {
-        // 首次(attempt 0)用全签名尝试；重试阶段用 quiet 模式(仅 1 个最小签名请求)——既给接口冷却时间，又避免 3x 请求放大限流
-        res = await signedFetch(pq, attempt > 0 ? { quiet: true } : {});
+        res = await signedFetch(pq, {});
         j = res && res.j;
         const softErr = j && typeof j.status_code === 'number' && j.status_code !== 0; // 200 但业务错误（如限流）
         if (res && res.ok && j && !softErr) { ok = true; break; }
         rateLimited = true;
-        const backoff = Math.min(60000, 2000 * Math.pow(2.2, attempt)); // 退避上限 60s、指数上升更快封顶（2s→4.4k→9.7k→21k→47k→60k…）
+        lastFailSample = ((res && res.err) || (j && j.status_msg) || (res && ('HTTP ' + res.http)) || '无详情');
+        const backoff = Math.min(120000, 3000 * Math.pow(1.9, attempt)); // 退避上限 120s、指数上升（3s→5.7k→10.8k→20.6k→39k→75k→120k…）足以跨过分钟级风控冷却
         if (onProgress) onProgress({ pages: page + 1, fetched: seen.size, hasMore: true, pct: 0, remMs: backoff, waiting: true, waitSec: Math.ceil(backoff / 1000) });
         await sleep(backoff);
       }
@@ -1267,6 +1269,7 @@ return sign;
         onProgress({ pages: pages, fetched: fetched, hasMore: hasMore, pct: pct, remMs: remMs });
       }
       await sleep(gap);   // 自适应节流：刚被限流则加大间隔，顺利则回落
+      if ((page + 1) % 3 === 0) await sleep(8000); // 每成功 3 页主动休息 8s，模拟人工节奏，从源头降低累计风控触发概率
     }
     lastApiError = err;
     // 完整性：无错误 + 已取到唯一账号 + 未触达分页上限（即 has_more 已变 false）
@@ -1398,9 +1401,12 @@ return sign;
       // 保存断点游标 + 已见 sec_uid，供下次点「获取」时从断点继续
       try { localStorage.setItem(K_FCURSOR, String(res.nextMaxTime)); localStorage.setItem(K_FSEEN, JSON.stringify([].slice.call(seen))); } catch (e) {}
       if (progEl) { progEl.style.display = 'block'; if (fillEl) fillEl.style.width = '100%'; if (pctEl) pctEl.textContent = '中断'; if (etaEl) etaEl.textContent = '未取完·已存进度·可继续'; }
+      // 保存诊断样本，便于用户反馈真实失败原因（HTTP码/status_code/响应片段）
+      try { localStorage.setItem('DYUNREAD_LAST_ERR', String(lastFailSample || lastApiError || '空')); } catch (e) {}
+      const diag = lastApiError || ('未知原因(诊断样本：' + (lastFailSample || '空') + ')');
       setScanText(!accounts.length
         ? ('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'))
-        : ('⚠️ 关注名单未完整获取（已取唯一 ' + accounts.length + ' 个，' + (lastApiError || '接口中断') + '）。已自动保存进度，请稍后点「继续获取关注的公众号」从断点接着拉，直到全部取完才能抓未读。'));
+        : ('⚠️ 关注名单未完整获取（已取唯一 ' + accounts.length + ' 个，' + diag + '）。已自动保存进度，请稍后点「继续获取关注的公众号」从断点接着拉，直到全部取完才能抓未读。'));
       updateSteps('err2'); updateLoginUI();
       return;
     }
