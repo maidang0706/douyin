@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-23 10:14 关注名单过滤非关注项(剔除推荐/粉丝,对齐真实关注数)
+// @name         抖音插件 2026-10-23 10:55 关注名单防中断(消除3x请求放大+登录态即时终止+退避收敛+诊断)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.6.6
-// @description  2026-10-23 10:14 修复「获取427个但只关注391个」：抖音 following/list 会混入推荐关注/粉丝卡片(有sec_uid但不属于你关注的人)，按 relation=0/rec_reason/is_follow=false 过滤，仅保留真实关注项，关注数不再虚高；并透明显示「接口返回N→剔除M→保留真实关注K」。完整签名重试/120s长冷却/节奏控制/诊断/断点续传保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @version      1.6.7
+// @description  2026-10-23 10:55 再次修复「获取关注反复中断」：①关键修复——v1.6.5/1.6.6 误用全签名分支导致每次重试发3个请求(3x放大)疯狂刷新抖音限流窗口，改回 quiet 单请求重试，消除放大；②错误分类——检测到登录态失效(status_code=5/8/HTTP401)立即终止并提示重登，不再傻等；③退避收敛——封顶30s、最多12次，不再卡1.7小时；④每页间隔随机抖动(1.5~2.4s)避免固定节奏被识别为脚本；⑤中断提示直接显示最近失败的具体错误码便于精准定位。过滤非关注项/进度条/断点续传保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -639,7 +639,7 @@ return sign;
           { addWebid: true,  addMsToken: false }, // 补 webid
           {}                                         // 补 webid + msToken
         ];
-    const last = { ok: false, j: null, err: '', http: 0 };
+    const last = { ok: false, j: null, err: '', http: 0, statusCode: null };
     for (const t of tries) {
       let url = API + pathAndQuery;
       try {
@@ -650,8 +650,9 @@ return sign;
         last.http = r.status;
         const j = await r.json().catch(function () { return null; });
         last.j = j;
-        if (j && (!j.status_code || j.status_code === 0)) { last.ok = true; return last; }
+        if (j && (!j.status_code || j.status_code === 0)) { last.ok = true; last.statusCode = j.status_code; return last; }
         last.err = 'status_code=' + (j && j.status_code != null ? j.status_code : '?') + ' ' + ((j && j.status_msg) || '');
+        last.statusCode = (j && j.status_code != null) ? j.status_code : null;
       } catch (e) {
         last.err = '请求异常：' + (e && e.message ? e.message : e);
         last.j = null;
@@ -1216,35 +1217,42 @@ return sign;
     let err = '';
     let capHit = false;   // 翻到分页上限仍未结束 → 视为未取完（避免把"取不全"误判为完成）
     let skipped = 0;     // 被过滤的非关注项(推荐/粉丝)数量，用于透明展示「接口返回 N → 剔除 M → 保留真实关注 K」
-    let gap = 1200;       // 自适应节流间隔(ms)：基础 1.2s，被限流→加大(≤8s)，顺利→缓慢回落到基础值（从源头降低触发限流的频率）
+    let gap = 1500;       // 自适应节流间隔(ms)：基础 1.5s，被限流→加大(≤8s)，顺利→缓慢回落（从源头降低触发限流的频率，配合下方随机抖动避免固定节奏）
     const t0 = Date.now();
     for (let page = 0; page < 60; page++) {
       let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
         '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
       if (maxTime) pq += '&max_time=' + maxTime;
-      // 单页「持续重试」：被限流/失败时不中断任务，而是原地长退避重试同一页，直到恢复或重试耗尽
-      // （抖音限流常持续数秒~十几秒，短重试必失败；持续重试可自动跨过限流窗口，一次取完）
-      let res = null, j = null, ok = false, rateLimited = false;
       // 单页「持续重试」：被限流/失败时不中断任务，原地长冷却重试同一页直到恢复
-      // 关键点：重试也用「完整签名(含 msToken)」而非裸请求——抖音往往只对缺少 msToken 的裸请求限流，
-      // 带 token 的完整签名更易成功；signedFetch 成功即停(不 3x 放大)，靠下方长退避保证请求稀疏、给接口充分冷却
-      for (let attempt = 0; attempt < 60; attempt++) {
-        res = await signedFetch(pq, {});
+      // 关键修复：重试阶段用 quiet（仅 1 个最小签名请求）——v1.6.5/1.6.6 误用全签名分支，每次重试发 3 个请求，
+      // 等于自己疯狂刷新抖音限流窗口，正是「翻几页就中断」的主因。单请求 + 稀疏间隔给接口真正冷却时间。
+      let res = null, j = null, ok = false, rateLimited = false, loginDead = false;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        res = await signedFetch(pq, { quiet: true });
         j = res && res.j;
+        const sc = res && res.statusCode;
+        // 登录态失效（401 或 status_code=5/8 等）：重试毫无意义，立即终止并提示用户重登，避免傻等
+        if ((res && res.http === 401) || sc === 5 || sc === 8) { loginDead = true; rateLimited = true; break; }
         const softErr = j && typeof j.status_code === 'number' && j.status_code !== 0; // 200 但业务错误（如限流）
         if (res && res.ok && j && !softErr) { ok = true; break; }
         rateLimited = true;
-        lastFailSample = ((res && res.err) || (j && j.status_msg) || (res && ('HTTP ' + res.http)) || '无详情');
-        const backoff = Math.min(120000, 3000 * Math.pow(1.9, attempt)); // 退避上限 120s、指数上升（3s→5.7k→10.8k→20.6k→39k→75k→120k…）足以跨过分钟级风控冷却
+        const reason = (res && res.err) || (j && j.status_msg) || ('HTTP ' + (res && res.http)) || '无详情';
+        lastFailSample = reason;
+        const backoff = Math.min(30000, 2000 * Math.pow(1.8, attempt)); // 退避封顶 30s、指数上升(2s→3.6k→6.5k→11.7k→21k→30k…)，足够跨过软限流且不会无限等待
         if (onProgress) onProgress({ pages: page + 1, fetched: out.length, hasMore: true, pct: 0, remMs: backoff, waiting: true, waitSec: Math.ceil(backoff / 1000) });
         await sleep(backoff);
       }
+      if (loginDead) {
+        const code = (res && res.statusCode != null) ? ('status_code=' + res.statusCode) : ('HTTP ' + (res && res.http));
+        err = '登录态已失效(' + code + ')。重试无效，请重新登录 www.douyin.com 后再次点「获取关注的公众号」。';
+        break;
+      }
       if (!ok) {
-        err = 'following/list 持续请求失败(已重试约60次仍失败) ' + ((res && (res.err || ('HTTP ' + res.http))) || (j && j.status_msg) || '接口返回异常');
+        err = 'following/list 持续失败(已重试约12次仍失败) ' + ((res && (res.err || ('HTTP ' + res.http))) || (j && j.status_msg) || '接口返回异常');
         break;
       }
       // 自适应节流：刚被限流→后续间隔加大；顺利→间隔缓慢回落到基础值
-      gap = rateLimited ? Math.min(8000, gap * 1.8) : Math.max(1200, gap * 0.9);
+      gap = rateLimited ? Math.min(8000, gap * 1.8) : Math.max(1500, gap * 0.9);
       const list = (j && (j.following_list || j.followings)) || [];
       // 解析：① 按 sec_uid 跨页去重；② 过滤非关注项(推荐关注/粉丝，relation=0 或含 rec_reason/is_follow=false)，
       // 这些项会被抖音 following 接口混进列表，导致「关注数」虚高(如 427 vs 真实 391)
@@ -1281,7 +1289,7 @@ return sign;
         }
         onProgress({ pages: pages, fetched: fetched, hasMore: hasMore, pct: pct, remMs: remMs });
       }
-      await sleep(gap);   // 自适应节流：刚被限流则加大间隔，顺利则回落
+      await sleep(gap + Math.floor(Math.random() * 900));   // 自适应节流 + 随机抖动(1.5~2.4s)，避免固定节奏被识别为脚本
       if ((page + 1) % 3 === 0) await sleep(8000); // 每成功 3 页主动休息 8s，模拟人工节奏，从源头降低累计风控触发概率
     }
     lastApiError = err;
@@ -1416,10 +1424,13 @@ return sign;
       if (progEl) { progEl.style.display = 'block'; if (fillEl) fillEl.style.width = '100%'; if (pctEl) pctEl.textContent = '中断'; if (etaEl) etaEl.textContent = '未取完·已存进度·可继续'; }
       // 保存诊断样本，便于用户反馈真实失败原因（HTTP码/status_code/响应片段）
       try { localStorage.setItem('DYUNREAD_LAST_ERR', String(lastFailSample || lastApiError || '空')); } catch (e) {}
-      const diag = lastApiError || ('未知原因(诊断样本：' + (lastFailSample || '空') + ')');
+      const diag = (lastFailSample ? ('最近一次失败：' + lastFailSample + '。') : '') + (lastApiError || '未知原因');
+      const tip = /登录态已失效/.test(lastApiError)
+        ? '（提示：登录态失效，请重新登录抖音后再点「获取关注」；若刚登过仍报此错，说明脚本拿到的登录票据缺失，试试在 www.douyin.com 刷新页面后重登。）'
+        : '（已自动保存进度，请稍后点「继续获取关注的公众号」从断点接着拉，直到全部取完才能抓未读。）';
       setScanText(!accounts.length
         ? ('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'))
-        : ('⚠️ 关注名单未完整获取（已取唯一 ' + accounts.length + ' 个，' + diag + '）。已自动保存进度，请稍后点「继续获取关注的公众号」从断点接着拉，直到全部取完才能抓未读。'));
+        : ('⚠️ 关注名单未完整获取（已取唯一 ' + accounts.length + ' 个）。' + diag + tip));
       updateSteps('err2'); updateLoginUI();
       return;
     }
