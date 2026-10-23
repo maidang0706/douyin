@@ -1,8 +1,10 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-23 10:55 关注名单防中断(消除3x请求放大+登录态即时终止+退避收敛+诊断)
+// @name         抖音插件 2026-10-23 11:18 修复Via更新拿到旧版(加@downloadURL+缓存破除)+关注防中断
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @version      1.6.7
-// @description  2026-10-23 10:55 再次修复「获取关注反复中断」：①关键修复——v1.6.5/1.6.6 误用全签名分支导致每次重试发3个请求(3x放大)疯狂刷新抖音限流窗口，改回 quiet 单请求重试，消除放大；②错误分类——检测到登录态失效(status_code=5/8/HTTP401)立即终止并提示重登，不再傻等；③退避收敛——封顶30s、最多12次，不再卡1.7小时；④每页间隔随机抖动(1.5~2.4s)避免固定节奏被识别为脚本；⑤中断提示直接显示最近失败的具体错误码便于精准定位。过滤非关注项/进度条/断点续传保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=168
+// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=168
+// @version      1.6.8
+// @description  2026-10-23 11:18 修复「Via 更新常跳到旧版(如1.6.3)」：根因为脚本无 @downloadURL/@updateURL 且 raw 有5分钟CDN缓存+Via用首次导入的本地副本，导致更新拉到旧版。新增 @downloadURL/@updateURL 指向带 ?v=168 缓存破除的 raw 地址，Via/管理器更新时绕过缓存拉最新。关注防中断修复(quiet单请求/登录态即时终止/退避收敛/随机间隔/诊断)保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
