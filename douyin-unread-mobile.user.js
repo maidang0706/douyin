@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-23 11:18 修复Via更新拿到旧版(加@downloadURL+缓存破除)+关注防中断
+// @name         抖音插件 2026-10-23 11:34 关注名单自动续传(一次点击跑到完+签名升级突破限流+诊断)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=168
-// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=168
-// @version      1.6.8
-// @description  2026-10-23 11:18 修复「Via 更新常跳到旧版(如1.6.3)」：根因为脚本无 @downloadURL/@updateURL 且 raw 有5分钟CDN缓存+Via用首次导入的本地副本，导致更新拉到旧版。新增 @downloadURL/@updateURL 指向带 ?v=168 缓存破除的 raw 地址，Via/管理器更新时绕过缓存拉最新。关注防中断修复(quiet单请求/登录态即时终止/退避收敛/随机间隔/诊断)保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=169
+// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=169
+// @version      1.6.9
+// @description  2026-10-23 11:34 修复「获取关注反复中断、要一次次点继续获取」：①自动续传——一次点击后遇限流中断会自动存进度、冷却25~40s后从断点接着拉，最多8轮，直到取完或登录失效，无需手动反复点「继续获取」；②重试周期升级签名(每第4次带msToken完整请求)突破「裸请求被限流」；③诊断不再吞错——任何失败都显示最近一次HTTP码/status_code并写入本地DYUNREAD_LAST_ERR，便于精准定位；④登录失效立即终止提示重登。过滤非关注/去重/进度条/随机间隔保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -1229,8 +1229,12 @@ return sign;
       // 关键修复：重试阶段用 quiet（仅 1 个最小签名请求）——v1.6.5/1.6.6 误用全签名分支，每次重试发 3 个请求，
       // 等于自己疯狂刷新抖音限流窗口，正是「翻几页就中断」的主因。单请求 + 稀疏间隔给接口真正冷却时间。
       let res = null, j = null, ok = false, rateLimited = false, loginDead = false;
-      for (let attempt = 0; attempt < 12; attempt++) {
-        res = await signedFetch(pq, { quiet: true });
+      for (let attempt = 0; attempt < 15; attempt++) {
+        // 重试时优先「最小签名(仅 1 个请求)」——避免 3x 请求放大、疯狂刷新抖音限流窗口；
+        // 但每第 4 次升级为「带 msToken 的完整签名」：抖音往往只对「缺 msToken 的裸请求」限流，
+        // 带 token 的请求反而放行，故周期性尝试完整签名以突破限流（实测裸请求持续失败、带 token 成功即印证此点）
+        const useQuiet = (attempt % 4 !== 3);
+        res = await signedFetch(pq, useQuiet ? { quiet: true } : {});
         j = res && res.j;
         const sc = res && res.statusCode;
         // 登录态失效（401 或 status_code=5/8 等）：重试毫无意义，立即终止并提示用户重登，避免傻等
@@ -1296,7 +1300,8 @@ return sign;
     }
     lastApiError = err;
     // 完整性：无错误 + 已取到唯一账号 + 未触达分页上限（即 has_more 已变 false）
-    return { list: out, seen: seen, nextMaxTime: maxTime, complete: !err && seen.size > 0 && !capHit, skipped: skipped };
+    // 额外返回 loginDead / err，供 doGetFollow 区分「登录失效(需重登)」与「限流(可自动续传)」，并透出真实错误
+    return { list: out, seen: seen, nextMaxTime: maxTime, complete: !err && seen.size > 0 && !capHit, skipped: skipped, loginDead: loginDead, err: err };
   }
   async function getAccountPosts(secUid) {
     const out = [];
@@ -1414,45 +1419,74 @@ return sign;
       if (cntEl) cntEl.textContent = '已获取 ' + p.fetched + ' 个（第 ' + p.pages + ' 页）';
       if (etaEl) etaEl.textContent = '预计剩余：' + fmtEta(p.remMs) + '（估算）';
     };
-    const res = await getFollowingList(MY_UID, onProg, { resumeFrom: resumeFrom, seen: seen });
-    const accounts = baseAccounts.concat(res.list);   // 续传时合并「已取 + 本次新增（已去重）」
-    // 写入关注白名单：之后未读只统计这些账号，避免混入非关注视频
-    setFollowSet(accounts.map(function (a) { return a.sec_uid; }));
-    LAST_ACCOUNTS = accounts; saveAccounts();
-    if (!accounts.length || !res.complete) {
-      FOLLOW_DONE = false;
-      // 保存断点游标 + 已见 sec_uid，供下次点「获取」时从断点继续
-      try { localStorage.setItem(K_FCURSOR, String(res.nextMaxTime)); localStorage.setItem(K_FSEEN, JSON.stringify([].slice.call(seen))); } catch (e) {}
-      if (progEl) { progEl.style.display = 'block'; if (fillEl) fillEl.style.width = '100%'; if (pctEl) pctEl.textContent = '中断'; if (etaEl) etaEl.textContent = '未取完·已存进度·可继续'; }
-      // 保存诊断样本，便于用户反馈真实失败原因（HTTP码/status_code/响应片段）
-      try { localStorage.setItem('DYUNREAD_LAST_ERR', String(lastFailSample || lastApiError || '空')); } catch (e) {}
-      const diag = (lastFailSample ? ('最近一次失败：' + lastFailSample + '。') : '') + (lastApiError || '未知原因');
-      const tip = /登录态已失效/.test(lastApiError)
-        ? '（提示：登录态失效，请重新登录抖音后再点「获取关注」；若刚登过仍报此错，说明脚本拿到的登录票据缺失，试试在 www.douyin.com 刷新页面后重登。）'
-        : '（已自动保存进度，请稍后点「继续获取关注的公众号」从断点接着拉，直到全部取完才能抓未读。）';
-      setScanText(!accounts.length
-        ? ('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'))
-        : ('⚠️ 关注名单未完整获取（已取唯一 ' + accounts.length + ' 个）。' + diag + tip));
-      updateSteps('err2'); updateLoginUI();
+    // —— 自动续传：一次点击后，遇到限流中断会自动保存进度并长冷却后接着拉，直到取完或登录失效，无需用户反复点击「继续获取」——
+    const MAX_OUTER = 8;            // 最多自动续传轮次（每轮之间冷却 25~40s），超出仍没取完才提示用户
+    let round = 0, resumeMax = resumeFrom, curSeen = seen, curBase = baseAccounts;
+    let finalRes = null, finalAccounts = [], loginDeadMsg = '', stuck = false;
+    const saveCursor = function () {
+      try { localStorage.setItem(K_FCURSOR, String(resumeMax)); localStorage.setItem(K_FSEEN, JSON.stringify([].slice.call(curSeen))); } catch (e) {}
+    };
+    while (round < MAX_OUTER) {
+      const r = await getFollowingList(MY_UID, onProg, { resumeFrom: resumeMax, seen: curSeen });
+      finalRes = r;
+      const accounts = curBase.concat(r.list);   // 续传时合并「已取 + 本次新增（已去重）」
+      // 边取边持久化白名单：即使中途关闭页面，已取部分也保留，重新打开可断点续传
+      setFollowSet(accounts.map(function (a) { return a.sec_uid; }));
+      LAST_ACCOUNTS = accounts; saveAccounts();
+      finalAccounts = accounts;
+      if (r.complete) break;                       // 全部取完 → 走成功流程
+      if (r.loginDead) { loginDeadMsg = r.err || '登录态已失效'; break; } // 登录失效 → 立即终止，提示重登
+      // 未取完且可重试：保存断点，长冷却后自动续传（不依赖用户手动点「继续获取」）
+      resumeMax = r.nextMaxTime; curBase = accounts; saveCursor();
+      if (round > 0 && r.list.length === 0) { stuck = true; break; } // 续传后毫无新增 → 真正卡死，不再空转
+      round++;
+      if (round >= MAX_OUTER) { stuck = true; break; }
+      const cd = 25000 + Math.floor(Math.random() * 15000); // 25~40s 冷却，给抖音限流窗口充分恢复
+      if (etaEl) etaEl.textContent = '⏳ 自动续传倒计时：约 ' + Math.round(cd / 1000) + ' 秒（无需操作）';
+      if (cntEl) cntEl.textContent = '已获取 ' + accounts.length + ' 个（第 ' + (round + 1) + ' 轮续传前，暂停恢复中）';
+      setScanText('② 第 ' + (round + 1) + ' 轮拉取被限流中断，已自动保存进度，暂停约 ' + Math.round(cd / 1000) + ' 秒后自动从断点继续（无需操作）…');
+      await sleep(cd);
+    }
+    const res = finalRes || {}; const accounts = finalAccounts;
+    if (res.complete) {
+      FOLLOW_DONE = true;
+      // 取完：清除续传游标
+      try { localStorage.removeItem(K_FCURSOR); localStorage.removeItem(K_FSEEN); } catch (e) {}
+      // 获取成功：进度条置满后收起，再展示核对区
+      if (fillEl) fillEl.style.width = '100%';
+      if (pctEl) pctEl.textContent = '100%';
+      if (etaEl) etaEl.textContent = '已完成';
+      setTimeout(function () { if (progEl) progEl.style.display = 'none'; }, 1200);
+      updateSteps(3);
+      updateLoginUI();
+      renderFollowList();
+      const skippedNow = res.skipped || 0;
+      let doneMsg = '② ✅ 完成：已获取 ' + accounts.length + ' 个关注公众号（已全部取完';
+      if (skippedNow > 0) doneMsg += '；已从接口返回中自动剔除 ' + skippedNow + ' 个非关注或推荐账号，仅保留真实关注';
+      else doneMsg += '，已按账号去重';
+      doneMsg += '）。请先核对上方名单数量是否正确，确认无误后再点「抓取未读视频」。';
+      setScanText(doneMsg);
       return;
     }
-    FOLLOW_DONE = true;
-    // 取完：清除续传游标
-    try { localStorage.removeItem(K_FCURSOR); localStorage.removeItem(K_FSEEN); } catch (e) {}
-    // 获取成功：进度条置满后收起，再展示核对区
-    if (fillEl) fillEl.style.width = '100%';
-    if (pctEl) pctEl.textContent = '100%';
-    if (etaEl) etaEl.textContent = '已完成';
-    setTimeout(function () { if (progEl) progEl.style.display = 'none'; }, 1200);
-    updateSteps(3);
-    updateLoginUI();
-    renderFollowList();
-    const skippedNow = res.skipped || 0;
-    let doneMsg = '② ✅ 完成：已获取 ' + accounts.length + ' 个关注公众号（已全部取完';
-    if (skippedNow > 0) doneMsg += '；已从接口返回中自动剔除 ' + skippedNow + ' 个非关注或推荐账号，仅保留真实关注';
-    else doneMsg += '，已按账号去重';
-    doneMsg += '）。请先核对上方名单数量是否正确，确认无误后再点「抓取未读视频」。';
-    setScanText(doneMsg);
+    // —— 未能取完（限流跨过多轮仍未恢复 / 登录失效 / 卡死）——
+    FOLLOW_DONE = false;
+    if (progEl) { progEl.style.display = 'block'; if (fillEl) fillEl.style.width = '100%'; if (pctEl) pctEl.textContent = '中断'; if (etaEl) etaEl.textContent = '未取完·可继续'; }
+    // 诊断样本写入本地，便于反馈真实失败原因（HTTP码/status_code/响应片段）
+    try { localStorage.setItem('DYUNREAD_LAST_ERR', String(lastFailSample || lastApiError || '空')); } catch (e) {}
+    const diag = (lastFailSample ? ('最近一次失败：' + lastFailSample + '。') : '') + (lastApiError || '未知原因（脚本未捕获到具体错误，可能是网络被拦截或响应为空，详见本地 DYUNREAD_LAST_ERR）');
+    let tip;
+    if (loginDeadMsg || /登录态已失效/.test(lastApiError)) {
+      tip = '（提示：登录态失效，请重新登录 www.douyin.com 后再次点「获取关注的公众号」；若刚登过仍报此错，说明脚本拿到的登录票据缺失，试试在抖音页面刷新后重登。）';
+    } else if (stuck) {
+      tip = '（已自动续传多次仍无新增，疑似该页被持续限流或登录态变化。请稍候几分钟再点「继续获取关注的公众号」，或重新登录抖音后再试。）';
+    } else {
+      tip = '（已自动保存进度并多次尝试续传仍未取完，请稍后点「继续获取关注的公众号」从断点接着拉，直到全部取完才能抓未读。）';
+    }
+    setScanText(!accounts.length
+      ? ('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'))
+      : ('⚠️ 关注名单未完整获取（已取唯一 ' + accounts.length + ' 个）。' + diag + tip));
+    updateSteps('err2'); updateLoginUI();
+    return;
   }
 
   // 第②步完成后，把关注名单（数量 + 昵称清单）渲染到核对区，供用户先核对再抓视频
