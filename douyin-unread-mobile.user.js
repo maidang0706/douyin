@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-24 19:26 修复获取关注卡住(翻页空转检测+脏数据自愈)
+// @name         抖音插件 2026-10-24 19:45 修复获取关注挤牙膏卡住(限流降速检测+从头重拉策略)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=173
-// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=173
-// @version      1.6.13
-// @description  2026-10-24 19:26 修复「获取关注又卡住(截图：第60页、已获取474/共391、94%不动)」：①根因——翻页游标失效时空转满60页(接口回带重复页被seen挡住0新增，旧逻辑maxTime-1还变负数游标继续空转)，每页0.7~1.3s sleep+可能的12s超时重试让界面几分钟不动=卡住；新增「连续3页无新增即停」「连续2页无有效max_time即停」「单轮超3分钟自动暂停进续传冷却」三重检测；②历史脏数据自愈——已取唯一数>真实关注总数(如474>391)时自动清空历史进度从头拉，不再在污染基数上续传；③修正已取数达到总数后百分比仍走估算公式显示94%的误导(改为封顶99%交完整性判定)。fetch超时/count降级/自动续传/去重/过滤非关注保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=174
+// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=174
+// @version      1.6.14
+// @description  2026-10-24 19:45 修复「获取关注又在79个卡住(第60页/20%)」：①根因——抖音限流时不完全拒绝请求，而是每页「挤牙膏」只吐1~2个新账号(60页×1.3个≈79个)，每页零星新增会清零旧的「无新增」检测，照样空转满60页；新增「挤牙膏检测」：单页新增不足期望量10%(count=200→10个/50→3个)连续8页即判限流降速提前停；②检出降速后续传放弃max_time从头重拉——抖音通常只限流带游标的翻页、首页(无max_time)仍能返回数据，已取账号靠seen去重不重复计数；③游标'0'现在是合法续传态(从头重拉)，按「是否保存过记录」判断可续传；④自动续传冷却按本轮新增量动态拉长(无新增60~90s/降速40~60s/普通25~40s)，被限越狠等越久。空转检测/脏数据自愈/fetch超时/去重/过滤非关注保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -694,7 +694,7 @@ return sign;
   const K_FSEEN = 'DYUNREAD_FOLLOW_SEEN';      // 已见 sec_uid（跨次去重 + 续传合并）
   let lastApiError = ''; // 最近一次接口失败原因，用于给出精准报错（而不是笼统的「接口未返回数据」）
   let lastFailSample = ''; // 最近一次失败的具体响应(HTTP码/status_code/msg)，供中断时给出诊断、便于精准定位
-  const SCRIPT_VERSION = '1.6.13'; // 面板常驻显示的版本号，便于一眼确认是否跑在最新版（与下方 @version 保持一致）
+  const SCRIPT_VERSION = '1.6.14'; // 面板常驻显示的版本号，便于一眼确认是否跑在最新版（与下方 @version 保持一致）
 
   // 关注账号列表缓存：登录成功后获取，供「重新获取未读」复用，无需每次重新拉名单
   let LAST_ACCOUNTS = [];
@@ -1270,6 +1270,8 @@ return sign;
     const ROUND_TIMEOUT = 180000;  // 单轮最长 3 分钟：超过就 break 交给「自动续传」轮次冷却，避免单轮长跑无感知（用户观感=卡住）
     let stallPages = 0;   // 连续无新增页数：翻页游标失效/被限流时接口返回重复页，seen 全挡住→0 新增，连续 3 页即判本轮无效（不再空转满 60 页）
     let badCursorPages = 0; // 连续无有效 max_time 的页数：接口不返回游标时旧逻辑用 maxTime-1 兜底会变负数继续空转，连续 2 页即停
+    let starvePages = 0;  // 连续「挤牙膏」页数：抖音限流时不完全拒绝，而是每页只吐 1~2 个新账号（60页×1.3个≈79个卡20%），每页有零星新增会清零 stall 检测——改为按「单页新增不足期望量10%」累计，连续 8 页即判限流降速
+    let degraded = false; // 本轮是否检出限流降速/游标失效（是则续传时放弃 max_time 从头重拉：首页不限流能拿数据，翻页被挤牙膏）
     let pageCount = 200;  // 优先 200/页（提速）；若抖音把 count=200 降级/忽略导致首页返回空，自动降到 50 重拉
     for (let page = 0; page < 60; page++) {
       let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=' + pageCount +
@@ -1336,6 +1338,11 @@ return sign;
       } else {
         stallPages = 0;
       }
+      // 挤牙膏检测：单页新增不足「期望量的10%」（count=200→10个、count=50→3个，保底3个）视为限流降速
+      const newThisPage = out.length - pageStartLen;
+      const starveThreshold = Math.max(3, Math.floor(pageCount / 20));
+      if (newThisPage > 0 && newThisPage < starveThreshold) starvePages++;
+      else starvePages = 0;
       if (!j.max_time || j.max_time <= 0) {
         badCursorPages++; // 接口不给翻页游标：旧逻辑 maxTime-1 会变负数继续空转，改为累计 2 页即停
       } else {
@@ -1343,10 +1350,17 @@ return sign;
       }
       if (stallPages >= 3) {
         err = '连续 3 页无新增（接口回带重复页，翻页游标可能失效），已停止本轮';
+        degraded = true;   // 游标失效 → 续传时从头重拉（首页不限流）
+        break;
+      }
+      if (starvePages >= 8) {
+        err = '连续 8 页每页仅个位数新增（疑似抖音对翻页限流降速），已提前停止本轮';
+        degraded = true;   // 翻页被挤牙膏 → 续传时放弃 max_time 从头重拉
         break;
       }
       if (badCursorPages >= 2) {
         err = '连续 2 页未返回有效翻页游标(max_time)，接口可能已限流，已停止本轮';
+        degraded = true;
         break;
       }
       if (Date.now() - t0 > ROUND_TIMEOUT) {
@@ -1389,8 +1403,8 @@ return sign;
     // ① 若已知真实关注总数 REAL_TOTAL，取到数 >= 总数即视为取全（哪怕 has_more 因限流卡住，也能消除「取到395却说没取完」的假性中断）；
     // ② 否则退回「has_more=false 且未触分页上限」的旧判定。无错误 + 已取到账号 是前提。
     const reachedTotal = REAL_TOTAL != null && (realCount + baseCount) >= REAL_TOTAL;
-    // 额外返回 loginDead / err / total / realCount，供 doGetFollow 区分「登录失效(需重登)」与「限流(可自动续传)」并透出真实错误
-    return { list: out, seen: seen, nextMaxTime: maxTime, complete: !err && seen.size > 0 && (reachedTotal || (!capHit && !lastHasMore)), skipped: skipped, loginDead: loginDead, err: err, total: REAL_TOTAL, realCount: realCount };
+    // 额外返回 loginDead / err / total / realCount / degraded，供 doGetFollow 区分「登录失效(需重登)」与「限流(可自动续传/从头重拉)」并透出真实错误
+    return { list: out, seen: seen, nextMaxTime: maxTime, complete: !err && seen.size > 0 && (reachedTotal || (!capHit && !lastHasMore)), skipped: skipped, loginDead: loginDead, err: err, total: REAL_TOTAL, realCount: realCount, degraded: degraded };
   }
   async function getAccountPosts(secUid) {
     const out = [];
@@ -1463,9 +1477,13 @@ return sign;
     let REAL_TOTAL = null;
     try { REAL_TOTAL = await getMyFollowingCount(); } catch (e) {}
     if (REAL_TOTAL != null) setScanText('② 已读取到你的真实关注总数 ' + REAL_TOTAL + ' 个，开始分页获取名单（取齐即自动判定完成）…');
-    // 断点续传：上次未取完且已保存游标 → 从断点继续拉，避免从头重拉反复撞限流
-    const cursor = Number(localStorage.getItem(K_FCURSOR) || 0);
-    let canResume = (!FOLLOW_DONE) && cursor > 0 && LAST_ACCOUNTS.length > 0;
+    // 断点续传：上次未取完且已保存游标 → 从断点继续拉，避免从头重拉反复撞限流。
+    // 游标为 '0' 是合法续传态（检出限流降速后主动「从头重拉」：首页不限流能拿数据，已取账号靠 seen 去重不重复计数），
+    // 因此用「是否保存过记录」而非「>0」判断；只有从未保存过(removeItem 后)才走从头全新获取。
+    const cursorRaw = localStorage.getItem(K_FCURSOR);
+    const hasCursor = cursorRaw !== null && cursorRaw !== undefined;
+    const cursor = Number(cursorRaw || 0);
+    let canResume = (!FOLLOW_DONE) && hasCursor && LAST_ACCOUNTS.length > 0;
     let baseAccounts = [];
     let seen = new Set();
     let resumeFrom = 0;
@@ -1482,7 +1500,9 @@ return sign;
       resumeFrom = cursor;
       baseAccounts = LAST_ACCOUNTS.slice();
       try { const arr = JSON.parse(localStorage.getItem(K_FSEEN) || '[]'); if (Array.isArray(arr)) arr.forEach(function (s) { seen.add(s); }); } catch (e) {}
-      setScanText('② 正在继续获取关注账号名单（断点续传：已取 ' + baseAccounts.length + ' 个，从断点接着拉）…');
+      setScanText(cursor > 0
+        ? ('② 正在继续获取关注账号名单（断点续传：已取 ' + baseAccounts.length + ' 个，从断点接着拉）…')
+        : ('② 正在从头重拉关注账号名单（已取 ' + baseAccounts.length + ' 个不会重复计数，翻页限流解除后继续补齐）…'));
     } else {
       try { localStorage.removeItem(K_FCURSOR); } catch (e) {}
       try { localStorage.removeItem(K_FSEEN); } catch (e) {}
@@ -1539,14 +1559,26 @@ return sign;
       if (r.complete) break;                       // 全部取完 → 走成功流程
       if (r.loginDead) { loginDeadMsg = r.err || '登录态已失效'; break; } // 登录失效 → 立即终止，提示重登
       // 未取完且可重试：保存断点，长冷却后自动续传（不依赖用户手动点「继续获取」）
-      resumeMax = r.nextMaxTime; curBase = accounts; saveCursor();
+      // 关键策略：检出「限流降速/游标失效」(degraded) 时放弃 max_time 从头重拉——抖音通常只限流「带游标的翻页」，
+      // 首页(无 max_time)仍能返回数据；已取账号靠 curSeen 去重，不会重复计数（79个挤牙膏卡20%的根治）
+      if (r.degraded) {
+        resumeMax = 0;
+      } else {
+        resumeMax = r.nextMaxTime;
+      }
+      curBase = accounts; saveCursor();
       if (round > 0 && r.list.length === 0) { stuck = true; break; } // 续传后毫无新增 → 真正卡死，不再空转
       round++;
       if (round >= MAX_OUTER) { stuck = true; break; }
-      const cd = 25000 + Math.floor(Math.random() * 15000); // 25~40s 冷却，给抖音限流窗口充分恢复
+      // 冷却时长按本轮新增量动态调整：被限得越狠（新增越少）等得越久，给限流窗口充分恢复
+      let cd;
+      if (r.list.length === 0) cd = 60000 + Math.floor(Math.random() * 30000);        // 毫无新增：60~90s
+      else if (r.degraded) cd = 40000 + Math.floor(Math.random() * 20000);           // 降速/游标失效：40~60s
+      else cd = 25000 + Math.floor(Math.random() * 15000);                           // 普通中断：25~40s
       if (etaEl) etaEl.textContent = '⏳ 自动续传倒计时：约 ' + Math.round(cd / 1000) + ' 秒（无需操作）';
-      if (cntEl) cntEl.textContent = '已获取 ' + accounts.length + ' 个（第 ' + (round + 1) + ' 轮续传前，暂停恢复中）';
-      setScanText('② 第 ' + (round + 1) + ' 轮拉取被限流中断，已自动保存进度，暂停约 ' + Math.round(cd / 1000) + ' 秒后自动从断点继续（无需操作）…');
+      if (cntEl) cntEl.textContent = '已获取 ' + accounts.length + ' 个（第 ' + (round + 1) + ' 轮拉取前，暂停恢复中）';
+      setScanText('② 第 ' + (round + 1) + ' 轮拉取' + (r.degraded ? '检出限流降速，将冷却后从头重拉（已取账号不会重复计数）' : '被中断') +
+        '，已自动保存进度，暂停约 ' + Math.round(cd / 1000) + ' 秒后自动继续（无需操作）…');
       await sleep(cd);
     }
     const res = finalRes || {}; const accounts = finalAccounts;
