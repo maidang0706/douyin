@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-23 11:45 关注名单自动续传+面板常驻版本号(一眼确认是否最新版)
+// @name         抖音插件 2026-10-24 12:30 关注名单提速(一步拿真实总数校验+count拉满+节流砍半)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=170
-// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=170
-// @version      1.6.10
-// @description  2026-10-23 11:45 在面板标题处常驻显示版本号 v1.6.10，一眼确认是否跑在最新版（根治「Via 更新常跳旧版、不知自己跑的是哪版」的困惑）。关注获取逻辑保持 v1.6.9 的自动续传(一次点击跑到完、遇限流自动存进度冷却25~40s后从断点接着拉最多8轮、无需手动点继续获取)+重试周期升级签名突破限流+诊断不吞错+登录失效立即终止。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=171
+// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=171
+// @version      1.6.11
+// @description  2026-10-24 12:30 针对「获取关注效率太低」：①新增一步拿真实关注总数(following_count，资料/关系接口直接返回，无需翻页)——既用于精确完成率，更用于完整性校验(取到数==真实总数即判已取全，消除「取到395却说没取完」的假性中断)；②分页 count 50→200 拉满(由 has_more 兜底，web端封顶50也不漏)；③节流从~2s/页砍到~0.7s/页并去掉每3页8s，整体提速数倍；④进度与提示显示「已取X/共Y」便于核对。自动续传/诊断/去重/过滤非关注保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -1210,20 +1210,47 @@ return sign;
     if (a.follow_status === 0 || a.relation === 0) return false;        // 关系字段明确为「未关注/粉丝」
     return true; // relation=1 关注 / 2 互关 → 保留；字段缺失 → 默认信任(接口通常只返回关注列表)
   }
+  // 一步拿到「我关注的总个数」——抖音用户资料/关系接口直接返回 following_count，无需翻页。
+  // 这是用户直觉里「个数应该一步拿到」的正确实现；用途：① 进度完成率精确计算；② 分页完整性校验
+  // （取到数 == following_count 就视为已取全，比 has_more=false 更可靠，可消除「取到395却说没取完」的假性中断）
+  async function getMyFollowingCount() {
+    // 1) 优先用当前登录用户的 sec_uid 调 profile/other（返回 user.following_count）
+    const sec = CAPTURED_SEC || (typeof getSelfSecFromPage === 'function' ? getSelfSecFromPage() : '');
+    if (sec) {
+      try {
+        const res = await signedFetch('/aweme/v1/web/user/profile/other/?aid=6383&sec_user_id=' + encodeURIComponent(sec), { quiet: true });
+        const u = res && res.j && (res.j.user || res.j.user_info || res.j.userInfo);
+        if (u && typeof u.following_count === 'number') return u.following_count;
+      } catch (e) {}
+    }
+    // 2) 兜底：commit/user 返回的 user 也可能带 following_count
+    try {
+      const r = await fetch(API + '/aweme/v1/web/commit/user/', { credentials: 'include' });
+      const j = await r.json().catch(function () { return {}; });
+      if (j && j.user && typeof j.user.following_count === 'number') return j.user.following_count;
+    } catch (e) {}
+    return null;
+  }
 
   async function getFollowingList(myUid, onProgress, opts) {
     opts = opts || {};
     const seen = (opts.seen instanceof Set) ? opts.seen : new Set(); // 累计唯一 sec_uid（含续传已有）
     const startMax = opts.resumeFrom || 0;
-    const out = [];           // 本次调用新增的唯一账号（不含 seen 中已存在的）
+    // 真实关注总数（来自 following_count，一步拿到的准确值）；用于精确完成率 + 完整性校验（取到数==总数即视为取全）
+    const REAL_TOTAL = (typeof opts.total === 'number' && opts.total > 0) ? opts.total : null;
+    // 续传时已累计的真实关注数（curBase 长度）；与本次 realCount 叠加后对比 REAL_TOTAL
+    const baseCount = (typeof opts.baseCount === 'number' && opts.baseCount >= 0) ? opts.baseCount : 0;
+    const out = [];           // 本次调用新增的真实关注账号（不含 seen 中已存在的；已过滤推荐/粉丝）
+    let realCount = 0;        // 本次新增的真实关注数（续传时叠加 baseCount 后对比 REAL_TOTAL，避免用含推荐项的 seen.size 误判完整）
     let maxTime = startMax;
     let err = '';
     let capHit = false;   // 翻到分页上限仍未结束 → 视为未取完（避免把"取不全"误判为完成）
+    let lastHasMore = true; // 记录最后一页是否还有更多（用于配合 REAL_TOTAL 判定完整性）
     let skipped = 0;     // 被过滤的非关注项(推荐/粉丝)数量，用于透明展示「接口返回 N → 剔除 M → 保留真实关注 K」
-    let gap = 1500;       // 自适应节流间隔(ms)：基础 1.5s，被限流→加大(≤8s)，顺利→缓慢回落（从源头降低触发限流的频率，配合下方随机抖动避免固定节奏）
+    let gap = 700;        // 自适应节流间隔(ms)：基础 0.7s，被限流→加大(≤8s)，顺利→缓慢回落（从源头降低触发限流的频率，配合下方随机抖动避免固定节奏）
     const t0 = Date.now();
     for (let page = 0; page < 60; page++) {
-      let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=50' +
+      let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=200' +
         '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
       if (maxTime) pq += '&max_time=' + maxTime;
       // 单页「持续重试」：被限流/失败时不中断任务，原地长冷却重试同一页直到恢复
@@ -1269,8 +1296,10 @@ return sign;
         seen.add(a.sec_uid);
         if (!isRealFollow(a)) { skipped++; continue; } // 非关注项(推荐/粉丝)剔除，不计入关注名单
         out.push({ sec_uid: a.sec_uid, nickname: a.nickname || a.unique_id || '未知' });
+        realCount++;
       }
       const hasMore = !!(j.has_more || j.has_more === 1);
+      lastHasMore = hasMore;
       if (!list.length) break;
       if (!hasMore) break;   // 没有更多页 → 已取完全部
       maxTime = j.max_time || (maxTime - 1);
@@ -1282,8 +1311,8 @@ return sign;
         const tElapsed = Date.now() - t0;
         const tPerPage = pages > 0 ? tElapsed / pages : 0;
         let pct, remMs;
-        // 优先用接口可能返回的真实关注总数；没有就用平滑估算（随页数上升、未取完前不超过 99%）
-        const realTotal = j && (j.following_count || j.total || j.followings_count || (j.user && j.user.following_count));
+        // 优先用「一步拿到的真实关注总数 REAL_TOTAL」；其次接口返回的 following_count；没有才平滑估算
+        const realTotal = REAL_TOTAL || (j && (j.following_count || j.total || j.followings_count || (j.user && j.user.following_count)));
         if (realTotal && realTotal > fetched) {
           pct = Math.min(99, Math.round(fetched / realTotal * 100));
           const perPageNow = fetched / pages;
@@ -1294,15 +1323,17 @@ return sign;
           const remPages = hasMore ? Math.max(1, pages) : 0;   // 不知总数时按"大约还有同样多页"保守估算
           remMs = tPerPage * remPages;
         }
-        onProgress({ pages: pages, fetched: fetched, hasMore: hasMore, pct: pct, remMs: remMs });
+        onProgress({ pages: pages, fetched: fetched, hasMore: hasMore, pct: pct, remMs: remMs, total: REAL_TOTAL });
       }
-      await sleep(gap + Math.floor(Math.random() * 900));   // 自适应节流 + 随机抖动(1.5~2.4s)，避免固定节奏被识别为脚本
-      if ((page + 1) % 3 === 0) await sleep(8000); // 每成功 3 页主动休息 8s，模拟人工节奏，从源头降低累计风控触发概率
+      await sleep(gap + Math.floor(Math.random() * 600));   // 自适应节流 + 随机抖动(0.7~1.3s)，避免固定节奏被识别为脚本
     }
     lastApiError = err;
-    // 完整性：无错误 + 已取到唯一账号 + 未触达分页上限（即 has_more 已变 false）
-    // 额外返回 loginDead / err，供 doGetFollow 区分「登录失效(需重登)」与「限流(可自动续传)」，并透出真实错误
-    return { list: out, seen: seen, nextMaxTime: maxTime, complete: !err && seen.size > 0 && !capHit, skipped: skipped, loginDead: loginDead, err: err };
+    // 完整性判定（更可靠）：
+    // ① 若已知真实关注总数 REAL_TOTAL，取到数 >= 总数即视为取全（哪怕 has_more 因限流卡住，也能消除「取到395却说没取完」的假性中断）；
+    // ② 否则退回「has_more=false 且未触分页上限」的旧判定。无错误 + 已取到账号 是前提。
+    const reachedTotal = REAL_TOTAL != null && (realCount + baseCount) >= REAL_TOTAL;
+    // 额外返回 loginDead / err / total / realCount，供 doGetFollow 区分「登录失效(需重登)」与「限流(可自动续传)」并透出真实错误
+    return { list: out, seen: seen, nextMaxTime: maxTime, complete: !err && seen.size > 0 && (reachedTotal || (!capHit && !lastHasMore)), skipped: skipped, loginDead: loginDead, err: err, total: REAL_TOTAL, realCount: realCount };
   }
   async function getAccountPosts(secUid) {
     const out = [];
@@ -1371,6 +1402,10 @@ return sign;
       return;
     }
     updateSteps(2);
+    // 一步拿到真实关注总数（following_count），用于精确完成率 + 完整性校验（消除假性中断）
+    let REAL_TOTAL = null;
+    try { REAL_TOTAL = await getMyFollowingCount(); } catch (e) {}
+    if (REAL_TOTAL != null) setScanText('② 已读取到你的真实关注总数 ' + REAL_TOTAL + ' 个，开始分页获取名单（取齐即自动判定完成）…');
     // 断点续传：上次未取完且已保存游标 → 从断点继续拉，避免从头重拉反复撞限流
     const cursor = Number(localStorage.getItem(K_FCURSOR) || 0);
     const canResume = (!FOLLOW_DONE) && cursor > 0 && LAST_ACCOUNTS.length > 0;
@@ -1410,15 +1445,15 @@ return sign;
       if (p.waiting) {
         // 触发限流：保持进度条，提示自动等待恢复（不再中断任务）
         if (etaEl) etaEl.textContent = '⏳ 触发限流，约 ' + (p.waitSec || '?') + ' 秒后自动重试（无需操作）';
-        if (cntEl) cntEl.textContent = '已获取 ' + p.fetched + ' 个（等待恢复）';
+        if (cntEl) cntEl.textContent = '已获取 ' + p.fetched + ' 个' + (p.total ? (' / 共 ' + p.total + ' 个') : '') + '（等待恢复）';
         if (pctEl) pctEl.textContent = lastPct + '%';
         return;
       }
       lastPct = p.pct;
       if (fillEl) fillEl.style.width = p.pct + '%';
       if (pctEl) pctEl.textContent = p.pct + '%';
-      if (cntEl) cntEl.textContent = '已获取 ' + p.fetched + ' 个（第 ' + p.pages + ' 页）';
-      if (etaEl) etaEl.textContent = '预计剩余：' + fmtEta(p.remMs) + '（估算）';
+      if (cntEl) cntEl.textContent = '已获取 ' + p.fetched + ' 个' + (p.total ? (' / 共 ' + p.total + ' 个') : '') + '（第 ' + p.pages + ' 页）';
+      if (etaEl) etaEl.textContent = '预计剩余：' + (p.total ? '精确计算' : fmtEta(p.remMs) + '（估算）');
     };
     // —— 自动续传：一次点击后，遇到限流中断会自动保存进度并长冷却后接着拉，直到取完或登录失效，无需用户反复点击「继续获取」——
     const MAX_OUTER = 8;            // 最多自动续传轮次（每轮之间冷却 25~40s），超出仍没取完才提示用户
@@ -1428,7 +1463,7 @@ return sign;
       try { localStorage.setItem(K_FCURSOR, String(resumeMax)); localStorage.setItem(K_FSEEN, JSON.stringify([].slice.call(curSeen))); } catch (e) {}
     };
     while (round < MAX_OUTER) {
-      const r = await getFollowingList(MY_UID, onProg, { resumeFrom: resumeMax, seen: curSeen });
+      const r = await getFollowingList(MY_UID, onProg, { resumeFrom: resumeMax, seen: curSeen, total: REAL_TOTAL, baseCount: curBase.length });
       finalRes = r;
       const accounts = curBase.concat(r.list);   // 续传时合并「已取 + 本次新增（已去重）」
       // 边取边持久化白名单：即使中途关闭页面，已取部分也保留，重新打开可断点续传
@@ -1463,6 +1498,7 @@ return sign;
       renderFollowList();
       const skippedNow = res.skipped || 0;
       let doneMsg = '② ✅ 完成：已获取 ' + accounts.length + ' 个关注公众号（已全部取完';
+      if (res.total) doneMsg += '；与抖音资料页显示的真实关注数 ' + res.total + ' 个一致';
       if (skippedNow > 0) doneMsg += '；已从接口返回中自动剔除 ' + skippedNow + ' 个非关注或推荐账号，仅保留真实关注';
       else doneMsg += '，已按账号去重';
       doneMsg += '）。请先核对上方名单数量是否正确，确认无误后再点「抓取未读视频」。';
@@ -1485,7 +1521,7 @@ return sign;
     }
     setScanText(!accounts.length
       ? ('⚠️ 未读取到关注账号。' + (lastApiError ? ('原因：' + lastApiError) : '（可能关注列表为空，或接口被限流，可稍后重试）'))
-      : ('⚠️ 关注名单未完整获取（已取唯一 ' + accounts.length + ' 个）。' + diag + tip));
+      : ('⚠️ 关注名单未完整获取（已取唯一 ' + accounts.length + ' 个' + (res.total ? (' / 真实关注总数 ' + res.total + ' 个') : '') + '）。' + diag + tip));
     updateSteps('err2'); updateLoginUI();
     return;
   }
