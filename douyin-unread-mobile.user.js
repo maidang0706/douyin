@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-24 16:10 修复获取关注卡死(fetch超时+count降级+进度计数修正)
+// @name         抖音插件 2026-10-24 19:26 修复获取关注卡住(翻页空转检测+脏数据自愈)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=172
-// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=172
-// @version      1.6.12
-// @description  2026-10-24 16:10 修复「获取关注到第几十个就卡住不动(不报错)」：①根因——所有 fetch 无超时，抖音服务端偶发挂起响应(连接建立但不回数据)时 await fetch 永久 pending，整个流程死住；新增 fetchWithTimeout 统一 12s 超时，超时走重试/降级，永不永久挂起；②count=200 被抖音降级/忽略导致首页返回空 → 自动降到 50 重拉本页；③进度计数修正——续传第二轮起回调只传本次新增数导致进度条跳回0，改为叠加断点前已取数；④单页重试收敛(8次/封顶15s，累计约80s即转入自动续传轮次冷却)，不在单页死等；⑤修正 SCRIPT_VERSION 常量滞后(面板显示1.6.10实为1.6.11)导致版本号显示不符。一步拿真实总数/count拉满/自动续传/诊断/去重/过滤非关注保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=173
+// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=173
+// @version      1.6.13
+// @description  2026-10-24 19:26 修复「获取关注又卡住(截图：第60页、已获取474/共391、94%不动)」：①根因——翻页游标失效时空转满60页(接口回带重复页被seen挡住0新增，旧逻辑maxTime-1还变负数游标继续空转)，每页0.7~1.3s sleep+可能的12s超时重试让界面几分钟不动=卡住；新增「连续3页无新增即停」「连续2页无有效max_time即停」「单轮超3分钟自动暂停进续传冷却」三重检测；②历史脏数据自愈——已取唯一数>真实关注总数(如474>391)时自动清空历史进度从头拉，不再在污染基数上续传；③修正已取数达到总数后百分比仍走估算公式显示94%的误导(改为封顶99%交完整性判定)。fetch超时/count降级/自动续传/去重/过滤非关注保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -694,7 +694,7 @@ return sign;
   const K_FSEEN = 'DYUNREAD_FOLLOW_SEEN';      // 已见 sec_uid（跨次去重 + 续传合并）
   let lastApiError = ''; // 最近一次接口失败原因，用于给出精准报错（而不是笼统的「接口未返回数据」）
   let lastFailSample = ''; // 最近一次失败的具体响应(HTTP码/status_code/msg)，供中断时给出诊断、便于精准定位
-  const SCRIPT_VERSION = '1.6.12'; // 面板常驻显示的版本号，便于一眼确认是否跑在最新版（与下方 @version 保持一致）
+  const SCRIPT_VERSION = '1.6.13'; // 面板常驻显示的版本号，便于一眼确认是否跑在最新版（与下方 @version 保持一致）
 
   // 关注账号列表缓存：登录成功后获取，供「重新获取未读」复用，无需每次重新拉名单
   let LAST_ACCOUNTS = [];
@@ -1267,6 +1267,9 @@ return sign;
     let skipped = 0;     // 被过滤的非关注项(推荐/粉丝)数量，用于透明展示「接口返回 N → 剔除 M → 保留真实关注 K」
     let gap = 700;        // 自适应节流间隔(ms)：基础 0.7s，被限流→加大(≤8s)，顺利→缓慢回落（从源头降低触发限流的频率，配合下方随机抖动避免固定节奏）
     const t0 = Date.now();
+    const ROUND_TIMEOUT = 180000;  // 单轮最长 3 分钟：超过就 break 交给「自动续传」轮次冷却，避免单轮长跑无感知（用户观感=卡住）
+    let stallPages = 0;   // 连续无新增页数：翻页游标失效/被限流时接口返回重复页，seen 全挡住→0 新增，连续 3 页即判本轮无效（不再空转满 60 页）
+    let badCursorPages = 0; // 连续无有效 max_time 的页数：接口不返回游标时旧逻辑用 maxTime-1 兜底会变负数继续空转，连续 2 页即停
     let pageCount = 200;  // 优先 200/页（提速）；若抖音把 count=200 降级/忽略导致首页返回空，自动降到 50 重拉
     for (let page = 0; page < 60; page++) {
       let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=' + pageCount +
@@ -1307,6 +1310,7 @@ return sign;
       // 自适应节流：刚被限流→后续间隔加大；顺利→间隔缓慢回落到基础值
       gap = rateLimited ? Math.min(8000, gap * 1.8) : Math.max(1500, gap * 0.9);
       const list = (j && (j.following_list || j.followings)) || [];
+      const pageStartLen = out.length;  // 本页解析前的新增数，用于空转检测（本页 0 新增 = 接口回带重复页）
       // 解析：① 按 sec_uid 跨页去重；② 过滤非关注项(推荐关注/粉丝，relation=0 或含 rec_reason/is_follow=false)，
       // 这些项会被抖音 following 接口混进列表，导致「关注数」虚高(如 427 vs 真实 391)
       for (const a of list) {
@@ -1326,8 +1330,31 @@ return sign;
         continue;
       }
       if (!list.length) break;
+      // —— 空转/游标失效检测（修复「第60页卡住不动」）——
+      if (list.length > 0 && out.length === pageStartLen) {
+        stallPages++;   // 本页全部被 seen 挡住（接口回带重复页）→ 空转
+      } else {
+        stallPages = 0;
+      }
+      if (!j.max_time || j.max_time <= 0) {
+        badCursorPages++; // 接口不给翻页游标：旧逻辑 maxTime-1 会变负数继续空转，改为累计 2 页即停
+      } else {
+        badCursorPages = 0;
+      }
+      if (stallPages >= 3) {
+        err = '连续 3 页无新增（接口回带重复页，翻页游标可能失效），已停止本轮';
+        break;
+      }
+      if (badCursorPages >= 2) {
+        err = '连续 2 页未返回有效翻页游标(max_time)，接口可能已限流，已停止本轮';
+        break;
+      }
+      if (Date.now() - t0 > ROUND_TIMEOUT) {
+        err = '本轮拉取已超过 3 分钟，自动暂停进入续传冷却（避免长时间无感知等待）';
+        break;
+      }
       if (!hasMore) break;   // 没有更多页 → 已取完全部
-      maxTime = j.max_time || (maxTime - 1);
+      maxTime = j.max_time || 0;   // 无有效游标时不带 max_time（旧逻辑 maxTime-1 会产生负数游标导致空转）
       if (page === 59) capHit = true;
       // —— 实时进度：每页回调一次（完成率/剩余时间多为估算，因为接口不返回总数）——
       if (onProgress) {
@@ -1343,6 +1370,11 @@ return sign;
           const perPageNow = fetched / pages;
           const remPages = Math.ceil((realTotal - fetched) / Math.max(1, perPageNow));
           remMs = tPerPage * remPages;
+        } else if (realTotal && fetched >= realTotal) {
+          // 已取数达到/超过真实总数（如历史脏数据导致 474>391）：封顶 99% 并交由完整性判定收尾，
+          // 绝不再走「平滑估算」公式（旧逻辑此时会显示 94% 这种误导性进度）
+          pct = 99;
+          remMs = 0;
         } else {
           pct = hasMore ? Math.round(50 + 49 * (1 - 1 / (1 + pages * 0.15))) : 100;
           const remPages = hasMore ? Math.max(1, pages) : 0;   // 不知总数时按"大约还有同样多页"保守估算
@@ -1433,10 +1465,19 @@ return sign;
     if (REAL_TOTAL != null) setScanText('② 已读取到你的真实关注总数 ' + REAL_TOTAL + ' 个，开始分页获取名单（取齐即自动判定完成）…');
     // 断点续传：上次未取完且已保存游标 → 从断点继续拉，避免从头重拉反复撞限流
     const cursor = Number(localStorage.getItem(K_FCURSOR) || 0);
-    const canResume = (!FOLLOW_DONE) && cursor > 0 && LAST_ACCOUNTS.length > 0;
+    let canResume = (!FOLLOW_DONE) && cursor > 0 && LAST_ACCOUNTS.length > 0;
     let baseAccounts = [];
     let seen = new Set();
     let resumeFrom = 0;
+    // 历史脏数据自愈：已取唯一数 > 真实关注总数（如 395/474 > 391），说明历史进度混入了非关注项/重复项，
+    // 续传只会在这个污染基数上继续跑、永远对不齐——直接清空历史从头拉（截图里 474>391 死局的根治）
+    if (canResume && REAL_TOTAL != null && LAST_ACCOUNTS.length > REAL_TOTAL) {
+      setScanText('② 检测到历史进度数据异常（已取 ' + LAST_ACCOUNTS.length + ' 个 > 真实关注总数 ' + REAL_TOTAL + ' 个，混入了非关注账号），已自动清除历史进度，从头重新获取…');
+      try { localStorage.removeItem(K_FCURSOR); } catch (e) {}
+      try { localStorage.removeItem(K_FSEEN); } catch (e) {}
+      LAST_ACCOUNTS = [];
+      canResume = false;
+    }
     if (canResume) {
       resumeFrom = cursor;
       baseAccounts = LAST_ACCOUNTS.slice();
