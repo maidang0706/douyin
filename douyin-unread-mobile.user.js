@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-24 19:45 修复获取关注挤牙膏卡住(限流降速检测+从头重拉策略)
+// @name         抖音插件 2026-10-24 21:26 获取关注提速(2分钟内完成+总时长看护)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=174
-// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=174
-// @version      1.6.14
-// @description  2026-10-24 19:45 修复「获取关注又在79个卡住(第60页/20%)」：①根因——抖音限流时不完全拒绝请求，而是每页「挤牙膏」只吐1~2个新账号(60页×1.3个≈79个)，每页零星新增会清零旧的「无新增」检测，照样空转满60页；新增「挤牙膏检测」：单页新增不足期望量10%(count=200→10个/50→3个)连续8页即判限流降速提前停；②检出降速后续传放弃max_time从头重拉——抖音通常只限流带游标的翻页、首页(无max_time)仍能返回数据，已取账号靠seen去重不重复计数；③游标'0'现在是合法续传态(从头重拉)，按「是否保存过记录」判断可续传；④自动续传冷却按本轮新增量动态拉长(无新增60~90s/降速40~60s/普通25~40s)，被限越狠等越久。空转检测/脏数据自愈/fetch超时/去重/过滤非关注保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=175
+// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=175
+// @version      1.6.15
+// @description  2026-10-24 21:26 针对「获取关注太慢、要求2分钟内完成」全面提速：①翻页节流 0.7~1.3s→0.3~0.65s（实测挤牙膏限流与请求快慢无关，重等待只拖总量）；②单页重试 8次/80s→3次/约7s（1s→1.8s→3.2s封顶4s），失败交给外层续传统一处理；③续传冷却 25~90s→6~30s三档（普通6~12s/降速12~20s/无新增20~30s）；④挤牙膏检测 8页→5页；⑤fetch超时 12s→8s；⑥新增总时长硬看护——单次点击最多110秒即保存进度收尾，提示再点「继续获取」接着拉，不会无限轮转。正常无限流时391个约10~20秒取完。防挤牙膏/从头重拉/脏数据自愈/去重/过滤非关注保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -635,7 +635,7 @@ return sign;
   // 无超时的 await fetch 会永久 pending，导致整个获取流程卡死（界面停住不动、不报错）。
   // 超时后抛 AbortError，由上层走既有的重试/降级逻辑，绝不永久挂起。
   function fetchWithTimeout(url, opts, ms) {
-    const timeout = ms || 12000;
+    const timeout = ms || 8000;
     if (typeof AbortController === 'undefined') return fetch(url, opts); // 极老环境降级
     let ac;
     try { ac = new AbortController(); } catch (e) { return fetch(url, opts); }
@@ -662,7 +662,7 @@ return sign;
         const u = new URL(url);
         if (extra) for (const k in extra) if (!u.searchParams.has(k)) u.searchParams.set(k, extra[k]);
         url = u.toString();
-        const r = await fetchWithTimeout(signUrl(url, t), { credentials: 'include' }, 12000);
+        const r = await fetchWithTimeout(signUrl(url, t), { credentials: 'include' }, 8000);
         last.http = r.status;
         const j = await r.json().catch(function () { return null; });
         last.j = j;
@@ -694,7 +694,7 @@ return sign;
   const K_FSEEN = 'DYUNREAD_FOLLOW_SEEN';      // 已见 sec_uid（跨次去重 + 续传合并）
   let lastApiError = ''; // 最近一次接口失败原因，用于给出精准报错（而不是笼统的「接口未返回数据」）
   let lastFailSample = ''; // 最近一次失败的具体响应(HTTP码/status_code/msg)，供中断时给出诊断、便于精准定位
-  const SCRIPT_VERSION = '1.6.14'; // 面板常驻显示的版本号，便于一眼确认是否跑在最新版（与下方 @version 保持一致）
+  const SCRIPT_VERSION = '1.6.15'; // 面板常驻显示的版本号，便于一眼确认是否跑在最新版（与下方 @version 保持一致）
 
   // 关注账号列表缓存：登录成功后获取，供「重新获取未读」复用，无需每次重新拉名单
   let LAST_ACCOUNTS = [];
@@ -1205,7 +1205,7 @@ return sign;
       if (r) { storeSelf(r, sec); return r; }
     }
     try {
-      const r = await fetchWithTimeout(API + '/aweme/v1/web/commit/user/', { credentials: 'include' }, 12000);
+      const r = await fetchWithTimeout(API + '/aweme/v1/web/commit/user/', { credentials: 'include' }, 8000);
       const j = await r.json().catch(function () { return {}; });
       if (j && j.user && j.user.uid) { storeSelf(String(j.user.uid), j.user.sec_uid || ''); return String(j.user.uid); }
       lastApiError = 'commit/user status_code=' + (j && j.status_code) + ' ' + ((j && j.status_msg) || '');
@@ -1243,7 +1243,7 @@ return sign;
     }
     // 2) 兜底：commit/user 返回的 user 也可能带 following_count
     try {
-      const r = await fetchWithTimeout(API + '/aweme/v1/web/commit/user/', { credentials: 'include' }, 12000);
+      const r = await fetchWithTimeout(API + '/aweme/v1/web/commit/user/', { credentials: 'include' }, 8000);
       const j = await r.json().catch(function () { return {}; });
       if (j && j.user && typeof j.user.following_count === 'number') return j.user.following_count;
     } catch (e) {}
@@ -1265,9 +1265,9 @@ return sign;
     let capHit = false;   // 翻到分页上限仍未结束 → 视为未取完（避免把"取不全"误判为完成）
     let lastHasMore = true; // 记录最后一页是否还有更多（用于配合 REAL_TOTAL 判定完整性）
     let skipped = 0;     // 被过滤的非关注项(推荐/粉丝)数量，用于透明展示「接口返回 N → 剔除 M → 保留真实关注 K」
-    let gap = 700;        // 自适应节流间隔(ms)：基础 0.7s，被限流→加大(≤8s)，顺利→缓慢回落（从源头降低触发限流的频率，配合下方随机抖动避免固定节奏）
+    let gap = 300;        // 自适应节流间隔(ms)：基础 0.3s——实测挤牙膏限流与请求快慢无关(带游标就被限)，重等待只会拖慢总量；保留 0.3s+随机抖动避免零间隔连发被判定脚本
     const t0 = Date.now();
-    const ROUND_TIMEOUT = 180000;  // 单轮最长 3 分钟：超过就 break 交给「自动续传」轮次冷却，避免单轮长跑无感知（用户观感=卡住）
+    const ROUND_TIMEOUT = 100000;  // 单轮最长 100 秒：超过就 break 交给「自动续传」轮次冷却（总预算 2 分钟内，单轮不能拖）
     let stallPages = 0;   // 连续无新增页数：翻页游标失效/被限流时接口返回重复页，seen 全挡住→0 新增，连续 3 页即判本轮无效（不再空转满 60 页）
     let badCursorPages = 0; // 连续无有效 max_time 的页数：接口不返回游标时旧逻辑用 maxTime-1 兜底会变负数继续空转，连续 2 页即停
     let starvePages = 0;  // 连续「挤牙膏」页数：抖音限流时不完全拒绝，而是每页只吐 1~2 个新账号（60页×1.3个≈79个卡20%），每页有零星新增会清零 stall 检测——改为按「单页新增不足期望量10%」累计，连续 8 页即判限流降速
@@ -1281,11 +1281,11 @@ return sign;
       // 关键修复：重试阶段用 quiet（仅 1 个最小签名请求）——v1.6.5/1.6.6 误用全签名分支，每次重试发 3 个请求，
       // 等于自己疯狂刷新抖音限流窗口，正是「翻几页就中断」的主因。单请求 + 稀疏间隔给接口真正冷却时间。
       let res = null, j = null, ok = false, rateLimited = false, loginDead = false;
-      for (let attempt = 0; attempt < 8; attempt++) {
+      for (let attempt = 0; attempt < 3; attempt++) {
         // 重试时优先「最小签名(仅 1 个请求)」——避免 3x 请求放大、疯狂刷新抖音限流窗口；
-        // 但每第 4 次升级为「带 msToken 的完整签名」：抖音往往只对「缺 msToken 的裸请求」限流，
+        // 但每第 3 次升级为「带 msToken 的完整签名」：抖音往往只对「缺 msToken 的裸请求」限流，
         // 带 token 的请求反而放行，故周期性尝试完整签名以突破限流（实测裸请求持续失败、带 token 成功即印证此点）
-        const useQuiet = (attempt % 4 !== 3);
+        const useQuiet = (attempt % 3 !== 2);
         res = await signedFetch(pq, useQuiet ? { quiet: true } : {});
         j = res && res.j;
         const sc = res && res.statusCode;
@@ -1296,7 +1296,7 @@ return sign;
         rateLimited = true;
         const reason = (res && res.err) || (j && j.status_msg) || ('HTTP ' + (res && res.http)) || '无详情';
         lastFailSample = reason;
-        const backoff = Math.min(15000, 1500 * Math.pow(1.9, attempt)); // 退避封顶 15s、指数上升(1.5s→2.9k→5.4k→10.3k→15k…)，单页累计约80s即转入「自动续传」轮次冷却，不在单页死等
+        const backoff = Math.min(4000, 1000 * Math.pow(1.8, attempt)); // 退避封顶 4s(1s→1.8s→3.2s→4s)，单页累计约 7s；3 次仍失败交给「自动续传」外层统一冷却重试，不在单页死等（总预算 2 分钟）
         if (onProgress) onProgress({ pages: page + 1, fetched: out.length + baseCount, hasMore: true, pct: 0, remMs: backoff, waiting: true, waitSec: Math.ceil(backoff / 1000) });
         await sleep(backoff);
       }
@@ -1309,8 +1309,8 @@ return sign;
         err = 'following/list 持续失败(已重试约8次仍失败) ' + ((res && (res.err || ('HTTP ' + res.http))) || (j && j.status_msg) || '接口返回异常');
         break;
       }
-      // 自适应节流：刚被限流→后续间隔加大；顺利→间隔缓慢回落到基础值
-      gap = rateLimited ? Math.min(8000, gap * 1.8) : Math.max(1500, gap * 0.9);
+      // 自适应节流：刚被限流→后续间隔加大(≤2s)；顺利→间隔缓慢回落到基础值 0.3s
+      gap = rateLimited ? Math.min(2000, gap * 1.5) : Math.max(300, gap * 0.9);
       const list = (j && (j.following_list || j.followings)) || [];
       const pageStartLen = out.length;  // 本页解析前的新增数，用于空转检测（本页 0 新增 = 接口回带重复页）
       // 解析：① 按 sec_uid 跨页去重；② 过滤非关注项(推荐关注/粉丝，relation=0 或含 rec_reason/is_follow=false)，
@@ -1353,8 +1353,8 @@ return sign;
         degraded = true;   // 游标失效 → 续传时从头重拉（首页不限流）
         break;
       }
-      if (starvePages >= 8) {
-        err = '连续 8 页每页仅个位数新增（疑似抖音对翻页限流降速），已提前停止本轮';
+      if (starvePages >= 5) {
+        err = '连续 5 页每页仅个位数新增（疑似抖音对翻页限流降速），已提前停止本轮';
         degraded = true;   // 翻页被挤牙膏 → 续传时放弃 max_time 从头重拉
         break;
       }
@@ -1396,7 +1396,7 @@ return sign;
         }
         onProgress({ pages: pages, fetched: fetched, hasMore: hasMore, pct: pct, remMs: remMs, total: REAL_TOTAL });
       }
-      await sleep(gap + Math.floor(Math.random() * 600));   // 自适应节流 + 随机抖动(0.7~1.3s)，避免固定节奏被识别为脚本
+      await sleep(gap + Math.floor(Math.random() * 350));   // 自适应节流 + 随机抖动(0.3~0.65s)，避免固定节奏被识别为脚本
     }
     lastApiError = err;
     // 完整性判定（更可靠）：
@@ -1447,7 +1447,7 @@ return sign;
       let name = getNickFromPage();
       if (!name) {
         try {
-          const r2 = await fetchWithTimeout(API + '/aweme/v1/web/commit/user/', { credentials: 'include' }, 12000);
+          const r2 = await fetchWithTimeout(API + '/aweme/v1/web/commit/user/', { credentials: 'include' }, 8000);
           const j2 = await r2.json().catch(function () { return {}; });
           name = (j2 && j2.user && (j2.user.nickname || j2.user.unique_id)) || '';
         } catch (e) {}
@@ -1542,9 +1542,11 @@ return sign;
       if (etaEl) etaEl.textContent = '预计剩余：' + (p.total ? '精确计算' : fmtEta(p.remMs) + '（估算）');
     };
     // —— 自动续传：一次点击后，遇到限流中断会自动保存进度并长冷却后接着拉，直到取完或登录失效，无需用户反复点击「继续获取」——
-    const MAX_OUTER = 8;            // 最多自动续传轮次（每轮之间冷却 25~40s），超出仍没取完才提示用户
+    const MAX_OUTER = 8;            // 最多自动续传轮次（每轮之间按新增量动态冷却 6~30s），超出仍没取完才提示用户
+    const TOTAL_BUDGET = 110000;    // 总时长硬看护：单次点击最多跑 110 秒（用户要求 2 分钟内），超时即保存进度收尾，用户可随时再点「继续获取」
+    const tStart = Date.now();
     let round = 0, resumeMax = resumeFrom, curSeen = seen, curBase = baseAccounts;
-    let finalRes = null, finalAccounts = [], loginDeadMsg = '', stuck = false;
+    let finalRes = null, finalAccounts = [], loginDeadMsg = '', stuck = false, timeUp = false;
     const saveCursor = function () {
       try { localStorage.setItem(K_FCURSOR, String(resumeMax)); localStorage.setItem(K_FSEEN, JSON.stringify([].slice.call(curSeen))); } catch (e) {}
     };
@@ -1558,6 +1560,8 @@ return sign;
       finalAccounts = accounts;
       if (r.complete) break;                       // 全部取完 → 走成功流程
       if (r.loginDead) { loginDeadMsg = r.err || '登录态已失效'; break; } // 登录失效 → 立即终止，提示重登
+      // 总时长看护：已超过 110s → 保存进度收尾（提示用户可再次点击继续），不再无限轮转
+      if (Date.now() - tStart > TOTAL_BUDGET) { timeUp = true; break; }
       // 未取完且可重试：保存断点，长冷却后自动续传（不依赖用户手动点「继续获取」）
       // 关键策略：检出「限流降速/游标失效」(degraded) 时放弃 max_time 从头重拉——抖音通常只限流「带游标的翻页」，
       // 首页(无 max_time)仍能返回数据；已取账号靠 curSeen 去重，不会重复计数（79个挤牙膏卡20%的根治）
@@ -1570,11 +1574,12 @@ return sign;
       if (round > 0 && r.list.length === 0) { stuck = true; break; } // 续传后毫无新增 → 真正卡死，不再空转
       round++;
       if (round >= MAX_OUTER) { stuck = true; break; }
-      // 冷却时长按本轮新增量动态调整：被限得越狠（新增越少）等得越久，给限流窗口充分恢复
+      // 冷却时长按本轮新增量动态调整（总预算 2 分钟内，故各档都砍到原来的 1/3~1/4）：
+      // 被限得越狠（新增越少）等得越久，但也不超过 30s——连 8 轮最坏 ~3 分钟、正常 1~2 轮即取完
       let cd;
-      if (r.list.length === 0) cd = 60000 + Math.floor(Math.random() * 30000);        // 毫无新增：60~90s
-      else if (r.degraded) cd = 40000 + Math.floor(Math.random() * 20000);           // 降速/游标失效：40~60s
-      else cd = 25000 + Math.floor(Math.random() * 15000);                           // 普通中断：25~40s
+      if (r.list.length === 0) cd = 20000 + Math.floor(Math.random() * 10000);        // 毫无新增：20~30s
+      else if (r.degraded) cd = 12000 + Math.floor(Math.random() * 8000);           // 降速/游标失效：12~20s
+      else cd = 6000 + Math.floor(Math.random() * 6000);                            // 普通中断：6~12s
       if (etaEl) etaEl.textContent = '⏳ 自动续传倒计时：约 ' + Math.round(cd / 1000) + ' 秒（无需操作）';
       if (cntEl) cntEl.textContent = '已获取 ' + accounts.length + ' 个（第 ' + (round + 1) + ' 轮拉取前，暂停恢复中）';
       setScanText('② 第 ' + (round + 1) + ' 轮拉取' + (r.degraded ? '检出限流降速，将冷却后从头重拉（已取账号不会重复计数）' : '被中断') +
@@ -1612,6 +1617,8 @@ return sign;
     let tip;
     if (loginDeadMsg || /登录态已失效/.test(lastApiError)) {
       tip = '（提示：登录态失效，请重新登录 www.douyin.com 后再次点「获取关注的公众号」；若刚登过仍报此错，说明脚本拿到的登录票据缺失，试试在抖音页面刷新后重登。）';
+    } else if (timeUp) {
+      tip = '（本次已运行约 2 分钟达到时长上限，进度已保存。稍等几秒让限流窗口恢复后，再点「继续获取关注的公众号」即可从断点接着拉，通常再点一两次即可取完。）';
     } else if (stuck) {
       tip = '（已自动续传多次仍无新增，疑似该页被持续限流或登录态变化。请稍候几分钟再点「继续获取关注的公众号」，或重新登录抖音后再试。）';
     } else {
