@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         抖音插件 2026-10-24 12:30 关注名单提速(一步拿真实总数校验+count拉满+节流砍半)
+// @name         抖音插件 2026-10-24 16:10 修复获取关注卡死(fetch超时+count降级+进度计数修正)
 // @namespace    com.workbuddy.douyin.unread.mobile
-// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=171
-// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=171
-// @version      1.6.11
-// @description  2026-10-24 12:30 针对「获取关注效率太低」：①新增一步拿真实关注总数(following_count，资料/关系接口直接返回，无需翻页)——既用于精确完成率，更用于完整性校验(取到数==真实总数即判已取全，消除「取到395却说没取完」的假性中断)；②分页 count 50→200 拉满(由 has_more 兜底，web端封顶50也不漏)；③节流从~2s/页砍到~0.7s/页并去掉每3页8s，整体提速数倍；④进度与提示显示「已取X/共Y」便于核对。自动续传/诊断/去重/过滤非关注保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
+// @downloadURL  https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=172
+// @updateURL    https://raw.githubusercontent.com/maidang0706/douyin/main/douyin-unread-mobile.user.js?v=172
+// @version      1.6.12
+// @description  2026-10-24 16:10 修复「获取关注到第几十个就卡住不动(不报错)」：①根因——所有 fetch 无超时，抖音服务端偶发挂起响应(连接建立但不回数据)时 await fetch 永久 pending，整个流程死住；新增 fetchWithTimeout 统一 12s 超时，超时走重试/降级，永不永久挂起；②count=200 被抖音降级/忽略导致首页返回空 → 自动降到 50 重拉本页；③进度计数修正——续传第二轮起回调只传本次新增数导致进度条跳回0，改为叠加断点前已取数；④单页重试收敛(8次/封顶15s，累计约80s即转入自动续传轮次冷却)，不在单页死等；⑤修正 SCRIPT_VERSION 常量滞后(面板显示1.6.10实为1.6.11)导致版本号显示不符。一步拿真实总数/count拉满/自动续传/诊断/去重/过滤非关注保留。打开已登录 www.douyin.com 依次点 登录→获取关注(看进度/核对)→抓取未读。
 // @author       WorkBuddy
 // @match        https://m.douyin.com/*
 // @match        https://www.douyin.com/*
@@ -631,6 +631,20 @@ return sign;
     }
   }
 
+  // 统一带超时的 fetch：抖音接口偶发「连接建立但服务端挂起不回数据」，
+  // 无超时的 await fetch 会永久 pending，导致整个获取流程卡死（界面停住不动、不报错）。
+  // 超时后抛 AbortError，由上层走既有的重试/降级逻辑，绝不永久挂起。
+  function fetchWithTimeout(url, opts, ms) {
+    const timeout = ms || 12000;
+    if (typeof AbortController === 'undefined') return fetch(url, opts); // 极老环境降级
+    let ac;
+    try { ac = new AbortController(); } catch (e) { return fetch(url, opts); }
+    const timer = setTimeout(function () { try { ac.abort(); } catch (e) {} }, timeout);
+    const o = opts || {};
+    const p = fetch(url, { credentials: o.credentials, signal: ac.signal });
+    return p.then(function (r) { clearTimeout(timer); return r; }, function (e) { clearTimeout(timer); throw e; });
+  }
+
   // 统一的带签名请求：最小请求优先，失败再逐步补 webid / msToken 重试。
   // 返回 { ok, j, err, http }。ok=true 表示 status_code 为 0（或字段缺失视为成功）。
   async function signedFetch(pathAndQuery, { extra, tries, quiet } = {}) {
@@ -648,7 +662,7 @@ return sign;
         const u = new URL(url);
         if (extra) for (const k in extra) if (!u.searchParams.has(k)) u.searchParams.set(k, extra[k]);
         url = u.toString();
-        const r = await fetch(signUrl(url, t), { credentials: 'include' });
+        const r = await fetchWithTimeout(signUrl(url, t), { credentials: 'include' }, 12000);
         last.http = r.status;
         const j = await r.json().catch(function () { return null; });
         last.j = j;
@@ -656,7 +670,9 @@ return sign;
         last.err = 'status_code=' + (j && j.status_code != null ? j.status_code : '?') + ' ' + ((j && j.status_msg) || '');
         last.statusCode = (j && j.status_code != null) ? j.status_code : null;
       } catch (e) {
-        last.err = '请求异常：' + (e && e.message ? e.message : e);
+        last.err = (e && e.name === 'AbortError')
+          ? '请求超时(12s服务端无响应)'
+          : ('请求异常：' + (e && e.message ? e.message : e));
         last.j = null;
       }
     }
@@ -678,7 +694,7 @@ return sign;
   const K_FSEEN = 'DYUNREAD_FOLLOW_SEEN';      // 已见 sec_uid（跨次去重 + 续传合并）
   let lastApiError = ''; // 最近一次接口失败原因，用于给出精准报错（而不是笼统的「接口未返回数据」）
   let lastFailSample = ''; // 最近一次失败的具体响应(HTTP码/status_code/msg)，供中断时给出诊断、便于精准定位
-  const SCRIPT_VERSION = '1.6.10'; // 面板常驻显示的版本号，便于一眼确认是否跑在最新版（与下方 @version 保持一致）
+  const SCRIPT_VERSION = '1.6.12'; // 面板常驻显示的版本号，便于一眼确认是否跑在最新版（与下方 @version 保持一致）
 
   // 关注账号列表缓存：登录成功后获取，供「重新获取未读」复用，无需每次重新拉名单
   let LAST_ACCOUNTS = [];
@@ -1189,12 +1205,14 @@ return sign;
       if (r) { storeSelf(r, sec); return r; }
     }
     try {
-      const r = await fetch(API + '/aweme/v1/web/commit/user/', { credentials: 'include' });
+      const r = await fetchWithTimeout(API + '/aweme/v1/web/commit/user/', { credentials: 'include' }, 12000);
       const j = await r.json().catch(function () { return {}; });
       if (j && j.user && j.user.uid) { storeSelf(String(j.user.uid), j.user.sec_uid || ''); return String(j.user.uid); }
       lastApiError = 'commit/user status_code=' + (j && j.status_code) + ' ' + ((j && j.status_msg) || '');
     } catch (e) {
-      lastApiError = 'commit/user 请求异常：' + (e && e.message ? e.message : e);
+      lastApiError = (e && e.name === 'AbortError')
+        ? 'commit/user 请求超时(12s服务端无响应)'
+        : ('commit/user 请求异常：' + (e && e.message ? e.message : e));
     }
     return '';
   }
@@ -1225,7 +1243,7 @@ return sign;
     }
     // 2) 兜底：commit/user 返回的 user 也可能带 following_count
     try {
-      const r = await fetch(API + '/aweme/v1/web/commit/user/', { credentials: 'include' });
+      const r = await fetchWithTimeout(API + '/aweme/v1/web/commit/user/', { credentials: 'include' }, 12000);
       const j = await r.json().catch(function () { return {}; });
       if (j && j.user && typeof j.user.following_count === 'number') return j.user.following_count;
     } catch (e) {}
@@ -1249,15 +1267,16 @@ return sign;
     let skipped = 0;     // 被过滤的非关注项(推荐/粉丝)数量，用于透明展示「接口返回 N → 剔除 M → 保留真实关注 K」
     let gap = 700;        // 自适应节流间隔(ms)：基础 0.7s，被限流→加大(≤8s)，顺利→缓慢回落（从源头降低触发限流的频率，配合下方随机抖动避免固定节奏）
     const t0 = Date.now();
+    let pageCount = 200;  // 优先 200/页（提速）；若抖音把 count=200 降级/忽略导致首页返回空，自动降到 50 重拉
     for (let page = 0; page < 60; page++) {
-      let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=200' +
+      let pq = '/aweme/v1/web/user/following/list/?aid=6383&count=' + pageCount +
         '&user_id=' + encodeURIComponent(myUid) + '&source_type=1';
       if (maxTime) pq += '&max_time=' + maxTime;
       // 单页「持续重试」：被限流/失败时不中断任务，原地长冷却重试同一页直到恢复
       // 关键修复：重试阶段用 quiet（仅 1 个最小签名请求）——v1.6.5/1.6.6 误用全签名分支，每次重试发 3 个请求，
       // 等于自己疯狂刷新抖音限流窗口，正是「翻几页就中断」的主因。单请求 + 稀疏间隔给接口真正冷却时间。
       let res = null, j = null, ok = false, rateLimited = false, loginDead = false;
-      for (let attempt = 0; attempt < 15; attempt++) {
+      for (let attempt = 0; attempt < 8; attempt++) {
         // 重试时优先「最小签名(仅 1 个请求)」——避免 3x 请求放大、疯狂刷新抖音限流窗口；
         // 但每第 4 次升级为「带 msToken 的完整签名」：抖音往往只对「缺 msToken 的裸请求」限流，
         // 带 token 的请求反而放行，故周期性尝试完整签名以突破限流（实测裸请求持续失败、带 token 成功即印证此点）
@@ -1272,8 +1291,8 @@ return sign;
         rateLimited = true;
         const reason = (res && res.err) || (j && j.status_msg) || ('HTTP ' + (res && res.http)) || '无详情';
         lastFailSample = reason;
-        const backoff = Math.min(30000, 2000 * Math.pow(1.8, attempt)); // 退避封顶 30s、指数上升(2s→3.6k→6.5k→11.7k→21k→30k…)，足够跨过软限流且不会无限等待
-        if (onProgress) onProgress({ pages: page + 1, fetched: out.length, hasMore: true, pct: 0, remMs: backoff, waiting: true, waitSec: Math.ceil(backoff / 1000) });
+        const backoff = Math.min(15000, 1500 * Math.pow(1.9, attempt)); // 退避封顶 15s、指数上升(1.5s→2.9k→5.4k→10.3k→15k…)，单页累计约80s即转入「自动续传」轮次冷却，不在单页死等
+        if (onProgress) onProgress({ pages: page + 1, fetched: out.length + baseCount, hasMore: true, pct: 0, remMs: backoff, waiting: true, waitSec: Math.ceil(backoff / 1000) });
         await sleep(backoff);
       }
       if (loginDead) {
@@ -1282,7 +1301,7 @@ return sign;
         break;
       }
       if (!ok) {
-        err = 'following/list 持续失败(已重试约12次仍失败) ' + ((res && (res.err || ('HTTP ' + res.http))) || (j && j.status_msg) || '接口返回异常');
+        err = 'following/list 持续失败(已重试约8次仍失败) ' + ((res && (res.err || ('HTTP ' + res.http))) || (j && j.status_msg) || '接口返回异常');
         break;
       }
       // 自适应节流：刚被限流→后续间隔加大；顺利→间隔缓慢回落到基础值
@@ -1300,6 +1319,12 @@ return sign;
       }
       const hasMore = !!(j.has_more || j.has_more === 1);
       lastHasMore = hasMore;
+      // count=200 被抖音降级/忽略时，首页可能返回空列表 → 自动降到 50 重拉本页（修复「取到几十个就停住不动」）
+      if (!list.length && page === 0 && seen.size === 0 && pageCount > 50) {
+        pageCount = 50;
+        await sleep(300);
+        continue;
+      }
       if (!list.length) break;
       if (!hasMore) break;   // 没有更多页 → 已取完全部
       maxTime = j.max_time || (maxTime - 1);
@@ -1307,7 +1332,7 @@ return sign;
       // —— 实时进度：每页回调一次（完成率/剩余时间多为估算，因为接口不返回总数）——
       if (onProgress) {
         const pages = page + 1;
-        const fetched = out.length;   // 累计真实关注账号数（已过滤非关注项，含续传已有）
+        const fetched = out.length + baseCount;   // 累计真实关注账号数（已过滤非关注项；续传时叠加断点前已取数，避免进度条跳回 0）
         const tElapsed = Date.now() - t0;
         const tPerPage = pages > 0 ? tElapsed / pages : 0;
         let pct, remMs;
@@ -1376,7 +1401,7 @@ return sign;
       let name = getNickFromPage();
       if (!name) {
         try {
-          const r2 = await fetch(API + '/aweme/v1/web/commit/user/', { credentials: 'include' });
+          const r2 = await fetchWithTimeout(API + '/aweme/v1/web/commit/user/', { credentials: 'include' }, 12000);
           const j2 = await r2.json().catch(function () { return {}; });
           name = (j2 && j2.user && (j2.user.nickname || j2.user.unique_id)) || '';
         } catch (e) {}
